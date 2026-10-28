@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from baatein.registry import ProviderSpec
@@ -9,10 +9,13 @@ from baatein.registry import ProviderSpec
 class LLMSettings(BaseModel):
     provider: str = "anthropic"
     model: str = "claude-haiku-5-5"
-    temperature: float = 0.7
+    temperature: float | None = None
 
     def spec(self) -> ProviderSpec:
-        return ProviderSpec(self.provider, {"model": self.model, "temperature": self.temperature})
+        options: dict[str, object] = {"model": self.model}
+        if self.temperature is not None:
+            options["temperature"] = self.temperature
+        return ProviderSpec(self.provider, options)
 
 
 class VoiceSettings(BaseModel):
@@ -34,6 +37,25 @@ class EmbeddingSettings(BaseModel):
 
 class MemorySettings(BaseModel):
     min_similarity: float = 0.3
+
+
+AGENT_NAME = "baatein"
+
+
+class AuthSettings(BaseModel):
+    jwt_secret: SecretStr | None = None
+    token_ttl_minutes: int = 7 * 24 * 60
+    min_password_length: int = 8
+
+
+class LiveKitSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="LIVEKIT_", env_file=".env", extra="ignore")
+
+    url: str = "ws://localhost:7880"
+    api_key: str | None = None
+    api_secret: SecretStr | None = None
+    agent_name: str = AGENT_NAME
+    token_ttl_minutes: int = 15
 
 
 class UnsupportedDatabaseError(ValueError):
@@ -65,3 +87,5 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
+    livekit: LiveKitSettings = Field(default_factory=LiveKitSettings)

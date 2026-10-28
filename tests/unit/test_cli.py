@@ -2,6 +2,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from injector import Injector, Module, provider, singleton
 
 from baatein import cli
@@ -51,3 +52,14 @@ def test_reembed_rebuilds_index_with_current_embedder(
     assert main(["reembed"]) == 0
 
     assert "re-embedded 0 facts into facts_vec_fake_bag_of_words_256" in capsys.readouterr().out
+
+
+def test_serve_runs_api_with_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, str, int]] = []
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, host, port: calls.append((app, host, port)))
+
+    assert main(["serve", "--host", "0.0.0.0", "--port", "9000"]) == 0
+
+    [(app, host, port)] = calls
+    assert isinstance(app, FastAPI)
+    assert (host, port) == ("0.0.0.0", 9000)

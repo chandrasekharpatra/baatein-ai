@@ -6,12 +6,18 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
+    "argon2-cffi>=25.1.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.162.0",
     "fastembed>=0.9.1",
     "injector~=0.24",
     "livekit-agents[anthropic,cartesia,sarvam,silero,turn-detector]~=1.8",
     "pydantic-settings~=2.16",
+    "pyjwt>=2.15.1",
+    "python-dotenv>=1.2.4",
     "python-ulid>=4.1.0",
     "sqlite-vec>=0.1.9",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [project.scripts]
@@ -27,6 +33,7 @@ packages = ["src/baatein"]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
     "pytest>=9.2.0",

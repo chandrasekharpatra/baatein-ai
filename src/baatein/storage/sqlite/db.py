@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,7 +30,7 @@ class Database:
         return self._conn
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def transaction(self) -> AsyncGenerator[aiosqlite.Connection]:
         async with self._lock:
             conn = await self._connection()
             await conn.execute("BEGIN IMMEDIATE")
@@ -42,7 +42,7 @@ class Database:
             await conn.execute("COMMIT")
 
     @asynccontextmanager
-    async def read(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def read(self) -> AsyncGenerator[aiosqlite.Connection]:
         async with self._lock:
             yield await self._connection()
 

@@ -12,12 +12,23 @@ uv run pre-commit install
 
 ## Run
 
+Quick check with your mic and speakers, no server needed:
+
 ```bash
-uv run baatein-agent console   # talk to the agent with your mic/speakers, no server needed
-uv run baatein-agent dev       # connect to a LiveKit server (LIVEKIT_URL, ...)
+uv run baatein-agent console
 ```
 
-For `dev`, run a local server with `livekit-server --dev` (install: `curl -sSL https://get.livekit.io | bash`).
+Full flow (web client → login → voice call), three terminals:
+
+```bash
+livekit-server --dev            # install: curl -sSL https://get.livekit.io | bash
+uv run baatein-agent dev        # agent worker, joins rooms it is dispatched to
+uv run baatein serve            # API + web client on http://127.0.0.1:8000
+```
+
+Open http://127.0.0.1:8000, sign up, and press "Start talking". The token endpoint dispatches the `baatein` agent with your user id, so the agent knows who it is talking to.
+
+Other commands: `uv run baatein migrate`, `uv run baatein reembed`.
 
 ## Test
 

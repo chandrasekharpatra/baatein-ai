@@ -14,3 +14,9 @@ def test_instructions_forbid_markup_for_voice_output() -> None:
 
 def test_assistant_uses_built_instructions() -> None:
     assert Assistant(PROFILE).instructions == build_instructions(PROFILE)
+
+
+def test_instructions_mention_user_name_when_known() -> None:
+    assert "You are talking with Asha." in build_instructions(PROFILE, "Asha")
+    assert "talking with" not in build_instructions(PROFILE)
+    assert "Asha" in Assistant(PROFILE, user_name="Asha").instructions

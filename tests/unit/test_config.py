@@ -27,11 +27,17 @@ def test_nested_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.voice.default_language == "english"
 
 
-def test_llm_spec_carries_model_options() -> None:
+def test_llm_spec_omits_temperature_by_default() -> None:
     spec = make_settings().llm.spec()
 
     assert spec.provider == "anthropic"
-    assert spec.options == {"model": "claude-haiku-5-5", "temperature": 0.7}
+    assert spec.options == {"model": "claude-haiku-5-5"}
+
+
+def test_llm_spec_includes_temperature_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BAATEIN_LLM__TEMPERATURE", "0.4")
+
+    assert make_settings().llm.spec().options == {"model": "claude-haiku-5-5", "temperature": 0.4}
 
 
 @pytest.mark.parametrize(

@@ -20,3 +20,22 @@ class DuplicateTurnError(BaateinError):
         super().__init__(f"turn {seq} already exists in session '{session_id}'")
         self.session_id = session_id
         self.seq = seq
+
+
+class InvalidCredentialsError(BaateinError):
+    def __init__(self) -> None:
+        super().__init__("invalid email or password")
+
+
+class InvalidTokenError(BaateinError):
+    pass
+
+
+class WeakPasswordError(BaateinError):
+    def __init__(self, min_length: int) -> None:
+        super().__init__(f"password must be at least {min_length} characters")
+        self.min_length = min_length
+
+
+class ConfigurationError(BaateinError):
+    pass

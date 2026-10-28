@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Baatein</title>
+  <style>
+    :root {
+      --bg: #faf7f2; --surface: #ffffff; --text: #1f1d1a; --muted: #6b665e;
+      --accent: #c2410c; --accent-text: #ffffff; --border: #e7e1d8; --error: #b91c1c;
+      --bubble-user: #fde7d6; --bubble-agent: #f1ede6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171512; --surface: #221f1b; --text: #f3efe8; --muted: #a39d93;
+        --accent: #fb923c; --accent-text: #1b130c; --border: #3a352e; --error: #f87171;
+        --bubble-user: #4a2a14; --bubble-agent: #2e2a25;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+      font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text);
+    }
+    main {
+      width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 28px;
+    }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    p.lead { margin: 0 0 20px; color: var(--muted); }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 4px; }
+    input, select {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font: inherit;
+    }
+    button {
+      width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 10px;
+      background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--accent); margin-top: 8px; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    .error { color: var(--error); min-height: 1.5em; margin-top: 12px; font-size: 0.9rem; }
+    .status { text-align: center; margin: 16px 0 4px; font-size: 1.05rem; }
+    .detail { text-align: center; color: var(--muted); font-size: 0.85rem; min-height: 1.3em; }
+    .orb {
+      width: 96px; height: 96px; margin: 8px auto; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, var(--accent), transparent 70%);
+      opacity: 0.35; transition: opacity 0.2s, transform 0.2s;
+    }
+    .orb.speaking { opacity: 1; transform: scale(1.08); }
+    .transcript {
+      margin-top: 16px; max-height: 260px; overflow-y: auto; display: flex;
+      flex-direction: column; gap: 8px;
+    }
+    .line { padding: 8px 12px; border-radius: 12px; max-width: 85%; overflow-wrap: anywhere; }
+    .line.agent { background: var(--bubble-agent); align-self: flex-start; }
+    .line.user { background: var(--bubble-user); align-self: flex-end; }
+    .line.interim { opacity: 0.6; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Baatein</h1>
+  <p class="lead">Your Hinglish companion who remembers.</p>
+
+  <form id="auth">
+    <div id="signup-fields" hidden>
+      <label for="name">Name</label>
+      <input id="name" autocomplete="name">
+      <label for="language">Language</label>
+      <select id="language">
+        <option value="hinglish">Hinglish</option>
+        <option value="english">English</option>
+      </select>
+    </div>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" minlength="8" required>
+    <button id="submit" type="submit">Log in</button>
+    <button id="toggle" class="secondary" type="button">New here? Sign up</button>
+    <div class="error" id="auth-error" role="alert"></div>
+  </form>
+
+  <section id="call" hidden>
+    <div class="orb" id="orb"></div>
+    <div class="status" id="status">Ready</div>
+    <div class="detail" id="detail"></div>
+    <button id="enable-audio" type="button" hidden>Tap to hear Baatein</button>
+    <button id="talk" type="button">Start talking</button>
+    <button id="logout" class="secondary" type="button">Log out</button>
+    <div class="error" id="call-error" role="alert"></div>
+    <div class="transcript" id="transcript" aria-live="polite"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.umd.min.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const { Room, RoomEvent, Track } = LivekitClient;
+  let mode = "login";
+  let room = null;
+  const lines = new Map();
+
+  function storedToken() {
+    try { return localStorage.getItem("baatein.token"); } catch { return null; }
+  }
+  function storeToken(token) {
+    try { token ? localStorage.setItem("baatein.token", token) : localStorage.removeItem("baatein.token"); } catch {}
+  }
+
+  async function request(path, body, token) {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await fetch(path, { method: body ? "POST" : "GET", headers, body: body && JSON.stringify(body) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(", ") : data.detail;
+      const error = new Error(detail || `Request failed (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  }
+
+  function show(signedIn) {
+    $("auth").hidden = signedIn;
+    $("call").hidden = !signedIn;
+  }
+
+  function detail(text) { $("detail").textContent = text; }
+
+  function isAgent(participant) {
+    return participant && participant.kind === LivekitClient.ParticipantKind.AGENT;
+  }
+
+  function upsertLine(id, who, text, final) {
+    let el = lines.get(id);
+    if (!el) {
+      el = document.createElement("div");
+      lines.set(id, el);
+      $("transcript").appendChild(el);
+    }
+    el.className = `line ${who}${final ? "" : " interim"}`;
+    el.textContent = text;
+    $("transcript").scrollTop = $("transcript").scrollHeight;
+  }
+
+  $("toggle").onclick = () => {
+    mode = mode === "login" ? "signup" : "login";
+    $("signup-fields").hidden = mode === "login";
+    $("submit").textContent = mode === "login" ? "Log in" : "Sign up";
+    $("toggle").textContent = mode === "login" ? "New here? Sign up" : "Have an account? Log in";
+    $("auth-error").textContent = "";
+  };
+
+  $("auth").onsubmit = async (event) => {
+    event.preventDefault();
+    $("submit").disabled = true;
+    $("auth-error").textContent = "";
+    try {
+      const body = { email: $("email").value, password: $("password").value };
+      if (mode === "signup") Object.assign(body, { display_name: $("name").value || null, language: $("language").value });
+      const session = await request(`/auth/${mode}`, body);
+      storeToken(session.access_token);
+      show(true);
+    } catch (error) {
+      $("auth-error").textContent = error.message;
+    } finally {
+      $("submit").disabled = false;
+    }
+  };
+
+  $("enable-audio").onclick = async () => {
+    if (room) await room.startAudio();
+  };
+
+  async function startCall() {
+    $("call-error").textContent = "";
+    $("talk").disabled = true;
+    $("transcript").replaceChildren();
+    lines.clear();
+    $("status").textContent = "Connecting…";
+    detail("");
+    try {
+      const grant = await request("/livekit/token", {}, storedToken());
+      room = new Room({ adaptiveStream: true });
+
+      room.on(RoomEvent.ConnectionStateChanged, (state) => detail(`Connection: ${state}`));
+      room.on(RoomEvent.ParticipantConnected, (participant) => {
+        if (isAgent(participant)) $("status").textContent = "Baatein joined";
+      });
+      room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
+        if (track.kind !== Track.Kind.Audio) return;
+        document.body.appendChild(track.attach());
+        detail(`Receiving audio from ${isAgent(participant) ? "Baatein" : participant.identity}`);
+      });
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        $("enable-audio").hidden = room.canPlaybackAudio;
+      });
+      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        const agentSpeaking = speakers.some(isAgent);
+        $("orb").classList.toggle("speaking", agentSpeaking);
+        $("status").textContent = agentSpeaking ? "Baatein is speaking" : "Listening…";
+      });
+      room.on(RoomEvent.MediaDevicesError, (error) => {
+        $("call-error").textContent = `Microphone error: ${error.message}`;
+      });
+      room.on(RoomEvent.Disconnected, () => endCall());
+
+      room.registerTextStreamHandler("lk.transcription", async (reader, participantInfo) => {
+        const who = participantInfo.identity === room.localParticipant.identity ? "user" : "agent";
+        const id = reader.info.attributes?.["lk.segment_id"] || reader.info.id;
+        let text = "";
+        for await (const chunk of reader) {
+          text += chunk;
+          upsertLine(id, who, text, false);
+        }
+        upsertLine(id, who, text, true);
+      });
+
+      await room.connect(grant.server_url, grant.participant_token);
+      await room.startAudio();
+      $("enable-audio").hidden = room.canPlaybackAudio;
+      await room.localParticipant.setMicrophoneEnabled(true);
+      $("status").textContent = "Waiting for Baatein…";
+      $("talk").textContent = "End call";
+      $("talk").onclick = () => room.disconnect();
+    } catch (error) {
+      $("call-error").textContent = error.message;
+      if (error.status === 401) { storeToken(null); show(false); }
+      if (room) await room.disconnect();
+      endCall();
+    } finally {
+      $("talk").disabled = false;
+    }
+  }
+
+  function endCall() {
+    document.querySelectorAll("audio").forEach((el) => el.remove());
+    room = null;
+    $("orb").classList.remove("speaking");
+    $("enable-audio").hidden = true;
+    $("status").textContent = "Ready";
+    $("talk").textContent = "Start talking";
+    $("talk").onclick = startCall;
+  }
+
+  $("talk").onclick = startCall;
+  $("logout").onclick = () => { if (room) room.disconnect(); storeToken(null); show(false); };
+  show(Boolean(storedToken()));
+</script>
+</body>
+</html>

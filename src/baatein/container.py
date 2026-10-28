@@ -1,7 +1,15 @@
+from datetime import timedelta
+
 from injector import Binder, Injector, Module, provider, singleton
 
+from baatein.auth.livekit import LiveKitCallTokens
+from baatein.auth.passwords import Argon2PasswordHasher
+from baatein.auth.service import AuthService
+from baatein.auth.tokens import JwtAccessTokens
 from baatein.config import Settings
+from baatein.domain.errors import ConfigurationError
 from baatein.memory.embeddings.registry import EmbedderRegistry, default_embedder_registry
+from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
@@ -86,6 +94,59 @@ class MemoryModule(Module):
         return store
 
 
+class AuthModule(Module):
+    @singleton
+    @provider
+    def password_hasher(self) -> PasswordHasher:
+        return Argon2PasswordHasher()
+
+    @singleton
+    @provider
+    def access_tokens(self, settings: Settings, clock: Clock) -> AccessTokens:
+        if settings.auth.jwt_secret is None:
+            raise ConfigurationError("BAATEIN_AUTH__JWT_SECRET must be set to issue access tokens")
+        return JwtAccessTokens(
+            settings.auth.jwt_secret.get_secret_value(),
+            timedelta(minutes=settings.auth.token_ttl_minutes),
+            clock,
+        )
+
+    @singleton
+    @provider
+    def call_tokens(self, settings: Settings) -> CallTokenIssuer:
+        livekit = settings.livekit
+        if livekit.api_key is None or livekit.api_secret is None:
+            raise ConfigurationError("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set")
+        return LiveKitCallTokens(
+            livekit.url,
+            livekit.api_key,
+            livekit.api_secret.get_secret_value(),
+            livekit.agent_name,
+            timedelta(minutes=livekit.token_ttl_minutes),
+        )
+
+    @singleton
+    @provider
+    def auth_service(
+        self,
+        settings: Settings,
+        users: UserRepo,
+        hasher: PasswordHasher,
+        tokens: AccessTokens,
+        languages: LanguageRegistry,
+        clock: Clock,
+    ) -> AuthService:
+        return AuthService(
+            users,
+            hasher,
+            tokens,
+            languages,
+            clock,
+            default_language=settings.voice.default_language,
+            min_password_length=settings.auth.min_password_length,
+        )
+
+
 class VoiceModule(Module):
     @singleton
     @provider
@@ -122,5 +183,12 @@ class VoiceModule(Module):
 
 def build_root(*overrides: Module, settings: Settings | None = None) -> Injector:
     return Injector(
-        [CoreModule(settings), StorageModule(), MemoryModule(), VoiceModule(), *overrides]
+        [
+            CoreModule(settings),
+            StorageModule(),
+            MemoryModule(),
+            AuthModule(),
+            VoiceModule(),
+            *overrides,
+        ]
     )

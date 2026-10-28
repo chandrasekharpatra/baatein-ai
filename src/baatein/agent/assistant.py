@@ -13,10 +13,13 @@ Your replies are spoken aloud, so:
 """
 
 
-def build_instructions(profile: LanguageProfile) -> str:
-    return f"{BASE_INSTRUCTIONS}\nLanguage: {profile.reply_style}\n"
+def build_instructions(profile: LanguageProfile, user_name: str | None = None) -> str:
+    instructions = f"{BASE_INSTRUCTIONS}\nLanguage: {profile.reply_style}\n"
+    if user_name:
+        instructions += f"\nYou are talking with {user_name}. Use their name naturally.\n"
+    return instructions
 
 
 class Assistant(Agent):
-    def __init__(self, profile: LanguageProfile) -> None:
-        super().__init__(instructions=build_instructions(profile))
+    def __init__(self, profile: LanguageProfile, user_name: str | None = None) -> None:
+        super().__init__(instructions=build_instructions(profile, user_name))

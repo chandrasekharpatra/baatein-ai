@@ -1,17 +1,22 @@
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from injector import Injector
+from injector import Injector, InstanceProvider
 from livekit.agents import AgentSession, vad
 
 from baatein.agent import entrypoint
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.ports.repos import UserRepo
 from baatein.voice.languages import LanguageProfile, ProviderSpec
 from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
+from tests.factories import make_user
+from tests.fakes.repos import InMemoryState, InMemoryUserRepo
 
 PROFILE = LanguageProfile("hinglish", ProviderSpec("s"), ProviderSpec("t"), "Hinglish")
 
@@ -83,7 +88,9 @@ async def test_entrypoint_starts_assistant_for_default_language(
     injector.binder.bind(VoicePipelineFactory, to=factory)  # type: ignore[arg-type]
     vad_model, room = object(), object()
     ctx = SimpleNamespace(
-        proc=SimpleNamespace(userdata={"injector": injector, "vad": vad_model}), room=room
+        proc=SimpleNamespace(userdata={"injector": injector, "vad": vad_model}),
+        room=room,
+        job=SimpleNamespace(metadata=""),
     )
 
     await entrypoint.entrypoint(ctx)  # type: ignore[arg-type]
@@ -98,10 +105,71 @@ async def test_entrypoint_starts_assistant_for_default_language(
     assert reply_kwargs == {"instructions": entrypoint.GREETING}
 
 
-def test_main_runs_cli_with_server(monkeypatch: pytest.MonkeyPatch) -> None:
-    ran: list[object] = []
-    monkeypatch.setattr(entrypoint.cli, "run_app", ran.append)
+def test_main_loads_dotenv_then_runs_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    Path(".env").write_text("LIVEKIT_URL=ws://from-dotenv:7880\nSARVAM_API_KEY=from-dotenv\n")
+    monkeypatch.setenv("SARVAM_API_KEY", "from-shell")
+    monkeypatch.setenv("LIVEKIT_URL", "restored-after-test")
+    monkeypatch.delenv("LIVEKIT_URL")
+    seen: list[tuple[object, str | None, str | None]] = []
+    monkeypatch.setattr(
+        entrypoint.cli,
+        "run_app",
+        lambda server: seen.append(
+            (server, os.environ.get("LIVEKIT_URL"), os.environ.get("SARVAM_API_KEY"))
+        ),
+    )
 
     entrypoint.main()
 
-    assert ran == [entrypoint.server]
+    assert seen == [(entrypoint.server, "ws://from-dotenv:7880", "from-shell")]
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ('{"user_id": "u1"}', "u1"),
+        ('{"user_id": ""}', None),
+        ('{"user_id": 42}', None),
+        ('["u1"]', None),
+        ("not json", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_dispatch_user_id(metadata: str | None, expected: str | None) -> None:
+    assert entrypoint.dispatch_user_id(metadata) == expected
+
+
+async def test_entrypoint_uses_dispatched_users_language_and_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = InMemoryState()
+    user = make_user(display_name="Asha", language="english")
+    await InMemoryUserRepo(state).add(user)
+    session = FakeSession()
+    monkeypatch.setattr(entrypoint, "create_session", lambda p, v: session)
+    english = LanguageProfile("english", ProviderSpec("s"), ProviderSpec("t"), "Speak English.")
+    factory = FakeFactory(VoicePipeline(english, stt=object(), llm=object(), tts=object()))  # type: ignore[arg-type]
+    injector = Injector()
+    injector.binder.bind(Settings, to=Settings(_env_file=None))  # type: ignore[call-arg]
+    injector.binder.bind(VoicePipelineFactory, to=factory)  # type: ignore[arg-type]
+    injector.binder.bind(UserRepo, to=InstanceProvider(InMemoryUserRepo(state)))  # type: ignore[type-abstract]
+    ctx = SimpleNamespace(
+        proc=SimpleNamespace(userdata={"injector": injector, "vad": object()}),
+        room=object(),
+        job=SimpleNamespace(metadata=json.dumps({"user_id": user.id})),
+    )
+
+    await entrypoint.entrypoint(ctx)  # type: ignore[arg-type]
+
+    assert factory.requested == ["english"]
+    agent = session.calls[0][1]["agent"]
+    assert "You are talking with Asha." in agent.instructions
+
+
+async def test_resolve_user_returns_none_for_unknown_user() -> None:
+    injector = Injector()
+    injector.binder.bind(UserRepo, to=InstanceProvider(InMemoryUserRepo(InMemoryState())))  # type: ignore[type-abstract]
+
+    assert await entrypoint.resolve_user(injector, '{"user_id": "ghost"}') is None
+    assert await entrypoint.resolve_user(injector, None) is None
