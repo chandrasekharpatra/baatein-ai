@@ -1,37 +1,11 @@
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from livekit.agents import llm, stt, tts
 from livekit.plugins import anthropic, cartesia, sarvam
 
-from baatein.voice.languages import LanguageProfile, LanguageRegistry, ProviderSpec
-
-
-class UnknownProviderError(LookupError):
-    pass
-
-
-class ProviderRegistry[T]:
-    kind = "provider"
-
-    def __init__(self, factories: Mapping[str, Callable[..., T]] | None = None) -> None:
-        self._factories: dict[str, Callable[..., T]] = dict(factories or {})
-
-    def register(self, name: str, factory: Callable[..., T]) -> None:
-        if name in self._factories:
-            raise ValueError(f"{self.kind} provider '{name}' is already registered")
-        self._factories[name] = factory
-
-    def create(self, spec: ProviderSpec) -> T:
-        try:
-            factory = self._factories[spec.provider]
-        except KeyError:
-            raise UnknownProviderError(
-                f"{self.kind} provider '{spec.provider}' is not registered, "
-                f"known: {', '.join(self._factories)}"
-            ) from None
-        return factory(**spec.options)
+from baatein.registry import ProviderRegistry, ProviderSpec
+from baatein.voice.languages import LanguageProfile, LanguageRegistry
 
 
 class STTRegistry(ProviderRegistry[stt.STT[Any]]):

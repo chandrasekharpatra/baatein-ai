@@ -14,6 +14,7 @@ from baatein.domain.models import (
     User,
 )
 from baatein.storage.sqlite.db import Database
+from baatein.text import search_terms
 
 
 def to_db(value: datetime | None) -> str | None:
@@ -33,9 +34,7 @@ def required(value: str) -> datetime:
 
 
 def fts_query(text: str) -> str | None:
-    terms = [term.replace('"', "") for term in text.split()]
-    terms = [term for term in terms if any(ch.isalnum() for ch in term)]
-    return " OR ".join(f'"{term}"' for term in terms) or None
+    return " OR ".join(f'"{term}"' for term in search_terms(text)) or None
 
 
 def is_unique_violation(exc: sqlite3.IntegrityError) -> bool:

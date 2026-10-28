@@ -1,12 +1,7 @@
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import Iterable
+from dataclasses import dataclass
 
-
-@dataclass(frozen=True)
-class ProviderSpec:
-    provider: str
-    options: Mapping[str, Any] = field(default_factory=dict)
+from baatein.registry import ProviderSpec
 
 
 @dataclass(frozen=True)

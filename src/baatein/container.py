@@ -1,9 +1,13 @@
 from injector import Binder, Injector, Module, provider, singleton
 
 from baatein.config import Settings
+from baatein.memory.embeddings.registry import EmbedderRegistry, default_embedder_registry
 from baatein.ports.clock import Clock, SystemClock
+from baatein.ports.embedder import Embedder
+from baatein.ports.memory import MemoryStore
 from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
 from baatein.storage.sqlite.db import Database
+from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
     SqliteFollowUpRepo,
     SqliteSessionRepo,
@@ -58,6 +62,30 @@ class StorageModule(Module):
         return SqliteFollowUpRepo(db)
 
 
+class MemoryModule(Module):
+    @singleton
+    @provider
+    def embedder_registry(self) -> EmbedderRegistry:
+        return default_embedder_registry()
+
+    @singleton
+    @provider
+    def embedder(self, settings: Settings, registry: EmbedderRegistry) -> Embedder:
+        return registry.create(settings.embedding.spec())
+
+    @singleton
+    @provider
+    def sqlite_memory_store(
+        self, db: Database, embedder: Embedder, settings: Settings
+    ) -> SqliteMemoryStore:
+        return SqliteMemoryStore(db, embedder, settings.memory.min_similarity)
+
+    @singleton
+    @provider
+    def memory_store(self, store: SqliteMemoryStore) -> MemoryStore:
+        return store
+
+
 class VoiceModule(Module):
     @singleton
     @provider
@@ -93,4 +121,6 @@ class VoiceModule(Module):
 
 
 def build_root(*overrides: Module, settings: Settings | None = None) -> Injector:
-    return Injector([CoreModule(settings), StorageModule(), VoiceModule(), *overrides])
+    return Injector(
+        [CoreModule(settings), StorageModule(), MemoryModule(), VoiceModule(), *overrides]
+    )

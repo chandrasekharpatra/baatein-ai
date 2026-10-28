@@ -5,9 +5,13 @@ from injector import Module, provider, singleton
 
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.memory.embeddings.fastembed import FastEmbedEmbedder
 from baatein.ports.clock import Clock, SystemClock
+from baatein.ports.embedder import Embedder
+from baatein.ports.memory import MemoryStore
 from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
 from baatein.storage.sqlite.db import Database
+from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
     SqliteFollowUpRepo,
     SqliteSessionRepo,
@@ -68,3 +72,13 @@ def test_repos_share_one_database_at_configured_path(tmp_path: Path) -> None:
     injector = build_root(settings=settings)
 
     assert injector.get(Database).path == f"{tmp_path}/x.db"
+
+
+def test_memory_store_is_sqlite_store_with_configured_embedder() -> None:
+    injector = build_root(settings=Settings(_env_file=None))  # type: ignore[call-arg]
+
+    store = injector.get(MemoryStore)
+
+    assert store is injector.get(SqliteMemoryStore)
+    assert isinstance(injector.get(Embedder), FastEmbedEmbedder)
+    assert store.vec_table.endswith("_384")  # type: ignore[attr-defined]

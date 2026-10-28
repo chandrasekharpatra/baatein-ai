@@ -1,9 +1,9 @@
-import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from baatein.domain.errors import DuplicateEmailError, DuplicateTurnError, NotFoundError
 from baatein.domain.models import FinalizeStatus, FollowUp, FollowUpStatus, Session, Turn, User
+from baatein.text import search_terms, words
 
 
 @dataclass
@@ -107,10 +107,10 @@ class InMemoryTurnRepo:
         return sorted(turns, key=lambda t: t.seq)
 
     async def search(self, user_id: str, query: str, limit: int) -> list[Turn]:
-        terms = set(_words(query))
+        terms = set(search_terms(query))
         sessions = {s.id for s in self._state.sessions.values() if s.user_id == user_id}
         scored = [
-            (len(terms & set(_words(t.text))), t)
+            (len(terms & set(words(t.text))), t)
             for t in self._state.turns
             if t.session_id in sessions
         ]
@@ -157,7 +157,3 @@ class InMemoryFollowUpRepo:
         self._state.followups[followup_id] = replace(
             self._state.followups[followup_id], status=status, resolved_at=resolved_at
         )
-
-
-def _words(text: str) -> list[str]:
-    return re.findall(r"\w+", text.lower())

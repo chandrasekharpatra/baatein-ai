@@ -5,6 +5,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from baatein.storage.sqlite.vec import load_vec_async
+
 
 class Database:
     def __init__(self, path: Path | str) -> None:
@@ -20,6 +22,7 @@ class Database:
         if self._conn is None:
             conn = await aiosqlite.connect(self._path, isolation_level=None)
             conn.row_factory = aiosqlite.Row
+            await load_vec_async(conn)
             await conn.execute("PRAGMA foreign_keys = ON")
             await conn.execute("PRAGMA busy_timeout = 5000")
             await conn.execute("PRAGMA synchronous = NORMAL")

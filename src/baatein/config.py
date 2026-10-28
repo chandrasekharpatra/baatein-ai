@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from baatein.voice.languages import ProviderSpec
+from baatein.registry import ProviderSpec
 
 
 class LLMSettings(BaseModel):
@@ -17,6 +17,23 @@ class LLMSettings(BaseModel):
 
 class VoiceSettings(BaseModel):
     default_language: str = "hinglish"
+
+
+class EmbeddingSettings(BaseModel):
+    provider: str = "fastembed"
+    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    dimensions: int = 384
+    cache_dir: str | None = "data/models"
+
+    def spec(self) -> ProviderSpec:
+        return ProviderSpec(
+            self.provider,
+            {"model_id": self.model, "dimensions": self.dimensions, "cache_dir": self.cache_dir},
+        )
+
+
+class MemorySettings(BaseModel):
+    min_similarity: float = 0.3
 
 
 class UnsupportedDatabaseError(ValueError):
@@ -46,3 +63,5 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)

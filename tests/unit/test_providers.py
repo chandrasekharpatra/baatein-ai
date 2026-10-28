@@ -3,13 +3,12 @@ from typing import Any
 
 import pytest
 
-from baatein.voice.languages import LanguageProfile, LanguageRegistry, ProviderSpec
+from baatein.registry import ProviderRegistry, ProviderSpec, UnknownProviderError
+from baatein.voice.languages import LanguageProfile, LanguageRegistry
 from baatein.voice.providers import (
     LLMRegistry,
-    ProviderRegistry,
     STTRegistry,
     TTSRegistry,
-    UnknownProviderError,
     VoicePipelineFactory,
 )
 

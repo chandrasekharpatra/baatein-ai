@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from baatein.domain.ids import new_id
-from baatein.domain.models import FollowUp, Role, Session, Turn, User
+from baatein.domain.models import Fact, FollowUp, Role, Session, Turn, User
 
 T0 = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 
@@ -40,3 +40,8 @@ def make_turn(session_id: str, seq: int, text: str = "hello", **overrides: Any) 
 def make_followup(user_id: str, **overrides: Any) -> FollowUp:
     fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "text": "ask", "created_at": T0}
     return FollowUp(**(fields | overrides))
+
+
+def make_fact(user_id: str, text: str = "likes chai", **overrides: Any) -> Fact:
+    fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "text": text, "created_at": T0}
+    return Fact(**(fields | overrides))

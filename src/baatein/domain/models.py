@@ -68,3 +68,40 @@ class FollowUp:
     priority: int = 0
     source_session_id: str | None = None
     resolved_at: datetime | None = None
+
+
+class FactCategory(StrEnum):
+    PERSONAL = "personal"
+    RELATIONSHIP = "relationship"
+    WORK = "work"
+    HEALTH = "health"
+    PREFERENCE = "preference"
+    EVENT = "event"
+    OTHER = "other"
+
+
+@dataclass(frozen=True)
+class Fact:
+    id: str
+    user_id: str
+    text: str
+    created_at: datetime
+    category: FactCategory = FactCategory.OTHER
+    importance: int = 3
+    source_session_id: str | None = None
+    superseded_by: str | None = None
+    retired_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.importance <= 5:
+            raise ValueError(f"importance must be between 1 and 5, got {self.importance}")
+
+    @property
+    def is_active(self) -> bool:
+        return self.retired_at is None
+
+
+@dataclass(frozen=True)
+class ScoredFact:
+    fact: Fact
+    score: float

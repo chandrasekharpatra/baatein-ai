@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from baatein.storage.sqlite.vec import load_vec
+
 _FILENAME = re.compile(r"^(\d{4})_([a-z0-9_]+)\.sql$")
 
 
@@ -69,6 +71,7 @@ def migrate(path: Path | str, migrations: Sequence[Migration] | None = None) -> 
 
     conn = sqlite3.connect(path, isolation_level=None)
     try:
+        load_vec(conn)
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         for migration in migrations:
