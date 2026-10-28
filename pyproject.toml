@@ -1,0 +1,84 @@
+[project]
+name = "baatein"
+version = "0.1.0"
+description = "Hinglish voice agent with long-term memory, built on LiveKit Agents"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "argon2-cffi>=25.1.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.162.0",
+    "fastembed>=0.9.1",
+    "injector~=0.24",
+    "livekit-agents[anthropic,cartesia,sarvam,silero,turn-detector]~=1.8",
+    "pydantic-settings~=2.16",
+    "pyjwt>=2.15.1",
+    "python-dotenv>=1.2.4",
+    "python-ulid>=4.1.0",
+    "sqlite-vec>=0.1.9",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+baatein = "baatein.cli:main"
+baatein-agent = "baatein.agent.entrypoint:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/baatein"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.4.0",
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers -m 'not llm and not model' --cov=baatein --cov-report=term-missing"
+markers = [
+    "llm: calls a real LLM provider (needs API keys); run with -m llm",
+    "model: downloads and runs a real local embedding model; run with -m model",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["baatein"]
+omit = ["src/baatein/agent/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_covered = true
+exclude_also = ['if __name__ == "__main__":']
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "ASYNC", "PT", "N"]
+ignore = ["SIM905"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["baatein"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["livekit.*", "injector.*", "sqlite_vec.*", "fastembed.*"]
+follow_untyped_imports = true
