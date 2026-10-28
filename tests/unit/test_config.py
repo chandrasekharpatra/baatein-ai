@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from baatein.config import Settings
+from baatein.config import Settings, UnsupportedDatabaseError
 
 
 def make_settings(**kwargs: object) -> Settings:
@@ -30,3 +32,22 @@ def test_llm_spec_carries_model_options() -> None:
 
     assert spec.provider == "anthropic"
     assert spec.options == {"model": "claude-haiku-5-5", "temperature": 0.7}
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("sqlite:///data/baatein.db", Path("data/baatein.db")),
+        ("sqlite:////var/lib/baatein.db", Path("/var/lib/baatein.db")),
+    ],
+)
+def test_sqlite_path(url: str, expected: Path) -> None:
+    assert make_settings(database={"url": url}).database.sqlite_path() == expected
+
+
+@pytest.mark.parametrize("url", ["postgresql://localhost/baatein", "sqlite:///", "data.db"])
+def test_unsupported_database_url(url: str) -> None:
+    settings = make_settings(database={"url": url})
+
+    with pytest.raises(UnsupportedDatabaseError, match="unsupported database url"):
+        settings.database.sqlite_path()

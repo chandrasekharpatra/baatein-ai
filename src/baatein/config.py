@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,6 +19,22 @@ class VoiceSettings(BaseModel):
     default_language: str = "hinglish"
 
 
+class UnsupportedDatabaseError(ValueError):
+    pass
+
+
+class DatabaseSettings(BaseModel):
+    url: str = "sqlite:///data/baatein.db"
+
+    def sqlite_path(self) -> Path:
+        prefix = "sqlite:///"
+        if not self.url.startswith(prefix) or self.url == prefix:
+            raise UnsupportedDatabaseError(
+                f"unsupported database url '{self.url}', expected sqlite:///<path>"
+            )
+        return Path(self.url.removeprefix(prefix))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="BAATEIN_",
@@ -27,3 +45,4 @@ class Settings(BaseSettings):
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)

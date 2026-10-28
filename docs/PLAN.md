@@ -182,26 +182,30 @@ tests/
 
 ## 7. SQLite schema (0001_init)
 
+Implemented in `src/baatein/storage/sqlite/migrations/0001_init.sql`:
+
 ```sql
-users(id TEXT PK, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      display_name TEXT, language_profile TEXT NOT NULL DEFAULT 'hinglish',
-      created_at TEXT NOT NULL)
-sessions(id TEXT PK, user_id FK → users ON DELETE CASCADE, room_name TEXT,
-         started_at, ended_at, end_reason, summary TEXT,
-         mem0_synced_seq INTEGER NOT NULL DEFAULT 0,
-         finalize_status TEXT CHECK IN ('active','pending','done','failed'),
-         finalize_attempts INTEGER DEFAULT 0)
-turns(id INTEGER PK, session_id FK ON DELETE CASCADE, seq INTEGER, role TEXT,
-      text TEXT, language TEXT, interrupted INTEGER, created_at,
-      UNIQUE(session_id, seq))
-followups(id TEXT PK, user_id FK ON DELETE CASCADE, text TEXT, due_at TEXT NULL,
-          status TEXT CHECK IN ('open','done','dropped'), priority INTEGER,
-          source_session_id FK, created_at, resolved_at)
-turns_fts USING fts5(text, content='turns', content_rowid='id')  + sync triggers
-indexes: sessions(user_id, started_at), followups(user_id, status, due_at)
+users(id TEXT PK, email TEXT UNIQUE COLLATE NOCASE, password_hash, display_name,
+      language DEFAULT 'hinglish', created_at)
+sessions(id TEXT PK, user_id FK ON DELETE CASCADE, room_name, started_at, ended_at,
+         end_reason, summary, finalize_status CHECK IN ('active','pending','done','failed'),
+         finalize_attempts, memory_synced_seq)
+turns(id INTEGER PK, session_id FK ON DELETE CASCADE, seq, role CHECK IN ('user','assistant'),
+      text, language, interrupted, created_at, UNIQUE(session_id, seq))
+turns_fts USING fts5(text, content='turns', tokenize='unicode61 remove_diacritics 0')
+      + insert/update/delete sync triggers
+followups(id TEXT PK, user_id FK ON DELETE CASCADE, text, due_at,
+          status CHECK IN ('open','done','dropped'), priority,
+          source_session_id FK ON DELETE SET NULL, created_at, resolved_at)
+indexes: sessions(user_id, started_at DESC), sessions(finalize_status, ended_at),
+         followups(user_id, status, due_at)
 ```
 
-IDs are ULID text (portable to Postgres). Timestamps ISO-8601 UTC.
+- IDs are ULID text (portable to Postgres). Timestamps are stored as UTC ISO-8601 with microseconds; naive datetimes are rejected.
+- `remove_diacritics 0` keeps Devanagari vowel signs intact so Hindi search works.
+- Migrations: `NNNN_name.sql`, contiguous versions, tracked by `PRAGMA user_version`. Each migration runs in its own `BEGIN IMMEDIATE` transaction (statements split with `sqlite3.complete_statement`, because `executescript` commits implicitly), so concurrent worker processes can migrate safely and a failed migration leaves no partial schema.
+- Runtime access: one `aiosqlite` connection per process behind an `asyncio.Lock`; writes use `BEGIN IMMEDIATE`, reads skip the write lock. WAL, `foreign_keys=ON`, `busy_timeout=5000`.
+- Migrations run in the agent's `prewarm` and via `uv run baatein migrate`.
 
 ## 8. Languages
 
@@ -233,7 +237,7 @@ Tests don't have to be written before the code, but every change ships with test
 | # | Key tests | Deliverable |
 |---|---|---|
 | 0 ✅ | settings, registries, container, entrypoint wiring, real plugin construction | Scaffold (uv, ruff, mypy, pytest, pre-commit, CI), settings, language + provider registries, DI container, Hinglish agent runnable in `console`. Pending: live check with real keys (Sarvam STT/TTS, Claude 5.5 ID) |
-| 1 | repo contract suite, migration tests | SQLite layer, migrations, repos, DI container |
+| 1 ✅ | repo contract suite (SQLite + in-memory fakes), migrations, transactions, cascades, Devanagari search | SQLite layer, migrations, repos, `StorageModule`, `baatein migrate` CLI |
 | 2 | `Embedder` contract, bridge guard, `MemoryStore` contract | Embedder registry + Pinecone adapter, Mem0 bridge/factory/store |
 | 3 | auth unit + API tests | Signup/login, token endpoint, identity → agent; minimal web client |
 | 4 | MemoryService unit tests, lifecycle tests | Session lifecycle, transcript persistence, incremental ingest, per-turn retrieval, memory tools |

@@ -5,12 +5,15 @@ description = "Hinglish voice agent with long-term memory, built on LiveKit Agen
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "aiosqlite>=0.22.1",
     "injector~=0.24",
     "livekit-agents[anthropic,cartesia,sarvam,silero,turn-detector]~=1.8",
     "pydantic-settings~=2.16",
+    "python-ulid>=4.1.0",
 ]
 
 [project.scripts]
+baatein = "baatein.cli:main"
 baatein-agent = "baatein.agent.entrypoint:main"
 
 [build-system]

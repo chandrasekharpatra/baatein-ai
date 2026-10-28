@@ -5,13 +5,16 @@ from livekit.plugins import silero
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.storage.sqlite.migrate import migrate
 from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
 
 GREETING = "Greet the user warmly in one short sentence and ask how their day is going."
 
 
 def prewarm(proc: JobProcess) -> None:
-    proc.userdata["injector"] = build_root()
+    settings = Settings()
+    migrate(settings.database.sqlite_path())
+    proc.userdata["injector"] = build_root(settings=settings)
     proc.userdata["vad"] = silero.VAD.load()
 
 

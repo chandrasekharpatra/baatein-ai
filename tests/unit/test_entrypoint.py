@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -42,13 +43,14 @@ class FakeFactory:
         return self.pipeline
 
 
-def test_prewarm_loads_injector_and_vad() -> None:
+def test_prewarm_migrates_and_loads_injector_and_vad() -> None:
     proc = SimpleNamespace(userdata={})
 
     entrypoint.prewarm(proc)  # type: ignore[arg-type]
 
     assert isinstance(proc.userdata["injector"], Injector)
     assert isinstance(proc.userdata["vad"], vad.VAD)
+    assert Path("data/baatein.db").exists()
 
 
 async def test_create_session_wires_pipeline_components() -> None:
