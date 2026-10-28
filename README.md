@@ -38,10 +38,12 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 
 ## Getting started
 
+For a step-by-step walkthrough from a fresh machine, including installing LiveKit, getting API keys, WSL notes and troubleshooting, see **[docs/RUNNING.md](docs/RUNNING.md)**. The short version follows.
+
 ### Prerequisites
 
 - Python 3.12 and [`uv`](https://docs.astral.sh/uv/)
-- `livekit-server`: `curl -sSL https://get.livekit.io | bash`
+- `livekit-server`: see the [LiveKit install instructions](https://github.com/livekit/livekit#linux) (Linux: `curl -sSL https://get.livekit.io | bash`, macOS: `brew install livekit`)
 - API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/), and [Cartesia](https://play.cartesia.ai/) (Cartesia is only used by the English voice)
 
 ### Install
