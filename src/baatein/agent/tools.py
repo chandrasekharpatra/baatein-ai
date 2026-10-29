@@ -105,11 +105,12 @@ def memory_tools(
 ) -> list[llm.Tool | llm.Toolset]:
     @function_tool
     async def recall(query: str) -> str:
-        """Look up what the user has asked you to remember, when they refer to something from
-        before that isn't already in your context. If nothing is found, say so honestly.
+        """Look up what the user has asked you to remember. Call it whenever they ask about or
+        refer to something from before that isn't in your context, before ever saying you don't
+        have it saved. If nothing is found, say so honestly.
 
         Args:
-            query: What to look for, e.g. "Ramesh" or "sister's wedding".
+            query: A few English keywords, e.g. "Ramesh", "wedding Sabitri", "father job".
         """
         facts = await memory.search(query)
         return render_search(facts, await memory.people() if facts else [])

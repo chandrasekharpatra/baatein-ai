@@ -1,6 +1,7 @@
 import os
 import re
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,9 +14,10 @@ from baatein.agent.assistant import Assistant
 from baatein.config import Settings
 from baatein.domain.models import Pace, Repeat, ThreadStatus
 from baatein.memory.context_builder import render_context
+from baatein.memory.seed import Seeder, SeedFile
 from baatein.memory.service import CallMemory
 from baatein.voice.languages import HINGLISH
-from baatein.voice.personas import CASUAL, ELDER, Persona
+from baatein.voice.personas import CASUAL, ELDER, Persona, default_persona_registry
 from tests.factories import (
     at,
     make_boundary,
@@ -418,3 +420,22 @@ async def test_brings_up_a_due_reminder() -> None:
         replies += assistant_replies(await session.run(user_input="Main theek hoon."))
 
         assert any("ravi" in reply.lower() for reply in replies), replies
+
+
+RAM = Path(__file__).parents[2] / "seeds" / "ram_mohapatra.json"
+
+
+async def test_looks_up_saved_details_before_saying_they_are_not_saved() -> None:
+    """Ram's wedding is saved but not in the call-start context: Baatein must call recall."""
+    world = build_world()
+    seeder = Seeder(world.service._deps, default_persona_registry())
+    seed = SeedFile.model_validate_json(RAM.read_text())
+    await seeder.load(world.user, seed)
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Ram", persona=ELDER)
+
+        result = await session.run(user_input="Tumhe yaad hai meri shaadi kab aur kahan hui thi?")
+
+        result.expect.contains_function_call(name="recall")
+        [reply] = assistant_replies(result)
+        assert "1995" in reply or "puri" in reply.lower(), reply

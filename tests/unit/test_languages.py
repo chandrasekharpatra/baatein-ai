@@ -50,3 +50,12 @@ def test_default_registry_includes_hinglish_with_codemix_stt() -> None:
     assert hinglish.stt.provider == "sarvam"
     assert hinglish.stt.options["mode"] == "codemix"
     assert "Hinglish" in hinglish.reply_style
+
+
+def test_hinglish_speaks_through_cartesia_in_hindi_with_speed_control() -> None:
+    hinglish = default_language_registry().get("hinglish")
+
+    assert (hinglish.tts.provider, hinglish.tts.options["language"]) == ("cartesia", "hi")
+    assert hinglish.pace_option == "speed"
+    assert hinglish.cannot_hear.startswith("Maaf kijiye")
+    assert default_language_registry().get("english").pace_option == "speed"

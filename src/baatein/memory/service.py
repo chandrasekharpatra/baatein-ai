@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from baatein.config import MemorySettings
 from baatein.domain.ids import new_id
 from baatein.domain.models import (
+    REMINDER_TIME,
     Boundary,
     BoundaryScope,
     Certainty,
@@ -590,7 +591,7 @@ class CallMemory:
             title=redact(title),
             created_at=self._deps.clock.now(),
             on=on,
-            at=at or time(9, 0),
+            at=at or REMINDER_TIME,
             repeat=repeat,
             alert_days_before=_alerts(alert_days_before),
             status=ReminderStatus.ACTIVE if on else ReminderStatus.NEEDS_INFO,

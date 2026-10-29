@@ -40,6 +40,10 @@ To add a provider: register its plugin class in the right registry in `voice/pro
 
 ## Gotchas already hit
 
+- **`turn_ctx` in `on_user_turn_completed` is thrown away after that reply.** Anything added only there is gone next turn. Per-turn recall added memories only there, so Claude later saw its own answer without the memory behind it and apologised for "inventing" it. `Assistant` now also writes each recalled memory into the history once (`update_chat_ctx`).
+- **Text-mode `session.run(user_input=...)` skips `on_user_turn_completed`.** Behaviour tests never exercise per-turn recall; call the hook yourself if a test depends on it.
+- **STT outages end calls silently by default.** LiveKit closes the session after a few unrecoverable STT errors. `agent/resilience.py` (`connect_options`, `SpeechGuard`) retries longer and apologises over TTS before ending. Hinglish TTS is now Cartesia (`language="hi"`, option `speed` for pace); Sarvam is STT only.
+
 - **`.env` isn't loaded by the LiveKit CLI.** `entrypoint.main()` calls `load_dotenv(find_dotenv(usecwd=True))` before `cli.run_app`. Without it: `ws_url is required, or set LIVEKIT_URL`, and plugins miss their API keys.
 - **The test judge sends `temperature=0.0`** for any model whose name doesn't contain `gpt-5` (`livekit/agents/voice/run_result.py`). The Anthropic SDK rejects it. Use the `JudgeLLM` subclass in `tests/agent/test_assistant_behaviour.py`, which strips it.
 - **`AgentSession` needs a running event loop** when constructed, so tests that build one must be `async`.

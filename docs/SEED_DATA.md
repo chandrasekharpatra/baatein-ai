@@ -5,7 +5,7 @@ A seed file fills an account with memories, storylines, boundaries, reminders an
 | File | Who | Good for |
 |---|---|---|
 | `seeds/mohan.json` | Mohan, elder persona; last call cut off mid-story | Cut-off story, boundary, grief, due birthday |
-| `seeds/ram_mohapatra.json` | Ram Babu (72), four past calls with full transcripts | Storyline check-in with history, a correction, health worry, weekly reminder |
+| `seeds/ram_mohapatra.json` | Ram Babu (72), Bhubaneswar; five past calls with full transcripts, 14 people, 34 memories | Retrieval of his life story, a correction, storyline check-in with history, health worry, reminders |
 
 ## Two ways to load one
 
@@ -151,5 +151,29 @@ To see the storyline check-in instead of the cut-off story, set `"ended_abruptly
 | Sambit's birthday in 2 days (alert 3 days before) | Reminds about it early in the call |
 | AIIMS checkup in 3 days, Sunday video call | Coming up: mentioned only if it fits |
 | Lipsa's godh bharai, no date | Waits for a date |
+
+### Talking to Ram: does Baatein remember his life?
+
+Ram's 34 memories are more than the call-start context holds (the top 10 by importance). The life details below are saved on purpose at low importance, so a right answer means Baatein **looked them up** with `recall`. Load a clean copy first (`uv run baatein seed seeds/ram_mohapatra.json --replace`), log in as `ram.mohapatra@example.com` / `ram-babu-test-1954`, and ask:
+
+| Ask | Expected | Where it comes from |
+|---|---|---|
+| *"Namaste!"* | "Ram Babu", slow voice; brings up Sambit's birthday (in 2 days) | Persona, due reminder |
+| *"Tumhe yaad hai meri shaadi kab aur kahan hui thi?"* | 12 February 1995, in Puri; Sabitri is from Cuttack | `recall` |
+| *"Mere Bapa kya karte the?"* | Headmaster in Old Town; died in 2008 | `recall` |
+| *"Maa ke haath ka kya pasand tha?"* | Chhena poda | `recall` |
+| *"Fani toofan mein hamare ghar ka kya hua tha?"* | The roof blew off; a week at Prafulla's | `recall` |
+| *"Super Cyclone ke time maine kya kiya tha?"* | Led RSP relief volunteers in Jagatsinghpur | `recall` |
+| *"Meri behen kahan rehti hai?"* | Sujata, in Puri (he visits every Rath Yatra) | People list, `recall` |
+| *"Lipsa kahan rehti hai?"* | Dwarka, Delhi (never Noida); baby due in January | Context (corrected memory) |
+| *"Aarav ka birthday kab hai?"* | April, but says Ram wasn't sure | `recall`, uncertain memory |
+| *"Mujhe kaunsa award mila tha?"* | Best engineer, RSP, 2003 | `recall` |
+| *"Main kaunsi team support karta hoon?"* | Mohun Bagan; he finds cricket boring | `recall` |
+| *"Bhoot wali kahani yaad hai?"* | Honestly: not saved | Nothing invented |
+| *"Laxman ka kya haal hai?"* | Doesn't open the land dispute | Boundary |
+| *"Aaj kuch naya karne ka mann hai"* | Never suggests laughter yoga | Declined suggestion |
+| *"Ghutne mein phir dard hai"* | Picks up the knee storyline and the AIIMS checkup | Health thread, only because he raised it |
+
+Checked on 2026-10-30 in a text call against the seeded account: 9 of 10 recall questions answered right. Two things to listen for: for "Somvaar ko kahan jaata hoon?" it may answer with Monday's AIIMS checkup instead of the weekly Lingaraj visit, and it once called Lipsa's baby a *naati* (grandson), which nobody knows yet.
 
 Things a seed can't express: `this_call` boundaries (they belong to a live call) and done or skipped reminder occurrences.

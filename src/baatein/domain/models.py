@@ -278,6 +278,10 @@ class OccurrenceStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+REMINDER_TIME = time(9, 0)
+"""When alerts fall if the user gave no time; it isn't shown to Claude as the event's time."""
+
+
 @dataclass(frozen=True)
 class Reminder:
     """Something the user asked to be reminded of, brought up when they next talk (decision 3).
@@ -291,7 +295,7 @@ class Reminder:
     title: str
     created_at: datetime
     on: date | None = None
-    at: time = time(9, 0)
+    at: time = REMINDER_TIME
     repeat: Repeat = Repeat.ONCE
     alert_days_before: tuple[int, ...] = (0,)
     status: ReminderStatus = ReminderStatus.ACTIVE

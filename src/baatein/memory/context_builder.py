@@ -2,6 +2,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, tzinfo
 
 from baatein.domain.models import (
+    REMINDER_TIME,
     Boundary,
     BoundaryScope,
     Certainty,
@@ -57,9 +58,10 @@ def render_reminder(reminder: Reminder, on: date | None = None) -> str:
     """One reminder as a line Claude can update by id."""
     notes = []
     when = on or reminder.on
-    if when:
-        at = _clock(datetime.combine(when, reminder.at))
-        notes.append(f"on {_day(when)}, {at}")
+    if when and reminder.at != REMINDER_TIME:
+        notes.append(f"on {_day(when)}, {_clock(datetime.combine(when, reminder.at))}")
+    elif when:
+        notes.append(f"on {_day(when)}")
     if REPEATS[reminder.repeat]:
         notes.append(REPEATS[reminder.repeat])
     before = [d for d in reminder.alert_days_before if d]

@@ -39,12 +39,12 @@ class FakeSession:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.handlers: dict[str, Callable[[Any], None]] = {}
 
-    def on(self, event: str) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
+    def on(self, event: str, handler: Callable[[Any], None] | None = None) -> Any:
         def register(handler: Callable[[Any], None]) -> Callable[[Any], None]:
             self.handlers[event] = handler
             return handler
 
-        return register
+        return register(handler) if handler else register
 
     async def start(self, **kwargs: Any) -> None:
         self.calls.append(("start", kwargs))
@@ -93,6 +93,8 @@ async def test_create_session_wires_pipeline_components() -> None:
     assert session.stt is pipeline.stt
     assert session.llm is pipeline.llm
     assert session.tts is pipeline.tts
+    assert session.conn_options.stt_conn_options.max_retry == 5
+    assert session.conn_options.max_unrecoverable_errors == 7
 
 
 async def test_entrypoint_starts_assistant_for_default_language(
@@ -103,7 +105,7 @@ async def test_entrypoint_starts_assistant_for_default_language(
     session = FakeSession()
     created: list[tuple[VoicePipeline, object]] = []
 
-    def fake_create_session(p: VoicePipeline, v: object) -> FakeSession:
+    def fake_create_session(p: VoicePipeline, v: object, settings: object) -> FakeSession:
         created.append((p, v))
         return session
 
@@ -132,6 +134,7 @@ async def test_entrypoint_starts_assistant_for_default_language(
     assert isinstance(start_kwargs["agent"], Assistant)
     assert reply == "generate_reply"
     assert reply_kwargs == {"instructions": CASUAL.greeting}
+    assert {"error", "user_input_transcribed"} <= set(session.handlers)
     assert factory.paces == [1.0]
     [close] = shutdown
     await close("done")
@@ -185,7 +188,7 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     )
     await InMemoryUserRepo(state).add(user)
     session = FakeSession()
-    monkeypatch.setattr(entrypoint, "create_session", lambda p, v: session)
+    monkeypatch.setattr(entrypoint, "create_session", lambda p, v, s: session)
     english = LanguageProfile("english", ProviderSpec("s"), ProviderSpec("t"), "Speak English.")
     factory = FakeFactory(VoicePipeline(english, stt=object(), llm=object(), tts=object()))  # type: ignore[arg-type]
     injector = Injector()

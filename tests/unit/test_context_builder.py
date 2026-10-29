@@ -214,7 +214,7 @@ def test_search_lists_memories_with_people() -> None:
     assert text == f"- [{fact.id}] Wants to call Ramesh again (about Ramesh (college friend))"
 
 
-def test_reminder_line_shows_day_time_repeat_alerts_and_note() -> None:
+def test_reminder_line_shows_day_repeat_alerts_and_note() -> None:
     birthday = make_reminder(
         "u",
         on=date(2026, 11, 18),
@@ -224,12 +224,14 @@ def test_reminder_line_shows_day_time_repeat_alerts_and_note() -> None:
     )
 
     assert render_reminder(birthday) == (
-        f"- [{birthday.id}] Ravi's birthday (on Wed 18 Nov 2026, 9:00 am; every year; remind 7"
+        f"- [{birthday.id}] Ravi's birthday (on Wed 18 Nov 2026; every year; remind 7"
         " days before; Buy a gift)"
     )
     assert render_reminder(birthday, date(2027, 11, 18)).startswith(
-        f"- [{birthday.id}] Ravi's birthday (on Thu 18 Nov 2027, 9:00 am"
+        f"- [{birthday.id}] Ravi's birthday (on Thu 18 Nov 2027;"
     )
+    # 9 am is only when alerts fall by default; shown as a time, Claude read it as the
+    # birthday's time ("1 November ko, subah 9 baje"). A time the user gave is shown.
     evening = make_reminder("u", "Walk", on=date(2026, 11, 2), at=time(18, 30))
     assert render_reminder(evening) == f"- [{evening.id}] Walk (on Mon 2 Nov 2026, 6:30 pm)"
     assert render_reminder(make_reminder("u", "Trip")).endswith("] Trip")

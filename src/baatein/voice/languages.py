@@ -12,6 +12,8 @@ class LanguageProfile:
     reply_style: str
     pace_option: str | None = None
     """The TTS option that sets speaking speed, if the provider has one."""
+    cannot_hear: str = "Sorry, I can't hear you right now. Let's talk again in a little while."
+    """Said before ending a call when speech-to-text stops working."""
 
 
 class UnknownLanguageError(LookupError):
@@ -44,8 +46,16 @@ class LanguageRegistry:
 HINGLISH = LanguageProfile(
     code="hinglish",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "hi-IN"}),
+    # Cartesia "Sneha - Empathetic Voice" (Hindi); it reads Roman-script Hinglish. Cartesia has
+    # no word timestamps for Hindi, so LiveKit times the live transcript itself.
     tts=ProviderSpec(
-        "sarvam", {"model": "bulbul:v3", "target_language_code": "hi-IN", "speaker": "shubh"}
+        "cartesia",
+        {
+            "model": "sonic-3",
+            "language": "hi",
+            "voice": "6b02ffe5-e3cb-48c0-a023-c72f85953375",
+            "word_timestamps": False,
+        },
     ),
     reply_style=(
         "Speak in natural, casual Hinglish the way urban Indians talk: mix Hindi and English "
@@ -53,7 +63,10 @@ HINGLISH = LanguageProfile(
         "balance of Hindi and English. Always write in Roman script, never Devanagari, even "
         "when the user's words reach you in Devanagari."
     ),
-    pace_option="pace",
+    pace_option="speed",
+    cannot_hear=(
+        "Maaf kijiye, aapki awaaz mujh tak nahi pahunch rahi. Thodi der mein phir baat karte hain."
+    ),
 )
 
 ENGLISH = LanguageProfile(
@@ -61,6 +74,7 @@ ENGLISH = LanguageProfile(
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "transcribe", "language": "en-IN"}),
     tts=ProviderSpec("cartesia", {"model": "sonic-3", "language": "en"}),
     reply_style="Speak in simple, friendly Indian English.",
+    pace_option="speed",
 )
 
 

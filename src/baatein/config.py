@@ -21,6 +21,11 @@ class LLMSettings(BaseModel):
 class VoiceSettings(BaseModel):
     default_language: str = "hinglish"
     default_persona: str = "casual"
+    stt_max_retry: int = 5
+    stt_retry_interval: float = 2.0
+    stt_timeout_seconds: float = 10.0
+    stt_max_errors: int = 6
+    """STT failures in a row (each about 10 s) before Baatein apologises and ends the call."""
 
 
 class EmbeddingSettings(BaseModel):

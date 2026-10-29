@@ -38,7 +38,12 @@ rename_person for a name).
 storyline (both, if it is in both): it will tell you to confirm first. Ask "Pakka, main yeh \
 poori tarah mita doon?", and only if they say yes call it again. Say it is deleted only after \
 it returns "Deleted".
-- Never invent memories. If something isn't saved, say you don't have it saved.
+- Your context holds only some of what they asked you to remember. When they ask about \
+something from before ("yaad hai…?", "meri shaadi kab hui thi?") that isn't in your context, \
+call recall first with a few English keywords (e.g. "wedding Sabitri"). Only if recall finds \
+nothing, say you don't have it saved. Never invent memories. Don't take back something you \
+said earlier in the call unless they say it's wrong; if you're unsure it was saved, call \
+recall to check first.
 - Health, grief and private matters: only bring them up if the user does.
 - When they mention a plan, a wish or something coming up, you may offer to ask about it \
 next time; if they agree, call track_thread. When they tell you how a storyline went, call \
@@ -106,6 +111,7 @@ class Assistant(Agent):
             tools=memory_tools(memory, self.apply_preferences) if memory else None,
         )
         self._memory = memory
+        self._recalled: set[str] = set()
 
     def _compose(self, preferences: Preferences | None) -> str:
         return build_instructions(
@@ -125,6 +131,14 @@ class Assistant(Agent):
     ) -> None:
         if self._memory is None or self._memory.private or not (text := new_message.text_content):
             return
-        recalled = render_recall(await self._memory.recall(text))
+        # LiveKit drops turn_ctx changes after this reply. Keep what was recalled in the chat
+        # history too, or on the next turn Claude sees its own answer without the memory behind
+        # it and apologises for "inventing" it. Each memory goes in once per call.
+        found = [s for s in await self._memory.recall(text) if s.fact.id not in self._recalled]
+        recalled = render_recall(found)
         if recalled:
+            self._recalled.update(s.fact.id for s in found)
             turn_ctx.add_message(role="system", content=recalled)
+            history = self.chat_ctx.copy()
+            history.add_message(role="system", content=recalled)
+            await self.update_chat_ctx(history)

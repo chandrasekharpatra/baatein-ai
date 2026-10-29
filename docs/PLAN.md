@@ -34,6 +34,8 @@ Slice 4 is built (2026-10-30): reminders with repeat rules and "remind me N days
 
 **Gotchas found so far**
 - Anthropic rejects a tool parameter that has an enum and a nullable type (`Enum value 'fact' does not match declared type ['string', 'null']`). The LiveKit plugin makes every defaulted parameter nullable in strict mode, so optional parameters with fixed choices are plain `str | None` and mapped with `agent/tools.py:choice`. `tests/unit/test_tools.py` checks the generated schemas.
+- A Sarvam STT outage (websocket connects timing out, 2026-10-30) closed the LiveKit session about 20 s in, silently, with the default retry limits. `agent/resilience.py` retries longer (`BAATEIN_VOICE__STT_MAX_ERRORS`, default 6 failures of ~10 s each) and, past that, says the profile's `cannot_hear` line over TTS before ending the call.
+- Hinglish TTS is Cartesia `sonic-3` with `language="hi"` (voice Sneha), which reads Roman-script Hinglish; pace maps to Cartesia `speed` (0.6–2.0). Cartesia has no word timestamps for Hindi, so they're off for that profile. Sarvam is still the STT.
 - Anthropic's strict tool schemas allow at most 16 nullable (optional) parameters across all tools (`Schemas contains too many parameters with union types`). Baatein sends non-strict schemas; see `voice/providers.py:anthropic_llm`.
 - `Agent.on_user_turn_completed` is not called in LiveKit's text-mode tests (`session.run(user_input=...)`). Logic that must count user turns reads `RunContext.session.history` in the tool instead.
 - Claude 5.5 rejects `temperature`; `BAATEIN_LLM__TEMPERATURE` is unset by default and only sent when set.

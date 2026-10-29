@@ -93,6 +93,23 @@ async def test_user_turn_injects_recalled_facts() -> None:
     assert "Has an interview at Google on Friday" in (injected.text_content or "")
 
 
+async def test_recalled_facts_stay_in_the_call_history_once() -> None:
+    # Without this, the next turn showed Claude its own answer but not the memory behind it,
+    # and it apologised for having made the answer up.
+    world = build_world()
+    await world.store.add(make_fact(world.user.id, "Has an interview at Google on Friday"))
+    memory = await world.service.open_call(world.user)
+    assistant = Assistant(PROFILE, memory=memory, memory_context="")
+
+    for said in ["Google interview ki tayari", "Google interview kal hai"]:
+        await assistant.on_user_turn_completed(
+            llm.ChatContext(), llm.ChatMessage(role="user", content=[said])
+        )
+
+    kept = [m.text_content or "" for m in assistant.chat_ctx.messages() if m.role == "system"]
+    assert sum("Has an interview at Google on Friday" in text for text in kept) == 1
+
+
 async def test_user_turn_adds_nothing_without_memory_matches_or_text() -> None:
     world = build_world()
     memory = await world.service.open_call(world.user)

@@ -51,6 +51,22 @@
     {
       "name": "Prafulla Pattnaik",
       "relation": "neighbour"
+    },
+    {
+      "name": "Gopinath Mohapatra",
+      "relation": "father (passed away 2008)"
+    },
+    {
+      "name": "Kunti",
+      "relation": "mother (passed away 2016)"
+    },
+    {
+      "name": "Sujata",
+      "relation": "younger sister, lives in Puri"
+    },
+    {
+      "name": "Sunil Ekka",
+      "relation": "former colleague at RSP"
     }
   ],
   "calls": [
@@ -225,6 +241,95 @@
         {
           "role": "assistant",
           "text": "Bilkul, Ram Babu. Main yeh save nahi karungi, aur khud se yeh baat nahi uthaungi."
+        }
+      ]
+    },
+    {
+      "key": "c2b",
+      "days_ago": 10,
+      "at": "19:15",
+      "minutes": 21,
+      "summary": "Ram Babu talked about his family roots: married Sabitri on 12 Feb 1995 in Puri; his father Gopinath was a headmaster, his mother Kunti made the best chhena poda. Sister Sujata lives in Puri and he visits her every Rath Yatra. Told the story of leading RSP relief volunteers after the 1999 Super Cyclone, and of Cyclone Fani damaging his roof in 2019. Daily life: Lingaraj every Monday, Samaja newspaper with sugar-free ginger tea, a garden with tulsi, mali and a guava tree. Asked to be reminded of the wedding anniversary every year. Also: B.Sc at Ravenshaw, engineering at REC Rourkela, the 2003 best engineer award at RSP.",
+      "turns": [
+        {
+          "role": "assistant",
+          "text": "Namaste, Ram Babu. Aaj kaisa din raha?"
+        },
+        {
+          "role": "user",
+          "text": "Accha tha. Aaj Sabitri ke saath purani photo album dekh rahe the. Hamari shaadi ki photo."
+        },
+        {
+          "role": "assistant",
+          "text": "Kitni sundar baat hai. Shaadi kab hui thi aapki?"
+        },
+        {
+          "role": "user",
+          "text": "Baarah February unnees sau pachaanve. Puri mein, Jagannath ji ke shehar mein. Arranged marriage thi, Sabitri Cuttack ki hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Puri mein shaadi, kya baat hai. Kya main yeh yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan rakho. Aur har saal anniversary yaad dila dena, ek hafta pehle, kuch tohfa lena hota hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai: har saal 12 February, ek hafta pehle aur us din. Jab hum us waqt ke aas-paas baat karenge, main yaad dila dungi. Sahi hai?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, sahi hai. Sabitri bhajan bahut accha gaati hai. Aur hafte mein do din mohalle ki auraton ko silai sikhaati hai."
+        },
+        {
+          "role": "user",
+          "text": "Mere Bapa, Gopinath Mohapatra, Old Town ke school mein headmaster the. Bahut sakht, lekin dil ke acche. 2008 mein chale gaye. Aur Maa, Kunti, unke haath ka chhena poda, uske jaisa kahin nahi milta. Maa 2016 mein gayi."
+        },
+        {
+          "role": "assistant",
+          "text": "Unki yaadein aapke saath hain, Ram Babu. Kya main aapke Bapa aur Maa ke baare mein yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan. Meri chhoti behen Sujata Puri mein rehti hai. Har Rath Yatra pe main uske ghar jaata hoon."
+        },
+        {
+          "role": "user",
+          "text": "Ek baat batata hoon. Unnees sau ninyaanve ka Super Cyclone. Main RSP ke volunteers lekar Jagatsinghpur gaya tha. Teen din tak bina soye kaam kiya."
+        },
+        {
+          "role": "assistant",
+          "text": "Yeh toh bahut badi seva thi. Kya main yeh kahani yaad rakhun, aapke shabdon ke saath?"
+        },
+        {
+          "role": "user",
+          "text": "Haan. Aur 2019 mein Fani aaya toh hamare ghar ki chhat ud gayi thi. Ek hafta Prafulla ke ghar rahe."
+        },
+        {
+          "role": "user",
+          "text": "Har Somvaar subah Lingaraj jaata hoon. Subah Samaja akhbaar padhta hoon, adrak wali chai ke saath, bina cheeni ke. Aur mera chhota sa bageecha hai, tulsi, mali aur ek amrood ka ped. Subah chhe baje paani deta hoon."
+        },
+        {
+          "role": "assistant",
+          "text": "Kitni sundar dincharya hai. Kya yeh sab yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, rakh lo. Rourkela ka mera dost Sunil Ekka, RSP mein saath the, usse Durga Puja pe baat hoti hai."
+        },
+        {
+          "role": "user",
+          "text": "Ravenshaw se B.Sc kiya, phir REC Rourkela se mechanical engineering, ab usko NIT bolte hain. 1980 mein RSP join kiya. 2003 mein blast furnace theek karne pe best engineer ka award mila tha, woh sabse garv ka pal tha."
+        },
+        {
+          "role": "user",
+          "text": "Aur Aarav ka janamdin, shayad April mein hai. Pakka yaad nahi."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai, likh leti hoon ki pakka nahi hai. Shubh raatri, Ram Babu."
         }
       ]
     },
@@ -594,6 +699,93 @@
       "kind": "preference",
       "importance": 2,
       "call": "c4"
+    },
+    {
+      "call": "c2b",
+      "kind": "moment",
+      "text": "Married Sabitri on 12 February 1995 in Puri; an arranged marriage, she is from Cuttack",
+      "about": "Sabitri",
+      "importance": 3
+    },
+    {
+      "call": "c2b",
+      "text": "Sabitri sings bhajans beautifully and teaches tailoring to women in the neighbourhood twice a week",
+      "about": "Sabitri",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "His father Gopinath Mohapatra was headmaster of a school in Old Town; strict but kind-hearted; he died in 2008",
+      "about": "Gopinath Mohapatra",
+      "importance": 3
+    },
+    {
+      "call": "c2b",
+      "kind": "story",
+      "text": "His mother Kunti made the best chhena poda; she died in 2016",
+      "quote": "Maa ke haath ka chhena poda, uske jaisa kahin nahi milta",
+      "about": "Kunti",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "Younger sister Sujata lives in Puri; he stays at her house every Rath Yatra",
+      "about": "Sujata",
+      "importance": 3
+    },
+    {
+      "call": "c2b",
+      "kind": "story",
+      "text": "After the 1999 Super Cyclone he led a team of RSP volunteers doing relief work in Jagatsinghpur",
+      "quote": "Teen din tak bina soye kaam kiya",
+      "importance": 3
+    },
+    {
+      "call": "c2b",
+      "kind": "story",
+      "text": "Cyclone Fani in 2019 blew off the roof of his Bhubaneswar house; the family stayed with neighbour Prafulla for a week",
+      "about": "Prafulla Pattnaik",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "Visits the Lingaraj temple every Monday morning",
+      "importance": 3
+    },
+    {
+      "call": "c2b",
+      "kind": "preference",
+      "text": "Reads the Samaja newspaper every morning with ginger tea without sugar",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "Has a small garden with tulsi, mali (jasmine) and a guava tree; waters it at 6 am",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "Old RSP colleague Sunil Ekka still lives in Rourkela; they talk every Durga Puja",
+      "about": "Sunil Ekka",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "Thinks grandson Aarav's birthday is in April",
+      "about": "Aarav",
+      "uncertain": true,
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "text": "Studied B.Sc at Ravenshaw College, Cuttack, then mechanical engineering at REC Rourkela (now NIT Rourkela); joined RSP in 1980",
+      "importance": 2
+    },
+    {
+      "call": "c2b",
+      "kind": "moment",
+      "text": "Proudest moment at work: the RSP best engineer award in 2003 for repairing a blast furnace",
+      "importance": 2
     }
   ],
   "threads": [
@@ -702,6 +894,18 @@
       "about": "Lipsa",
       "note": "date not fixed yet",
       "call": "c3"
+    },
+    {
+      "call": "c2b",
+      "title": "Wedding anniversary with Sabitri",
+      "date": "2027-02-12",
+      "repeat": "yearly",
+      "days_before": [
+        7,
+        0
+      ],
+      "about": "Sabitri",
+      "note": "buy a gift; married 1995 in Puri"
     }
   ]
 }

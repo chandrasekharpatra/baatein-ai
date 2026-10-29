@@ -109,4 +109,26 @@ async def test_reseeding_after_delete_replaces_the_user(db: Database) -> None:
     assert not await delete_user(db, "ram.mohapatra@example.com")
     second = await seed_ram(db)
 
-    assert len(await SqliteMemoryStore(db, FakeEmbedder()).active(second.id, 50)) == 20
+    assert len(await SqliteMemoryStore(db, FakeEmbedder()).active(second.id, 50)) == 34
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("married Sabitri Puri 1995", "12 February 1995"),
+        ("Cyclone Fani roof", "Fani"),
+        ("Super Cyclone relief Jagatsinghpur", "Jagatsinghpur"),
+        ("Lingaraj temple Monday", "Lingaraj temple every Monday"),
+        ("sister Sujata Puri", "Sujata"),
+        ("father headmaster", "headmaster"),
+    ],
+)
+async def test_life_details_are_left_out_of_the_context_but_found_by_search(
+    db: Database, query: str, expected: str
+) -> None:
+    user = await seed_ram(db)
+    context = await next_call(db, user)
+
+    assert not any(expected in f.text for f in context.facts)
+    hits = await SqliteMemoryStore(db, FakeEmbedder()).search(user.id, query, 5)
+    assert any(expected in h.fact.text for h in hits), [h.fact.text for h in hits]

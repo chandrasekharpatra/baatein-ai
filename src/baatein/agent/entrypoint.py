@@ -9,7 +9,8 @@ from livekit.agents.voice import ConversationItemAddedEvent
 from livekit.plugins import silero
 
 from baatein.agent.assistant import Assistant
-from baatein.config import LiveKitSettings, Settings
+from baatein.agent.resilience import SpeechGuard, connect_options
+from baatein.config import LiveKitSettings, Settings, VoiceSettings
 from baatein.container import build_root
 from baatein.domain.models import Role, User
 from baatein.memory.context_builder import render_context
@@ -64,8 +65,16 @@ def resolve_persona(injector: Injector, user: User | None) -> Persona:
         return CASUAL
 
 
-def create_session(pipeline: VoicePipeline, vad_model: vad.VAD) -> AgentSession[None]:
-    return AgentSession(vad=vad_model, stt=pipeline.stt, llm=pipeline.llm, tts=pipeline.tts)
+def create_session(
+    pipeline: VoicePipeline, vad_model: vad.VAD, settings: VoiceSettings | None = None
+) -> AgentSession[None]:
+    return AgentSession(
+        vad=vad_model,
+        stt=pipeline.stt,
+        llm=pipeline.llm,
+        tts=pipeline.tts,
+        conn_options=connect_options(settings or VoiceSettings()),
+    )
 
 
 async def end_call(injector: Injector, memory: CallMemory | None, reason: str) -> None:
@@ -92,11 +101,13 @@ server = AgentServer(setup_fnc=prewarm)
 async def entrypoint(ctx: JobContext) -> None:
     injector: Injector = ctx.proc.userdata["injector"]
     user = await resolve_user(injector, ctx.job.metadata)
-    language = user.language if user else injector.get(Settings).voice.default_language
+    voice = injector.get(Settings).voice
+    language = user.language if user else voice.default_language
     persona = resolve_persona(injector, user)
     pace = effective_pace(persona, user.preferences) if user else 1.0
     pipeline = injector.get(VoicePipelineFactory).build(language, pace)
-    session = create_session(pipeline, ctx.proc.userdata["vad"])
+    session = create_session(pipeline, ctx.proc.userdata["vad"], voice)
+    SpeechGuard(session, voice.stt_max_errors, pipeline.profile.cannot_hear)
     user_name = user.display_name if user else None
     memory: CallMemory | None = None
 
