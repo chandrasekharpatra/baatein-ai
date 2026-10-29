@@ -2,13 +2,21 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
-from livekit.agents import function_tool, llm
+from livekit.agents import RunContext, function_tool, llm
 
 from baatein.domain.models import Certainty, FollowUpStatus, MemoryKind, Sensitivity
 from baatein.memory.context_builder import render_search
-from baatein.memory.service import CallMemory
+from baatein.memory.service import CallMemory, ForgetOutcome
 
 PAUSED = "Not saved: the user asked you not to save anything in this call."
+FORGET_REPLIES = {
+    ForgetOutcome.DELETED: "Deleted.",
+    ForgetOutcome.NEEDS_CONFIRMATION: (
+        'Not deleted yet. Ask the user to confirm, e.g. "Pakka, main yeh poori tarah mita '
+        'doon?" If they say yes, call forget again with the same id.'
+    ),
+    ForgetOutcome.NOT_FOUND: "No saved memory with that id.",
+}
 
 
 def parse_due_date(value: str | None) -> datetime | None:
@@ -20,6 +28,15 @@ def parse_due_date(value: str | None) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def user_messages(context: RunContext[None]) -> int:
+    """How many messages the user has sent so far in this call."""
+    return sum(
+        1
+        for item in context.session.history.items
+        if isinstance(item, llm.ChatMessage) and item.role == "user"
+    )
 
 
 def choice[E: StrEnum](enum: type[E], value: str | None, default: E) -> E:
@@ -55,8 +72,8 @@ def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
         sensitivity: str | None = None,
         uncertain: bool | None = None,
     ) -> str:
-        """Save something about the user. ONLY call this after you asked "Kya main yeh yaad
-        rakhun?" (or similar) and the user clearly said yes in their last message. Never save
+        """Save something about the user. Call it when the user asks you to remember something,
+        or after you asked "Kya main yeh yaad rakhun?" and they clearly said yes. Never save
         OTPs, PINs, passwords or account numbers.
 
         Args:
@@ -96,14 +113,15 @@ def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
         return "No current memory with that id." if fact is None else f"Corrected as [{fact.id}]."
 
     @function_tool
-    async def forget(memory_id: str) -> str:
-        """Delete a saved memory completely when the user asks you to forget it. Only tell the
-        user it is deleted if this returns "Deleted".
+    async def forget(context: RunContext[None], memory_id: str) -> str:
+        """Delete a saved memory completely when the user asks you to forget it. The first call
+        only asks for confirmation; call it again with the same id after the user confirms.
+        Only tell the user it is deleted if this returns "Deleted".
 
         Args:
             memory_id: The id in brackets next to the memory.
         """
-        return "Deleted." if await memory.forget(memory_id) else "No saved memory with that id."
+        return FORGET_REPLIES[await memory.forget(memory_id, user_messages(context))]
 
     @function_tool
     async def pause_saving() -> str:

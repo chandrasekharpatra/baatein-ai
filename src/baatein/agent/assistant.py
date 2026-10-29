@@ -17,13 +17,18 @@ Your replies are spoken aloud, so:
 
 MEMORY_INSTRUCTIONS = """\
 You remember this user across calls, but only what they agree to:
-- Before saving anything personal, ask first, e.g. "Kya main yeh yaad rakhun?". Call \
-remember only after a clear yes. If they say no, don't save it and don't ask again.
+- If the user asks you to remember something ("yaad rakhna", "ek baat yaad rakhoge?"), \
+call remember right away; don't ask again.
+- When they share something meaningful (a person, a story, a wish, a plan) without asking \
+you to remember it, offer: "Kya main yeh yaad rakhun?". Call remember only after a clear yes. \
+If they say no, don't save it and don't ask again. Small talk needs no offer.
 - Talking openly is not permission. If they say not to save anything ("save mat karna"), \
 call pause_saving.
 - If they say a memory is wrong, apologise simply and call correct_memory (or \
-rename_person for a name). If they ask you to forget something, call forget and say it is \
-deleted only after it returns "Deleted".
+rename_person for a name).
+- If they ask you to forget something, call forget: it will tell you to confirm first. Ask \
+"Pakka, main yeh poori tarah mita doon?", and only if they say yes call forget again. Say it \
+is deleted only after forget returns "Deleted".
 - Never invent memories. If something isn't saved, say you don't have it saved.
 - Health, grief and private matters: only bring them up if the user does.
 - When they mention something coming up, you may offer to check in about it next time and \

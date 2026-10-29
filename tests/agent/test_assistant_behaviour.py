@@ -82,6 +82,20 @@ async def test_asks_before_saving_and_saves_after_yes() -> None:
         assert "ramesh" in fact.text.lower()
 
 
+async def test_saves_directly_when_the_user_asks_to_remember() -> None:
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Asha")
+
+        await session.run(
+            user_input="Ek baat yaad rakhoge? Mere bete Ravi ka birthday 18 November ko hai."
+        )
+
+        [fact] = await world.store.active(world.user.id, limit=5)
+        assert "ravi" in fact.text.lower()
+        assert [p.name for p in world.state.people.values()] == ["Ravi"]
+
+
 async def test_saves_nothing_after_user_says_not_to() -> None:
     world = build_world()
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
@@ -101,22 +115,31 @@ async def test_saves_nothing_after_user_says_not_to() -> None:
 async def test_forgets_on_request_and_does_not_use_it_again() -> None:
     world = build_world()
     await world.store.add(
-        make_fact(world.user.id, "Is worried about a family property dispute with his cousin")
+        make_fact(
+            world.user.id, "Is worried about a dispute with his cousin Mahesh over the Pune flat"
+        )
     )
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        await session.run(
-            user_input="Maine jo family property wali baat batayi thi, use bhool jao."
+        asked = await session.run(
+            user_input="Maine jo family wali pareshani batayi thi, use bhool jao."
         )
-        [fact] = [f for f in world.store._facts.values()]
+        [fact] = list(world.store._facts.values())
+        assert not fact.is_deleted
+        await asked.expect.contains_message(role="assistant").judge(
+            llm, intent="Asks the user to confirm before deleting the family matter."
+        )
+
+        await session.run(user_input="Haan, poori tarah mita do.")
+        [fact] = list(world.store._facts.values())
         assert fact.is_deleted
 
         result = await session.run(user_input="Tumhe meri family wali baat yaad hai?")
         await result.expect.contains_message(role="assistant").judge(
             llm,
             intent="Says it no longer has that family matter saved (or that it was deleted), "
-            "without mentioning any property, dispute or cousin.",
+            "without mentioning Mahesh, a cousin, Pune or a flat.",
         )
 
 

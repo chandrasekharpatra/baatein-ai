@@ -15,7 +15,7 @@ from baatein.domain.models import (
     ScoredFact,
     Sensitivity,
 )
-from baatein.memory.service import FORGOTTEN_TURN, CallMemory
+from baatein.memory.service import FORGOTTEN_TURN, CallMemory, ForgetOutcome
 from tests.factories import at, make_fact, make_followup, make_session, make_turn, make_user
 from tests.fakes.world import World, build_world
 
@@ -311,6 +311,34 @@ async def test_correct_rejects_unknown_foreign_or_retired_memory(world: World) -
     assert await memory.correct(old.id, "x") is None
 
 
+async def confirmed_forget(memory: CallMemory, fact_id: str) -> ForgetOutcome:
+    assert await memory.forget(fact_id, user_turn=1) is ForgetOutcome.NEEDS_CONFIRMATION
+    return await memory.forget(fact_id, user_turn=2)
+
+
+async def test_forget_needs_confirmation_on_the_next_user_turn(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    fact = await memory.remember("Private family matter")
+    assert fact is not None
+
+    assert await memory.forget(fact.id, user_turn=3) is ForgetOutcome.NEEDS_CONFIRMATION
+    assert await memory.forget(fact.id, user_turn=3) is ForgetOutcome.NEEDS_CONFIRMATION
+    assert not (await world.store.get(fact.id)).is_deleted  # type: ignore[union-attr]
+
+    assert await memory.forget(fact.id, user_turn=4) is ForgetOutcome.DELETED
+    assert (await world.store.get(fact.id)).is_deleted  # type: ignore[union-attr]
+
+
+async def test_unconfirmed_forget_request_expires(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    fact = await memory.remember("Private family matter")
+    assert fact is not None
+    await memory.forget(fact.id, user_turn=1)
+
+    assert await memory.forget(fact.id, user_turn=3) is ForgetOutcome.NEEDS_CONFIRMATION
+    assert not (await world.store.get(fact.id)).is_deleted  # type: ignore[union-attr]
+
+
 async def test_forget_wipes_memory_and_redacts_its_calls(world: World) -> None:
     earlier = await world.service.open_call(world.user)
     earlier.record(Role.USER, "Family wali baat")
@@ -323,7 +351,7 @@ async def test_forget_wipes_memory_and_redacts_its_calls(world: World) -> None:
     memory = await world.service.open_call(world.user)
     memory.record(Role.USER, "Woh family wali baat bhool jao")
 
-    assert await memory.forget(fact.id)
+    assert await confirmed_forget(memory, fact.id) is ForgetOutcome.DELETED
 
     tombstone = await world.store.get(fact.id)
     assert tombstone is not None
@@ -340,9 +368,9 @@ async def test_forget_removes_a_person_only_when_nothing_else_is_about_them(worl
     assert first is not None
     assert second is not None
 
-    await memory.forget(first.id)
+    await confirmed_forget(memory, first.id)
     assert [p.name for p in await memory.people()] == ["Ramesh"]
-    await memory.forget(second.id)
+    await confirmed_forget(memory, second.id)
     assert await memory.people() == []
 
 
@@ -354,11 +382,11 @@ async def test_forget_rejects_unknown_foreign_or_already_deleted(world: World) -
     memory = await world.service.open_call(world.user)
     fact = await memory.remember("Secret")
     assert fact is not None
-    await memory.forget(fact.id)
+    await confirmed_forget(memory, fact.id)
 
-    assert not await memory.forget("missing")
-    assert not await memory.forget(foreign.id)
-    assert not await memory.forget(fact.id)
+    assert await memory.forget("missing", user_turn=3) is ForgetOutcome.NOT_FOUND
+    assert await memory.forget(foreign.id, user_turn=3) is ForgetOutcome.NOT_FOUND
+    assert await memory.forget(fact.id, user_turn=3) is ForgetOutcome.NOT_FOUND
     assert (await world.store.get(foreign.id)).text == foreign.text  # type: ignore[union-attr]
 
 

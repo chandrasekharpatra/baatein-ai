@@ -155,7 +155,7 @@ On each user turn, search memories and threads, skipping anything without consen
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Consent model | **Strict.** Every personal memory is saved only after the user agrees in the call ("Kya main yaad rakhun?" → "Haan"). No silent extraction. |
+| 1 | Consent model | **Strict.** Every personal memory is saved only with the user's agreement in the call. No silent extraction. Refined on 2026-10-29: an explicit request ("Ek baat yaad rakhoge? …", "yaad rakhna") is the agreement, so it is saved right away (#34); when Baatein itself wants to keep something it asks first ("Kya main yaad rakhun?" → "Haan", #1). **Destructive actions are always confirmed**, even right after an explicit request: forget asks "Pakka, main yeh poori tarah mita doon?" and deletes only on the user's next message (#13). |
 | 2 | Transcripts | **Internal log only, plus the summary of the last call.** Claude never searches raw transcripts; `recall` covers consented memories and threads. The last call's summary goes into call-start context. |
 | 3 | Reminder delivery | **In the next conversation only, for now.** Reminders are stored as first-class dated objects; Baatein brings due ones up when the user next talks to it and never claims it will "notify" or "call" at a time. Timed delivery (scheduler + outbound call or push) is a later phase. |
 | 4 | Audience and persona | **Persona as a per-user setting** (option C in §6). The profile holds a persona (tone, form of address, pace, sentence length, question frequency) next to the language. An elder persona follows the scenario library; the current casual Hinglish persona stays. Preferences from #21–23 adjust it per user. |

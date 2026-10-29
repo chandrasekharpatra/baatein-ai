@@ -34,19 +34,25 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 
 ## Slice 1: save only with permission; correct and forget ✅ done
 
-**Status:** built and verified live on 2026-10-29. Differences from the brief: the `facts` table was extended rather than renamed; consent needs no column (only `remember` creates memories, after a yes); `forget` also redacts the whole transcript of the call the memory came from and deletes the person when nothing else is about them; a `rename_person` tool handles name corrections; `remember`'s `kind` and `sensitivity` are plain strings because Anthropic rejects enums on optional parameters.
+**Status:** built and verified live on 2026-10-29. Consent rule as built: an explicit "yaad rakhna" saves right away; otherwise Baatein offers ("Kya main yeh yaad rakhun?") and saves after a yes. Forget always asks "Pakka, main yeh poori tarah mita doon?" first; this is enforced in code (the first `forget` call only records the request, and deletion happens only on a second call after the user's next message). Differences from the brief: the `facts` table was extended rather than renamed; consent needs no column (only `remember` creates memories, after a yes); `forget` also redacts the whole transcript of the call the memory came from and deletes the person when nothing else is about them; a `rename_person` tool handles name corrections; `remember`'s `kind` and `sensitivity` are plain strings because Anthropic rejects enums on optional parameters.
 
 ### Example (#1 and #13)
 ```
-Buddy: Kya main yaad rakhun ki aap Ramesh ko miss karte hain?
+Buddy: Kya main yaad rakhun ki aap Ramesh ko miss karte hain?      ← Baatein offers, then waits
 Mohan: Haan, yaad rakhna.
         → remember(kind=fact, text="Misses college friend Ramesh; wants to reconnect",
                    quote="Mera ek dost tha, Ramesh…", about=Ramesh)   saved ✓
 
 (a later call)
 Mohan: Woh Ramesh wali baat bhool jao.
-        → forget(memory_id)   text, vectors and related transcript lines wiped ✓
-Buddy: Theek hai, maine woh baat hata di.    ← said only after the write succeeds
+        → forget(memory_id)   "not deleted yet, ask the user to confirm"
+Buddy: Pakka, main yeh poori tarah mita doon?
+Mohan: Haan, mita do.
+        → forget(memory_id)   text, vectors and that call's transcript wiped ✓
+Buddy: Theek hai, maine woh baat poori tarah mita di.    ← said only after the write succeeds
+
+(#34) Asha: Ek baat yaad rakhoge? Ravi ka birthday 18 November ko hai.
+        → remember(...) right away: an explicit request is the agreement
 ```
 
 ### How it works

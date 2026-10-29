@@ -1,10 +1,11 @@
 from datetime import UTC, datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from livekit.agents import llm
 
-from baatein.agent.tools import PAUSED, choice, memory_tools, parse_due_date
+from baatein.agent.tools import PAUSED, choice, memory_tools, parse_due_date, user_messages
 from baatein.domain.models import Certainty, FollowUpStatus, MemoryKind, Sensitivity
 from baatein.memory.service import CallMemory
 from tests.factories import make_followup
@@ -27,6 +28,16 @@ from tests.fakes.world import World, build_world
 )
 def test_parse_due_date(value: str | None, expected: datetime | None) -> None:
     assert parse_due_date(value) == expected
+
+
+def run_context(user_messages: int) -> Any:
+    items = [llm.ChatMessage(role="assistant", content=["Namaste"])]
+    items += [llm.ChatMessage(role="user", content=[f"msg {i}"]) for i in range(user_messages)]
+    return SimpleNamespace(session=SimpleNamespace(history=llm.ChatContext(items)))
+
+
+def test_user_messages_counts_only_user_chat_messages() -> None:
+    assert user_messages(run_context(user_messages=3)) == 3
 
 
 async def tools_for(world: World) -> tuple[CallMemory, dict[str, Any]]:
@@ -125,8 +136,12 @@ async def test_correct_memory_and_forget_report_outcomes() -> None:
 
     assert corrected == f"Corrected as [{current.id}]."
     assert await tools["correct_memory"](fact.id, "x") == "No current memory with that id."
-    assert await tools["forget"](current.id) == "Deleted."
-    assert await tools["forget"](current.id) == "No saved memory with that id."
+    asked = await tools["forget"](run_context(user_messages=1), current.id)
+    assert asked.startswith("Not deleted yet. Ask the user")
+    assert await world.store.active(world.user.id, limit=5) == [current]
+    assert await tools["forget"](run_context(user_messages=2), current.id) == "Deleted."
+    gone = await tools["forget"](run_context(user_messages=3), current.id)
+    assert gone == "No saved memory with that id."
     assert await world.store.active(world.user.id, limit=5) == []
 
 

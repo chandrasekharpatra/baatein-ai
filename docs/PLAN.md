@@ -28,6 +28,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 **Gotchas found so far**
 - Anthropic rejects a tool parameter that has an enum and a nullable type (`Enum value 'fact' does not match declared type ['string', 'null']`). The LiveKit plugin makes every defaulted parameter nullable in strict mode, so optional parameters with fixed choices are plain `str | None` and mapped with `agent/tools.py:choice`. `tests/unit/test_tools.py` checks the generated schemas.
+- `Agent.on_user_turn_completed` is not called in LiveKit's text-mode tests (`session.run(user_input=...)`). Logic that must count user turns reads `RunContext.session.history` in the tool instead.
 - Claude 5.5 rejects `temperature`; `BAATEIN_LLM__TEMPERATURE` is unset by default and only sent when set.
 - LiveKit's test judge hardcodes `temperature=0.0`; `tests/agent/test_assistant_behaviour.py` uses a `JudgeLLM` subclass that strips it.
 - The agent CLI doesn't read `.env` by itself; `entrypoint.main()` loads it from the current directory before LiveKit spawns workers.
@@ -292,7 +293,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 ### Slice 1: memory structure, consent, correct and forget ✅
 
-**As built:** the `facts` table and `Fact` model were extended rather than renamed. There is no consent column: with strict consent a memory can only be created through `remember` after a "yes", and `source_session_id` is the call where the user agreed. `forget` tombstones the memory and every earlier version it replaced, redacts the whole transcript of each call those versions came from (the transcript is in Devanagari while memories are in English, so the exact lines can't be matched reliably), clears those calls' summaries, and deletes the person if no current memory is about them. `rename_person` was added for name corrections (#12); `recall_memory` became `recall` over saved memories only. Turns are redacted for codes and long numbers as they are written.
+**As built:** the `facts` table and `Fact` model were extended rather than renamed. There is no consent column: with strict consent a memory can only be created through `remember` after a "yes", and `source_session_id` is the call where the user agreed. `forget` tombstones the memory and every earlier version it replaced, redacts the whole transcript of each call those versions came from (the transcript is in Devanagari while memories are in English, so the exact lines can't be matched reliably), clears those calls' summaries, and deletes the person if no current memory is about them. Explicit "yaad rakhna" requests are saved right away; otherwise Baatein offers first. `forget` is two-step and enforced in code: the first call records the request and tells Claude to ask "Pakka, main yeh poori tarah mita doon?"; a second call on the user's next message (counted from the session history, so it works in voice and text mode) deletes. `rename_person` was added for name corrections (#12); `recall_memory` became `recall` over saved memories only. Turns are redacted for codes and long numbers as they are written.
 
 **Why, in the scenarios**
 - #1 Mohan: *"Kya main yaad rakhun ki aap Ramesh ko miss karte hain?" "Haan, yaad rakhna."* Only after this "haan" may anything be saved.

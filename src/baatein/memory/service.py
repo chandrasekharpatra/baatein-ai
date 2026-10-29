@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import StrEnum
 
 from baatein.config import MemorySettings
 from baatein.domain.ids import new_id
@@ -38,6 +39,12 @@ class MemoryContext:
     followups: list[FollowUp]
     facts: list[Fact]
     people: list[Person]
+
+
+class ForgetOutcome(StrEnum):
+    DELETED = "deleted"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+    NOT_FOUND = "not_found"
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,7 @@ class CallMemory:
         self._pending: asyncio.Future[None] | None = None
         self._closed = False
         self.saving_paused = False
+        self._forget_requests: dict[str, int] = {}
 
     @property
     def user_id(self) -> str:
@@ -210,11 +218,26 @@ class CallMemory:
         await self._deps.store.supersede(fact_id, replacement)
         return replacement
 
-    async def forget(self, fact_id: str) -> bool:
-        """Tombstone a memory and its earlier versions, and redact the calls it came from."""
+    async def forget(self, fact_id: str, user_turn: int) -> ForgetOutcome:
+        """Delete a memory in two steps, so it is never lost to a single misheard sentence.
+
+        `user_turn` is how many messages the user has sent so far in this call. The first call
+        only records the request; a second call on the user's next message (their confirmation)
+        deletes it. A request not confirmed on that next message expires.
+        """
         fact = await self._deps.store.get(fact_id)
         if fact is None or fact.user_id != self.user_id or fact.is_deleted:
-            return False
+            return ForgetOutcome.NOT_FOUND
+        if self._forget_requests.get(fact_id) != user_turn - 1:
+            self._forget_requests[fact_id] = user_turn
+            return ForgetOutcome.NEEDS_CONFIRMATION
+        del self._forget_requests[fact_id]
+        await self._erase(fact)
+        return ForgetOutcome.DELETED
+
+    async def _erase(self, fact: Fact) -> None:
+        """Tombstone a memory and its earlier versions, and redact the calls they came from."""
+        fact_id = fact.id
         await self.flush()
         for session_id in await self._deps.store.forget(fact_id, self._deps.clock.now()):
             await self._deps.turns.redact_session(session_id, FORGOTTEN_TURN)
@@ -222,7 +245,6 @@ class CallMemory:
         person_id = fact.about_person_id
         if person_id and await self._deps.store.count_about(person_id) == 0:
             await self._deps.people.delete(person_id)
-        return True
 
     async def people(self) -> list[Person]:
         return await self._deps.people.list_for_user(self.user_id, CONTEXT_PEOPLE)
