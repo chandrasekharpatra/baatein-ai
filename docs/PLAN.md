@@ -6,13 +6,15 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 **Done:** Phases 0–4. You can sign up in the web client, start a call and have a live Hinglish voice conversation (Sarvam STT → Claude Haiku 5.5 → Sarvam TTS). Each call now has a `sessions` row, every message is saved as a turn while the call runs, the agent starts with memory context (recent summaries, open follow-ups, top facts), searches facts on every user turn, and has `recall_memory`, `add_followup` and `resolve_followup` tools. Verified end to end on 2026-10-29: in one call the user mentioned an interview and the agent saved a dated follow-up; in the next call it remembered the interview and resolved the follow-up.
 
-**Not yet:** nothing turns a finished call into summaries or facts, so call-start context only contains follow-ups until Phase 5.
+**Not yet:** nothing turns a finished call into summaries or memories, and memory is saved without asking the user first.
 
-**Next: Phase 5** (see §10):
-1. Finalizer: on `pending` sessions, one structured Claude call over the transcript, open follow-ups and similar facts → summary, new/resolved follow-ups, fact add/supersede/retire.
-2. Retry worker for `failed` sessions (`finalize_attempts`).
-3. Proactive opener: greet with the most relevant due follow-up.
-4. Decide STT script: Sarvam `codemix` returns Devanagari for Hindi words (e.g. "अगले Friday मेरा Google में interview है"); try `translit` mode (Roman) for consistent transcripts/search.
+**Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
+1. Memory structure, consent-only saving, correct and forget
+2. Threads, boundaries and the call-start context
+3. Persona and preferences
+4. Reminders (delivered in conversation only)
+5. End-of-call summary and retry
+6. Scenario evals
 
 **Phase 4 notes**
 - Per-call state is a `CallMemory` object created by the process-wide `MemoryService` (`memory/service.py`), not a child injector: it only needs the session and the repos, and a plain object is easier to test.
@@ -265,7 +267,7 @@ Tests don't have to be written before the code, but every change ships with test
 | 2 ✅ | `MemoryStore` contract (SQLite + fake), vector index lifecycle, embedder adapter, real model | `Embedder` port + FastEmbed, `facts` + `sqlite-vec` + FTS5 hybrid search, `MemoryModule`, `baatein reembed` |
 | 3 ✅ | auth service, Argon2, JWT expiry via clock, LiveKit token claims, API routes, identity → agent | `AuthService`, `/auth/signup`, `/auth/login`, `/me`, `/livekit/token`, `AuthModule`, `baatein serve`, web client at `/` with live transcripts; agent resolves the user from dispatch metadata. Verified live end to end |
 | 4 ✅ | MemoryService unit tests, lifecycle tests, entrypoint wiring, memory tool behaviour against real Claude | Session lifecycle, transcript persistence, call-start context, per-turn retrieval, memory tools. Verified live across two calls |
-| 5 | finalizer state-machine tests, analyzer evals, agent opener test | Session analyzer (summary + follow-ups + fact ops), retry worker, proactive opener |
+| 5 | slice tests per §13, scenario evals against real Claude | Consent-based memory layer (§13): memories with consent and tombstones, people, threads, boundaries, persona and preferences, conversation-only reminders, ranked call-start context, end-of-call summary with retry |
 | 6 | evals, deletion tests | "Forget me", logging/metrics, demo polish |
 
 ## 11. Risks
@@ -278,3 +280,114 @@ Tests don't have to be written before the code, but every change ships with test
 ## 12. Open items (discuss later)
 
 - **Pinecone `llama-text-embed-v2`** — confirm `pc.inference.embed` parameters (`input_type`, `dimension`, `truncate`) and latency from India, then add a `PineconeEmbedder` adapter. With the `Embedder` port and per-model vector tables, switching is config + `baatein reembed`.
+
+## 13. Phase 5 plan: the consent-based memory layer
+
+Design and the full scenario review are in `docs/MEMORY_DESIGN.md`. Decisions: strict consent; transcripts are an internal log and only the last call's summary reaches the agent; reminders are delivered in conversation only; persona is a per-user setting; forgetting writes a tombstone.
+
+Each slice below says **what it is for, with a scenario from the library**, then what changes and how it is tested. Scenario numbers refer to the library (#1–45). Every slice is committed separately, keeps coverage at 100%, and is checked with a live probe call before the next one starts.
+
+### Slice 1: memory structure, consent, correct and forget
+
+**Why, in the scenarios**
+- #1 Mohan: *"Kya main yaad rakhun ki aap Ramesh ko miss karte hain?" "Haan, yaad rakhna."* Only after this "haan" may anything be saved.
+- #14: *"Aaj gardening par baat kar sakte hain, save mat karna."* Baatein talks about gardening but saves nothing for the rest of the call.
+- #12: *"Suman meri behen?" "Nahi, padosan… naam Sunita hai."* The old memory is replaced, not kept beside the new one.
+- #13: *"Family wali baat bhool jao… poori tarah."* Next call: *"Kya tumhe woh family wali baat yaad hai?"* → Baatein doesn't use it. Baatein says "deleted" only once the database write succeeded.
+- #25: *"Koi phone par bank OTP maang raha tha."* Nothing like an OTP, PIN or account number is ever stored.
+- #33: *"Saheli Neena ke ghar mushkil waqt."* The memory is about Neena, not the user, and stays minimal.
+
+**Changes**
+- Migration `0003`: extend `facts` into memories with `kind` (fact, story, preference, moment), `about_person_id`, `quote` (the user's own words), `certainty` (sure, uncertain), `sensitivity` (normal, personal, health, grief, crisis), `consent_session_id`, `deleted_at`. Add a `people` table (name, relation, aliases).
+- Domain: `Memory` replaces `Fact`; `Person`. `MemoryStore` gains `forget` (tombstone: clear text and quote, drop vectors and FTS rows, redact related transcript turns, keep `id` and `deleted_at`) and filters deleted and non-consented rows everywhere.
+- `memory/redact.py`: removes OTP-, PIN-, card- and account-like numbers before anything is written.
+- Tools: `remember(kind, text, quote, about, sensitivity)`, `correct_memory(id, text)`, `forget(id)`, `pause_saving()` for the rest of the call, `recall(query)` over consented memories only. `recall_memory`'s transcript search is removed (decision 2).
+- Instructions: ask before saving, never invent, say "I don't have that saved" (#15, #20).
+
+**Tests**: tombstone wipes text, vectors, FTS and turns; deleted memories never come back from `recall`, `active` or search; `remember` is refused while saving is paused; redaction cases. Real-Claude: Claude asks before calling `remember`; after `forget` it doesn't use the detail.
+
+### Slice 2: threads, boundaries and the call-start context
+
+**Why, in the scenarios**
+- #1 Ramesh, over three calls: wants to call → *"Main phone karunga"* → *"Maine unko phone kar diya!"* → *"Abhi sirf baat hui. Dekhenge."* One thread moves through states, with a dated event at each step, so the next call can say *"pichhli baar aap Ramesh ke baare mein…"* accurately.
+- #5 Kamala: *"Sunday ko lambi call karne ka socha hai."* The thread's next check-in is after Sunday, not every call.
+- #8 Lata: *"Ek din na ho paaye toh?" "Toh koi baat nahi."* A check-in, never a task to enforce.
+- #16: *"Main ab yoga class nahi jaana chahta."* Thread cancelled; never suggested again. #29: *"Tumne kal walk ki baat ki thi, main naraz tha."* The rejected suggestion is recorded and not repeated.
+- #11: *"Aaj painting yaad nahi dilana"* → later *"Ab painting ke baare mein poochh sakte ho."* A boundary with a scope, lifted by the user, without deleting the memory.
+- #19: *"Aaj meri patni ki barsi hai."* Grief and health topics are never raised by Baatein first. #32: *"Kamre mein mehmaan hain."* No personal details spoken for the rest of the call.
+- #15: *"Pehli baar mil rahe hain."* A first call says so instead of faking familiarity. #31: the last call cut off mid-story → *"Baat yahin ruk gayi thi. Aap wahin se shuru karna chahte hain?"*, offered once.
+- The rule after every scenario: *"never mechanically at every opening."* At most one check-in per call.
+
+**Changes**
+- Migration `0004`: `threads` (kind, title, status: open, in_progress, done, not_done, cancelled, snoozed; next_step, check_in_after, last_offered_at, times_offered, sensitivity, consent_session_id), `thread_events`, `boundaries` (topic or thread, scope: this_call, until_reopened, until_date), `declined_suggestions`; `users.timezone` (default `Asia/Kolkata`); `sessions.ended_abruptly`, `sessions.unfinished_topic`. Existing open follow-ups become threads.
+- Tools: `track_thread` (after consent), `update_thread(status, event, next_step, check_in_after)`, `set_boundary`, `lift_boundary`, `note_declined_suggestion`, `privacy_mode()`.
+- Context builder rewrite: local date and time, first call or the last call's date and summary and whether it ended abruptly, boundaries (always), people, **one** check-in chosen by a ranker (due, not snoozed or bounded, not sensitive, not offered in the last few days, not offered too often without an answer), followed by the rules.
+- Per-turn recall covers memories and threads, filtered by consent, boundaries and sensitivity (sensitive items only when the user's words match them).
+
+**Tests**: ranker picks the right single check-in for fixed states (#1, #5, #16, #17); boundaries always present and never violated; first-call and abrupt-end wording. Real-Claude: with Ramesh's thread in context it asks once and accepts *"nahi"*; with a painting boundary it doesn't raise painting.
+
+### Slice 3: persona and preferences
+
+**Why, in the scenarios**
+- The library is written for users aged 68–78: *"Namaste, Mohan ji!"*, Hindi-first, patient, few questions. Baatein's current prompt is casual urban Hinglish.
+- #21: *"Arre, itne sawaal mat poochho."* → fewer questions from now on. #23: *"Dheere bolo, sunai nahi diya."* → slower voice and shorter sentences. #22: *"Hindi aur English mix… is preference ko yaad rakhna."* #30: *"Chai mein elaichi nahi"* → later *"ab kabhi-kabhi elaichi bhi"*, so preferences can change.
+- #28: *"Tum hi kaafi ho."* → Baatein is warm but never claims to replace people.
+
+**Changes**
+- Migration `0005`: `users.persona` (elder, casual), `address_as`, `pace`, `verbosity`, `fewer_questions`.
+- `voice/personas.py`: a persona registry next to `LanguageProfile` (tone, form of address, sentence length, question frequency, greeting). `elder` follows the library; `casual` is today's prompt.
+- Preferences feed the instructions and the TTS (Sarvam `pace`). Tool `set_preference`.
+- Web client signup: choose persona; `/me` returns it.
+
+**Tests**: prompt and TTS options per persona and preference. Real-Claude: elder persona uses "ji" and short replies; after "itne sawaal mat poochho" it stops asking several questions per reply.
+
+### Slice 4: reminders, delivered in conversation
+
+**Why, in the scenarios**
+- #34 Asha: *"Mere bete Ravi ka birthday 18 november ko hai… har saal 11 november subah 9 baje, aur 18 november subah 9 baje."* One reminder, two alert times, every year.
+- #36: *"Shayad June ke aakhri hafte mein."* No guessed date: the reminder waits for the date (`needs_info`).
+- #37, #43: *"Dukaan band thi; somvaar ko phir yaad dilao." "Purani ko hi badal do, do alag-alag mat banana."* Rescheduling updates the same reminder.
+- #44: *"Har mahine ke pehle ravivaar"*, then *"sirf is baar skip kar do."* Skipping one occurrence keeps the series.
+- #42: *"Bill bhar diya; baaki reminder hata do."* Only this occurrence's remaining alerts stop.
+- Decision 3: Baatein says it will bring the reminder up **when they next talk**, never that it will notify or call at 9 am.
+
+**Changes**
+- Migration `0006`: `reminders` (title, person, event date, local time, timezone, recurrence: once, weekly, monthly by date, monthly nth weekday, yearly; alert offsets, note, status: needs_info, active, done, cancelled, sensitivity) and `reminder_occurrences`.
+- `memory/recurrence.py` for the rules; relative dates ("agle shanivaar", "parson") resolved in the user's timezone.
+- Tools: `create_reminder` (after reading it back and hearing "haan"), `update_reminder`, `complete_occurrence`, `skip_occurrence`, `cancel_reminder`.
+- Context: reminders whose alert time has passed since the last call or falls in the next 7 days, phrased honestly.
+
+**Tests**: recurrence and next-occurrence calculation (first Sunday, yearly birthday, leap years); update never duplicates; complete or skip one occurrence keeps the series. Real-Claude: reads back date, time and repeat before creating; for #36 asks for the date instead of guessing.
+
+### Slice 5: end-of-call summary and retry
+
+**Why, in the scenarios**
+- #10: *"Bas theek. Subah chai peeke balcony mein baitha tha."* Most calls produce a short summary and nothing else.
+- #14, #15: things said without consent must not leak into the summary that opens the next call.
+- #31: *"Kal main apne bachpan ka ek kissa bata raha tha… [call ends]"* The summary records that the call ended mid-story and what the story was about.
+
+**Changes**
+- `memory/analyzer.py`: after a call, one structured Claude call over the transcript and the call's consented items → summary (consented items only), `ended_abruptly`, `unfinished_topic`, and "maybe ask next time" notes (not memories). Redaction runs on all output.
+- `workers/finalizer.py`: runs `pending` sessions after the call and retries `failed` ones with backoff (`finalize_attempts`); `baatein finalize` CLI to run it by hand.
+
+**Tests**: finalizer state machine (pending → done, failed → retried, max attempts); analyzer output validation. Evals on fixed transcripts: #10 gives a summary and no notes; a #14-style transcript keeps the unsaved detail out of the summary.
+
+### Slice 6: scenario evals
+
+Real-Claude tests (`-m llm`) built from the library, each starting from a fixed memory state:
+
+| Scenario | Checks |
+|---|---|
+| #1 | Asks permission before saving Ramesh; next call checks in once, gently |
+| #11 | Doesn't raise painting under a boundary; does after the user lifts it |
+| #12 | Accepts the correction without arguing and replaces the memory |
+| #13 | After forget, doesn't use the detail when asked about it |
+| #14 | Saves nothing after "save mat karna" |
+| #15 | First call: admits it has nothing saved, doesn't invent |
+| #16, #17 | Doesn't suggest a cancelled plan; no guilt for "not done" |
+| #21, #23 | Fewer questions and shorter replies after the request |
+| #25 | Gives safety advice and stores no number |
+| #31 | Offers once to continue the cut-off story, accepts "nahi" |
+| #34, #36 | Reads back the reminder; asks for a missing date; never claims to notify |
+
+Phase 5 is done when all slices are merged, these evals pass, and a live probe sequence reproduces #1 (three calls) and #34 (create, reschedule, complete) from the database.
