@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from datetime import datetime, tzinfo
+from datetime import date, datetime, time, tzinfo
 from enum import StrEnum
 
 from livekit.agents import RunContext, function_tool, llm
@@ -8,8 +8,10 @@ from baatein.domain.models import (
     BoundaryScope,
     Certainty,
     MemoryKind,
+    OccurrenceStatus,
     Pace,
     Preferences,
+    Repeat,
     Sensitivity,
     ThreadKind,
     ThreadStatus,
@@ -27,6 +29,20 @@ FORGET_REPLIES = {
     ),
     ForgetOutcome.NOT_FOUND: "No saved memory with that id.",
 }
+CANCEL_REPLIES = {
+    ForgetOutcome.DELETED: "Cancelled.",
+    ForgetOutcome.NEEDS_CONFIRMATION: (
+        'Not cancelled yet. Ask the user to confirm, e.g. "Pakka, yeh reminder band kar doon?" '
+        "If they say yes, call cancel_reminder again with the same id."
+    ),
+    ForgetOutcome.NOT_FOUND: "No open reminder with that id.",
+}
+REMINDER_SAVED = (
+    "Saved as [{id}]. You can't alert them at a time, only bring it up when they talk to you. "
+    'Say so, e.g. "Jab hum us din ke aas-paas baat karenge, main yaad dila dungi", never '
+    '"9 baje yaad dila dungi".'
+)
+NEEDS_DATE = "Saved as [{id}], waiting for a date. Ask for it only when they know it."
 FORGET_THREAD_REPLIES = FORGET_REPLIES | {
     ForgetOutcome.NEEDS_CONFIRMATION: FORGET_REPLIES[ForgetOutcome.NEEDS_CONFIRMATION].replace(
         "call forget again", "call forget_thread again"
@@ -44,6 +60,22 @@ def parse_date(value: str | None, tz: tzinfo) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=tz)
+
+
+def parse_day(value: str | None) -> date | None:
+    """`YYYY-MM-DD` → date; None if missing or invalid."""
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def parse_time(value: str | None) -> time | None:
+    """`HH:MM` (24-hour) → time; None if missing or invalid."""
+    try:
+        return time.fromisoformat(value) if value else None
+    except ValueError:
+        return None
 
 
 def user_messages(context: RunContext[None]) -> int:
@@ -287,6 +319,115 @@ def memory_tools(
         return "Noted. Never suggest it again."
 
     @function_tool
+    async def create_reminder(
+        title: str,
+        date: str | None = None,
+        time: str | None = None,
+        repeat: str | None = None,
+        days_before: list[int] | None = None,
+        about: str | None = None,
+        note: str | None = None,
+    ) -> str:
+        """Save a reminder the user asked for, e.g. "Ravi ka birthday 18 November, har saal
+        yaad dilana". First read back the date, time and repeat in simple words and wait for
+        "haan". Never guess a date: if they aren't sure, leave it out.
+
+        Args:
+            title: What to remind them of, in a few English words, e.g. "Ravi's birthday".
+            date: The (first) day of the event as YYYY-MM-DD, resolved from "agle shanivaar",
+                "parson" etc. using today's date.
+            time: When to remind them, as HH:MM (24-hour), e.g. "09:00". Default 09:00.
+            repeat: "once" (default), "weekly", "monthly_date" (same date every month),
+                "monthly_weekday" (e.g. first Sunday of every month), or "yearly".
+            days_before: Days before the event to remind them too, e.g. [7, 0] for a week
+                before and on the day. Default [0].
+            about: Name of the person it is about, e.g. "Ravi".
+            note: Anything else they said, e.g. "Buy a gift".
+        """
+        reminder = await memory.create_reminder(
+            title,
+            on=parse_day(date),
+            at=parse_time(time),
+            repeat=choice(Repeat, repeat, Repeat.ONCE),
+            alert_days_before=tuple(days_before or (0,)),
+            about=about,
+            note=note,
+        )
+        template = REMINDER_SAVED if reminder.on else NEEDS_DATE
+        return template.format(id=reminder.id)
+
+    @function_tool
+    async def update_reminder(
+        reminder_id: str,
+        title: str | None = None,
+        date: str | None = None,
+        time: str | None = None,
+        repeat: str | None = None,
+        days_before: list[int] | None = None,
+        note: str | None = None,
+    ) -> str:
+        """Change a reminder in place, e.g. "somvaar ko phir yaad dilao" or "purani ko hi badal
+        do". Never create a second reminder for the same thing. Read the change back first.
+
+        Args:
+            reminder_id: The id in brackets next to the reminder.
+            title: New title, if it changed.
+            date: New day as YYYY-MM-DD.
+            time: New time as HH:MM (24-hour).
+            repeat: "once", "weekly", "monthly_date", "monthly_weekday" or "yearly".
+            days_before: New list of days before the event to remind them.
+            note: New note.
+        """
+        reminder = await memory.update_reminder(
+            reminder_id,
+            title=title,
+            on=parse_day(date),
+            at=parse_time(time),
+            repeat=choice(Repeat, repeat, None),
+            alert_days_before=tuple(days_before) if days_before else None,
+            note=note,
+        )
+        return "No open reminder with that id." if reminder is None else "Updated."
+
+    async def settle(reminder_id: str, status: OccurrenceStatus, on: str | None) -> str:
+        day = await memory.settle_occurrence(reminder_id, status, parse_day(on))
+        if day is None:
+            return "No open reminder with that id, or no occurrence near today."
+        return f"Marked {status.value} for {day:%a} {day.day} {day:%b %Y}."
+
+    @function_tool
+    async def complete_occurrence(reminder_id: str, date: str | None = None) -> str:
+        """The user has done what this occurrence was about, e.g. "bill bhar diya". Its
+        remaining alerts stop; a repeating reminder continues next time.
+
+        Args:
+            reminder_id: The id in brackets next to the reminder.
+            date: Which occurrence, as YYYY-MM-DD. Default: the one nearest today.
+        """
+        return await settle(reminder_id, OccurrenceStatus.DONE, date)
+
+    @function_tool
+    async def skip_occurrence(reminder_id: str, date: str | None = None) -> str:
+        """Skip one occurrence of a repeating reminder, e.g. "sirf is baar skip kar do". The
+        series continues.
+
+        Args:
+            reminder_id: The id in brackets next to the reminder.
+            date: Which occurrence, as YYYY-MM-DD. Default: the one nearest today.
+        """
+        return await settle(reminder_id, OccurrenceStatus.SKIPPED, date)
+
+    @function_tool
+    async def cancel_reminder(context: RunContext[None], reminder_id: str) -> str:
+        """Stop a reminder for good when the user asks. The first call only asks for
+        confirmation; call it again with the same id after the user confirms.
+
+        Args:
+            reminder_id: The id in brackets next to the reminder.
+        """
+        return CANCEL_REPLIES[await memory.cancel_reminder(reminder_id, user_messages(context))]
+
+    @function_tool
     async def set_preference(
         address_as: str | None = None,
         pace: str | None = None,
@@ -337,6 +478,11 @@ def memory_tools(
         set_boundary,
         lift_boundary,
         note_declined_suggestion,
+        create_reminder,
+        update_reminder,
+        complete_occurrence,
+        skip_occurrence,
+        cancel_reminder,
         set_preference,
         privacy_mode,
     ]

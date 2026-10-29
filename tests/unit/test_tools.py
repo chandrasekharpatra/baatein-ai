@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -6,13 +6,23 @@ from zoneinfo import ZoneInfo
 import pytest
 from livekit.agents import llm
 
-from baatein.agent.tools import PAUSED, choice, memory_tools, parse_date, user_messages
+from baatein.agent.tools import (
+    PAUSED,
+    choice,
+    memory_tools,
+    parse_date,
+    parse_day,
+    parse_time,
+    user_messages,
+)
 from baatein.domain.models import (
     BoundaryScope,
     Certainty,
     MemoryKind,
     Pace,
     Preferences,
+    ReminderStatus,
+    Repeat,
     Sensitivity,
     ThreadKind,
     ThreadStatus,
@@ -80,6 +90,11 @@ async def test_tools_are_named_for_the_llm() -> None:
         "set_boundary",
         "lift_boundary",
         "note_declined_suggestion",
+        "create_reminder",
+        "update_reminder",
+        "complete_occurrence",
+        "skip_occurrence",
+        "cancel_reminder",
         "set_preference",
         "privacy_mode",
     }
@@ -330,3 +345,54 @@ async def test_set_preference_saves_and_applies_right_away() -> None:
     assert world.state.users[world.user.id].preferences == expected
     _, plain = await tools_for(world)
     assert (await plain["set_preference"](address_as="Mohan ji")).startswith("Done.")
+
+
+def test_parse_day_and_time() -> None:
+    assert parse_day("2026-11-18") == date(2026, 11, 18)
+    assert parse_day("18 Nov") is None
+    assert parse_day(None) is None
+    assert parse_time("09:30") == time(9, 30)
+    assert parse_time("9 baje") is None
+    assert parse_time("") is None
+
+
+async def test_reminder_tools_create_update_settle_and_cancel() -> None:
+    world = build_world()
+    _, tools = await tools_for(world)
+
+    saved = await tools["create_reminder"](
+        "Ravi's birthday", "2026-11-18", "09:00", "yearly", [7, 0], "Ravi", "Buy a gift"
+    )
+    waiting = await tools["create_reminder"]("June trip", repeat="sometimes")
+    birthday, trip = world.state.reminders.values()
+
+    assert saved.startswith(f"Saved as [{birthday.id}]. You can't alert them at a time")
+    assert (birthday.on, birthday.repeat, birthday.alert_days_before) == (
+        date(2026, 11, 18),
+        Repeat.YEARLY,
+        (7, 0),
+    )
+    assert (
+        waiting == f"Saved as [{trip.id}], waiting for a date. Ask for it only when they know it."
+    )
+    assert trip.repeat is Repeat.ONCE
+
+    assert await tools["update_reminder"](trip.id, date="2026-06-22", days_before=[1]) == "Updated."
+    assert world.state.reminders[trip.id].alert_days_before == (1,)
+    assert await tools["update_reminder"]("missing") == "No open reminder with that id."
+
+    done = await tools["complete_occurrence"](trip.id)
+    assert done == "Marked done for Mon 22 Jun 2026."
+    assert world.state.reminders[trip.id].status is ReminderStatus.DONE
+    skipped = await tools["skip_occurrence"](birthday.id, "2026-11-18")
+    assert skipped == "Marked skipped for Wed 18 Nov 2026."
+    assert (await tools["skip_occurrence"]("missing")).startswith("No open reminder")
+
+    asked = await tools["cancel_reminder"](run_context(user_messages=1), birthday.id)
+    assert "call cancel_reminder again" in asked
+    assert await tools["cancel_reminder"](run_context(user_messages=2), birthday.id) == (
+        "Cancelled."
+    )
+    assert await tools["cancel_reminder"](run_context(user_messages=3), birthday.id) == (
+        "No open reminder with that id."
+    )

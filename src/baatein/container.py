@@ -9,6 +9,7 @@ from baatein.auth.tokens import JwtAccessTokens
 from baatein.config import Settings
 from baatein.domain.errors import ConfigurationError
 from baatein.memory.embeddings.registry import EmbedderRegistry, default_embedder_registry
+from baatein.memory.seed import Seeder
 from baatein.memory.service import MemoryDeps, MemoryService
 from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
@@ -17,6 +18,7 @@ from baatein.ports.memory import MemoryStore
 from baatein.ports.repos import (
     BoundaryRepo,
     PeopleRepo,
+    ReminderRepo,
     SessionRepo,
     SuggestionRepo,
     ThreadRepo,
@@ -28,6 +30,7 @@ from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
     SqliteBoundaryRepo,
     SqlitePeopleRepo,
+    SqliteReminderRepo,
     SqliteSessionRepo,
     SqliteSuggestionRepo,
     SqliteThreadRepo,
@@ -97,6 +100,11 @@ class StorageModule(Module):
     def suggestions(self, db: Database) -> SuggestionRepo:
         return SqliteSuggestionRepo(db)
 
+    @singleton
+    @provider
+    def reminders(self, db: Database) -> ReminderRepo:
+        return SqliteReminderRepo(db)
+
 
 class MemoryModule(Module):
     @singleton
@@ -123,7 +131,7 @@ class MemoryModule(Module):
 
     @singleton
     @provider
-    def memory_service(
+    def memory_deps(
         self,
         settings: Settings,
         users: UserRepo,
@@ -133,11 +141,11 @@ class MemoryModule(Module):
         threads: ThreadRepo,
         boundaries: BoundaryRepo,
         suggestions: SuggestionRepo,
+        reminders: ReminderRepo,
         store: MemoryStore,
-        embedder: Embedder,
         clock: Clock,
-    ) -> MemoryService:
-        deps = MemoryDeps(
+    ) -> MemoryDeps:
+        return MemoryDeps(
             users,
             sessions,
             turns,
@@ -145,11 +153,21 @@ class MemoryModule(Module):
             threads,
             boundaries,
             suggestions,
+            reminders,
             store,
             clock,
             settings.memory,
         )
+
+    @singleton
+    @provider
+    def memory_service(self, deps: MemoryDeps, embedder: Embedder) -> MemoryService:
         return MemoryService(deps, embedder)
+
+    @singleton
+    @provider
+    def seeder(self, deps: MemoryDeps, personas: PersonaRegistry) -> Seeder:
+        return Seeder(deps, personas)
 
 
 class AuthModule(Module):

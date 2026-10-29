@@ -1,0 +1,707 @@
+{
+  "user": {
+    "email": "ram.mohapatra@example.com",
+    "password": "ram-babu-test-1954",
+    "display_name": "Ram",
+    "language": "hinglish",
+    "timezone": "Asia/Kolkata"
+  },
+  "persona": "elder",
+  "preferences": {
+    "address_as": "Ram Babu",
+    "pace": "slow"
+  },
+  "people": [
+    {
+      "name": "Sabitri",
+      "relation": "wife"
+    },
+    {
+      "name": "Sambit",
+      "relation": "elder son"
+    },
+    {
+      "name": "Megha",
+      "relation": "daughter-in-law, Sambit's wife"
+    },
+    {
+      "name": "Aarav",
+      "relation": "grandson, Sambit's son"
+    },
+    {
+      "name": "Rohan",
+      "relation": "younger son"
+    },
+    {
+      "name": "Lipsa",
+      "relation": "daughter"
+    },
+    {
+      "name": "Ankit",
+      "relation": "son-in-law, Lipsa's husband"
+    },
+    {
+      "name": "Hari",
+      "relation": "elder brother (passed away)"
+    },
+    {
+      "name": "Bijay Das",
+      "relation": "college friend"
+    },
+    {
+      "name": "Prafulla Pattnaik",
+      "relation": "neighbour"
+    }
+  ],
+  "calls": [
+    {
+      "key": "c1",
+      "days_ago": 21,
+      "at": "18:30",
+      "minutes": 14,
+      "summary": "First call. Ram Babu (72) introduced himself: native of Bhubaneswar, retired RSP mechanical engineer. Shared his family: wife Sabitri, elder son Sambit in Austin with Megha and Aarav, younger son Rohan at IIT Kharagpur, daughter Lipsa married to Ankit. Asked to be called Ram Babu and spoken to slowly. Sambit may visit in December.",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Hello? Haan, yeh Baatein hai? Mere bete Rohan ne yeh phone mein lagaya hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Namaste ji! Haan, main Baatein hoon, ek AI saathi. Aapka naam kya hai?"
+        },
+        {
+          "role": "user",
+          "text": "Mera naam Ram Chandra Mohapatra hai. Bahattar saal ka hoon. Bhubaneswar mein rehta hoon, yahin paida hua, Old Town mein, Lingaraj mandir ke paas."
+        },
+        {
+          "role": "assistant",
+          "text": "Aapse milkar accha laga, Ram ji. Lingaraj ke paas bachpan, sundar yaadein hongi."
+        },
+        {
+          "role": "user",
+          "text": "Haan. Lekin naukri poori Rourkela mein ki. Chautees saal Rourkela Steel Plant mein mechanical engineer tha. 2014 mein retire hua, phir apne Bhubaneswar wapas aa gaye."
+        },
+        {
+          "role": "assistant",
+          "text": "Chautees saal, bahut lambi seva hai. Kya main yaad rakhun ki aap RSP mein engineer the?"
+        },
+        {
+          "role": "user",
+          "text": "Haan haan, yaad rakho. Aur yeh bhi ki Bhubaneswar mera janm-sthan hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai, yaad rakh liya."
+        },
+        {
+          "role": "user",
+          "text": "Ghar mein meri patni Sabitri hai, chauvan saal ki. Teen bachche hain. Bada beta Sambit America mein hai, Austin, Texas mein. Software engineer hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Accha. Sambit itni door hain, unki yaad aati hogi."
+        },
+        {
+          "role": "user",
+          "text": "Bahut. Uski patni Megha hai aur ek beta Aarav, paanch saal ka. Chhota beta Rohan IIT Kharagpur mein M.Tech kar raha hai. Aur beti Lipsa ki shaadi ho gayi, woh Noida mein rehti hai, damaad ka naam Ankit hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Bhara-poora parivaar hai. Kya main parivaar ke baare mein yeh sab yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, rakh lo. Aur suno, mujhe Ram ji mat bolo. Sab mujhe Ram Babu bulaate hain."
+        },
+        {
+          "role": "assistant",
+          "text": "Zaroor, Ram Babu."
+        },
+        {
+          "role": "user",
+          "text": "Aur thoda dheere bolna. Tum bahut tez bolti ho."
+        },
+        {
+          "role": "assistant",
+          "text": "Ji, main dheere bolungi."
+        },
+        {
+          "role": "user",
+          "text": "Sambit keh raha tha shayad December mein aayega, sab ke saath."
+        },
+        {
+          "role": "assistant",
+          "text": "Yeh toh khushi ki baat hai. Kya main agli baar is baare mein poochhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, poochhna."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai, Ram Babu. Aapse baat karke accha laga."
+        }
+      ]
+    },
+    {
+      "key": "c2",
+      "days_ago": 14,
+      "at": "19:00",
+      "minutes": 18,
+      "summary": "Ram Babu remembered his late elder brother Hari and their childhood cycle trip to the Puri Rath Yatra; saved as a story with Hari's words. Shared that he has diabetes and loves rasagola. Has right knee pain and started physiotherapy; agreed to occasional check-ins. Asked not to bring up one family matter.",
+      "turns": [
+        {
+          "role": "assistant",
+          "text": "Namaste, Ram Babu. Aaj kaisa din raha?"
+        },
+        {
+          "role": "user",
+          "text": "Namaskar. Aaj subah se Hari bhai ki bahut yaad aa rahi hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Hari ji ke baare mein bataiye, main sun rahi hoon."
+        },
+        {
+          "role": "user",
+          "text": "Woh mere bade bhai the. Jab main das saal ka tha, hum dono chupke se cycle chalakar Puri gaye the, Rath Yatra dekhne. Saath kilometre! Ghar aaye toh Bapa ne bahut daanta."
+        },
+        {
+          "role": "assistant",
+          "text": "Saath kilometre cycle se. Kya himmat thi aap dono ki."
+        },
+        {
+          "role": "user",
+          "text": "Hari bhai kehte the, Jagannath bulaate hain toh raasta khud chhota ho jaata hai. Pichhle saal March mein woh chale gaye."
+        },
+        {
+          "role": "assistant",
+          "text": "Mujhe bahut afsos hai, Ram Babu. Yeh yaad bahut keemti hai. Kya main yeh kahani yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, rakho. Unki baat bhi. Aur yeh bhi ki woh ab nahi rahe."
+        },
+        {
+          "role": "assistant",
+          "text": "Rakh li, aapke shabdon mein."
+        },
+        {
+          "role": "user",
+          "text": "Ek aur baat. Mujhe sugar hai. Doctor ne meetha mana kiya hai, lekin rasagola dekh ke mann nahi maanta."
+        },
+        {
+          "role": "assistant",
+          "text": "Rasagola ke saamne mann maanna mushkil hai. Kya main yaad rakhun ki aapko sugar hai?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, theek hai."
+        },
+        {
+          "role": "user",
+          "text": "Aur daayein ghutne mein dard rehta hai. Physiotherapy shuru ki hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Dhyan rakhiye. Kya main kabhi kabhi physiotherapy ke baare mein poochh sakti hoon?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, kabhi kabhi."
+        },
+        {
+          "role": "user",
+          "text": "Mera chhota bhai Laxman hai, Cuttack mein. Gaon ki zameen ko lekar uske saath jhagda chal raha hai. Usne bina bataaye aadha hissa bech diya."
+        },
+        {
+          "role": "assistant",
+          "text": "Yeh sunkar dukh hua. Yeh aapke liye bhaari baat hogi."
+        },
+        {
+          "role": "user",
+          "text": "Haan. Lekin yeh baat save mat karna. Aur aage se Laxman ki zameen wali baat mat chhedna."
+        },
+        {
+          "role": "assistant",
+          "text": "Bilkul, Ram Babu. Main yeh save nahi karungi, aur khud se yeh baat nahi uthaungi."
+        }
+      ]
+    },
+    {
+      "key": "c3",
+      "days_ago": 7,
+      "at": "18:45",
+      "minutes": 22,
+      "summary": "Ram Babu called his old friend Bijay Das after ten years. Plays chess with neighbour Prafulla every evening. Sambit confirmed the visit, 18 Dec to 5 Jan; tickets not booked. Corrected: Lipsa lives in Dwarka, Delhi, not Noida. Lipsa is expecting in January; godh bharai date not fixed. Wants to write about his Rourkela years. Didn't like the laughter yoga suggestion.",
+      "turns": [
+        {
+          "role": "assistant",
+          "text": "Namaste, Ram Babu! Kaise hain aap?"
+        },
+        {
+          "role": "user",
+          "text": "Accha hoon. Pata hai, kal maine Bijay ko phone kiya! Bijay Das, Ravenshaw College ka mera dost, ab Berhampur mein rehta hai. Das saal baad baat hui, ek ghanta baat ki."
+        },
+        {
+          "role": "assistant",
+          "text": "Arre wah! Das saal baad, kitni khushi hui hogi. Kya main yeh yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, zaroor. Aur Bijay ke baare mein bhi yaad rakhna, woh mera sabse purana dost hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Rakh liya."
+        },
+        {
+          "role": "user",
+          "text": "Shaam ko main padosi Prafulla Pattnaik ke saath chess khelta hoon, roz. Woh hamesha haar jaata hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Roz ki baazi! Aap toh champion lagte hain."
+        },
+        {
+          "role": "user",
+          "text": "Haan haan. Yeh bhi yaad rakh lo."
+        },
+        {
+          "role": "assistant",
+          "text": "Ji. Ram Babu, Sambit ke December aane ki baat thi. Kuch tay hua?"
+        },
+        {
+          "role": "user",
+          "text": "Haan! Sambit ne bataya, attharah December se paanch January tak aayenge. Ticket abhi book nahi hua. Main Aarav ko Nandankanan le jaunga, sher dikhane."
+        },
+        {
+          "role": "assistant",
+          "text": "Bahut acchi khabar hai. Aarav ko bahut maza aayega."
+        },
+        {
+          "role": "user",
+          "text": "Ek galti hai. Lipsa Noida mein nahi, Dwarka, Delhi mein rehti hai. Maine pichhli baar galat bola tha."
+        },
+        {
+          "role": "assistant",
+          "text": "Maaf kijiye, maine theek kar diya. Lipsa Dwarka, Delhi mein rehti hain."
+        },
+        {
+          "role": "user",
+          "text": "Aur khushkhabri hai. Lipsa maa banne wali hai, January mein. Pehla bachcha hai uska."
+        },
+        {
+          "role": "assistant",
+          "text": "Bahut bahut badhaai ho, Ram Babu! Kya main yeh yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan. Aur godh bharai ka function hoga, tareekh abhi pakki nahi hai. Yaad dila dena."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai. Jab tareekh pakki ho, mujhe bata dijiye. Tab tak bina tareekh ke rakh liya."
+        },
+        {
+          "role": "user",
+          "text": "Aangan mein aam ka ped hai. Sambit ke paida hone par lagaya tha, shayad 1997 mein. Pakka yaad nahi."
+        },
+        {
+          "role": "assistant",
+          "text": "Kitni pyaari yaad hai. Kya main yeh rakh loon, saal pakka nahi hai, yeh bhi likh ke?"
+        },
+        {
+          "role": "user",
+          "text": "Haan."
+        },
+        {
+          "role": "assistant",
+          "text": "Aap subah park mein laughter yoga club join kar sakte hain. Wahan log saath mein..."
+        },
+        {
+          "role": "user",
+          "text": "Nahi nahi, mujhe woh hasne wala club pasand nahi. Zabardasti hasna mujhe accha nahi lagta."
+        },
+        {
+          "role": "assistant",
+          "text": "Maaf kijiye, Ram Babu. Main aage se yeh nahi kahungi."
+        },
+        {
+          "role": "user",
+          "text": "Ek kaam karna chahta hoon. Rourkela ke dinon ki yaadein likhna chahta hoon, bachchon ke liye. 1980 mein join kiya tha, wahan se shuru karunga."
+        },
+        {
+          "role": "assistant",
+          "text": "Yeh bahut sundar vichaar hai. Kya main kuch din baad poochhun ki likhna shuru hua?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, das din baad poochh lena."
+        }
+      ]
+    },
+    {
+      "key": "c4",
+      "days_ago": 2,
+      "at": "19:30",
+      "minutes": 17,
+      "summary": "Ram Babu was cheerful: Akshaya Mohanty songs on the radio, pakhala with machha bhaja for dinner. Aarav calls him Aja. Worried Rohan wants a PhD abroad; asked not to be asked about it often. Knee better with physio. Asked for reminders: Sambit's birthday (yearly), the AIIMS knee checkup and the Sunday video call with Sambit. Wants to teach Aarav chess in December.",
+      "turns": [
+        {
+          "role": "assistant",
+          "text": "Namaste, Ram Babu. Aaj kaisa raha din?"
+        },
+        {
+          "role": "user",
+          "text": "Accha tha. Radio pe Akshaya Mohanty ke gaane aa rahe the. Unke gaane sunke jawani yaad aa jaati hai."
+        },
+        {
+          "role": "assistant",
+          "text": "Akshaya Mohanty ki aawaz mein jaadu hai."
+        },
+        {
+          "role": "user",
+          "text": "Aur aaj Sabitri ne pakhala bhata banaya, saath mein badi aur machha bhaja. Dalma bhi mujhe bahut pasand hai. Yeh sab yaad rakhna, gaane bhi."
+        },
+        {
+          "role": "assistant",
+          "text": "Wah! Yaad rakh liya, Ram Babu."
+        },
+        {
+          "role": "user",
+          "text": "Kal Aarav se video call hui. Woh mujhe Aja bolta hai, Odia mein. American accent mein, Ajaaa!"
+        },
+        {
+          "role": "assistant",
+          "text": "Kitna pyaara! Kya yeh pal yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan."
+        },
+        {
+          "role": "user",
+          "text": "Ek chinta hai. Rohan bol raha hai PhD ke liye bahar jaana chahta hai, Germany ya America. Dono bete door chale jayenge."
+        },
+        {
+          "role": "assistant",
+          "text": "Yeh chinta samajh aati hai, Ram Babu. Kya main yeh yaad rakhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, rakh lo. Par baar baar mat poochhna."
+        },
+        {
+          "role": "assistant",
+          "text": "Ji, nahi poochhungi."
+        },
+        {
+          "role": "user",
+          "text": "2022 mein main aur Sabitri Austin gaye the. Wahan thand bahut thi, aur dalma kahin nahi milta! Lekin Houston mein NASA dekha, woh bahut accha laga. Engineer hoon na. Yeh bhi likh lo."
+        },
+        {
+          "role": "assistant",
+          "text": "NASA dekhna toh ek engineer ke liye sapna hai. Likh liya."
+        },
+        {
+          "role": "user",
+          "text": "Aur football! Main 1975 se Mohun Bagan ka supporter hoon. Cricket mujhe bore karta hai. Yeh bhi yaad rakhna."
+        },
+        {
+          "role": "assistant",
+          "text": "Mohun Bagan ke pakke fan! Yaad rakh liya."
+        },
+        {
+          "role": "user",
+          "text": "Ghutna ab thoda behtar hai, physio se. Teen din baad AIIMS mein checkup hai... nahi, paanch din baad. Saade das baje. Ek din pehle yaad dila dena."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai: AIIMS checkup paanch din baad, saade das baje. Jab hum ek din pehle baat karenge, main yaad dila dungi. Sahi hai?"
+        },
+        {
+          "role": "user",
+          "text": "Haan."
+        },
+        {
+          "role": "user",
+          "text": "Aur chaar din baad Sambit ka janamdin hai. Har saal yaad dilana. Teen din pehle bhi, gift bhejna hota hai, aur us din bhi."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai: Sambit ka janamdin har saal, teen din pehle aur us din. Sahi?"
+        },
+        {
+          "role": "user",
+          "text": "Haan. Aur har Sunday raat aath baje Sambit se video call hoti hai. Woh bhi yaad dila diya karo."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai, har Sunday raat aath baje."
+        },
+        {
+          "role": "user",
+          "text": "Jab Aarav aayega toh usko chess sikhaunga."
+        },
+        {
+          "role": "assistant",
+          "text": "Kya baat hai! Kya main baad mein yeh poochhun?"
+        },
+        {
+          "role": "user",
+          "text": "Haan, jab woh aaye tab."
+        },
+        {
+          "role": "assistant",
+          "text": "Theek hai, Ram Babu. Shubh raatri."
+        }
+      ]
+    }
+  ],
+  "memories": [
+    {
+      "text": "Bhubaneswar is his native place; he was born and raised in Old Town, near the Lingaraj temple",
+      "importance": 5,
+      "call": "c1"
+    },
+    {
+      "text": "Worked 34 years as a mechanical engineer at Rourkela Steel Plant (RSP), retired in 2014 and moved back to Bhubaneswar",
+      "importance": 4,
+      "call": "c1"
+    },
+    {
+      "text": "Wife Sabitri is 54",
+      "about": "Sabitri",
+      "importance": 5,
+      "call": "c1"
+    },
+    {
+      "text": "Elder son Sambit is a software engineer in Austin, Texas, USA, with wife Megha and son Aarav (5)",
+      "about": "Sambit",
+      "importance": 5,
+      "call": "c1"
+    },
+    {
+      "text": "Younger son Rohan is doing an M.Tech at IIT Kharagpur",
+      "about": "Rohan",
+      "importance": 5,
+      "call": "c1"
+    },
+    {
+      "key": "lipsa_noida",
+      "text": "Daughter Lipsa is married to Ankit and lives in Noida",
+      "about": "Lipsa",
+      "importance": 5,
+      "call": "c1"
+    },
+    {
+      "text": "As boys, he and elder brother Hari secretly cycled 60 km to Puri to see the Rath Yatra; their father scolded them",
+      "kind": "story",
+      "quote": "Jagannath bulaate hain toh raasta khud chhota ho jaata hai",
+      "about": "Hari",
+      "importance": 3,
+      "call": "c2"
+    },
+    {
+      "text": "Elder brother Hari passed away in March 2025",
+      "about": "Hari",
+      "sensitivity": "grief",
+      "importance": 3,
+      "call": "c2"
+    },
+    {
+      "text": "Has diabetes; the doctor told him to avoid sweets, though he loves rasagola",
+      "sensitivity": "health",
+      "importance": 4,
+      "call": "c2"
+    },
+    {
+      "text": "Bijay Das, his oldest friend from Ravenshaw College, lives in Berhampur",
+      "about": "Bijay Das",
+      "importance": 3,
+      "call": "c3"
+    },
+    {
+      "text": "Called Bijay after ten years and they talked for an hour",
+      "kind": "moment",
+      "about": "Bijay Das",
+      "importance": 3,
+      "call": "c3"
+    },
+    {
+      "text": "Plays chess every evening with neighbour Prafulla Pattnaik, who usually loses",
+      "about": "Prafulla Pattnaik",
+      "importance": 3,
+      "call": "c3"
+    },
+    {
+      "corrects": "lipsa_noida",
+      "text": "Daughter Lipsa is married to Ankit and lives in Dwarka, Delhi",
+      "about": "Lipsa",
+      "importance": 5,
+      "call": "c3"
+    },
+    {
+      "text": "Daughter Lipsa is expecting her first baby in January",
+      "kind": "moment",
+      "about": "Lipsa",
+      "importance": 4,
+      "call": "c3"
+    },
+    {
+      "text": "The mango tree in the courtyard was planted when Sambit was born, maybe in 1997",
+      "kind": "story",
+      "about": "Sambit",
+      "importance": 2,
+      "call": "c3",
+      "uncertain": true
+    },
+    {
+      "text": "Loves Akshaya Mohanty's Odia songs on the radio; they remind him of his youth",
+      "kind": "preference",
+      "importance": 4,
+      "call": "c4"
+    },
+    {
+      "text": "Favourite food is pakhala bhata with badi and machha bhaja (fried fish); also loves dalma",
+      "kind": "preference",
+      "importance": 3,
+      "call": "c4"
+    },
+    {
+      "text": "Grandson Aarav calls him 'Aja' (Odia for grandfather) on video calls, in an American accent",
+      "kind": "moment",
+      "quote": "Ajaaa!",
+      "about": "Aarav",
+      "importance": 4,
+      "call": "c4"
+    },
+    {
+      "text": "Worried that Rohan wants to go abroad (Germany or USA) for a PhD and both sons will be far away; doesn't want to be asked about it often",
+      "about": "Rohan",
+      "sensitivity": "personal",
+      "importance": 3,
+      "call": "c4"
+    },
+    {
+      "text": "Visited Sambit in Austin with Sabitri in 2022; found it cold and missed dalma, but loved seeing NASA in Houston",
+      "importance": 3,
+      "call": "c4"
+    },
+    {
+      "text": "Mohun Bagan football supporter since 1975; finds cricket boring",
+      "kind": "preference",
+      "importance": 2,
+      "call": "c4"
+    }
+  ],
+  "threads": [
+    {
+      "title": "Sambit, Megha and Aarav visiting from Austin in December",
+      "kind": "plan",
+      "status": "in_progress",
+      "next_step": "Ask whether the tickets are booked; Ram wants to take Aarav to Nandankanan zoo",
+      "last_offered_days_ago": 7,
+      "about": "Sambit",
+      "call": "c1",
+      "check_in_after": "today-3",
+      "events": [
+        {
+          "call": "c1",
+          "text": "Sambit said they might come in December",
+          "status": "open"
+        },
+        {
+          "call": "c3",
+          "text": "Sambit confirmed 18 Dec to 5 Jan; tickets not booked yet",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "title": "Write down memories of the Rourkela Steel Plant years for the children",
+      "kind": "aspiration",
+      "next_step": "Start with joining RSP in 1980",
+      "call": "c3",
+      "check_in_after": "today+3"
+    },
+    {
+      "title": "Right knee pain and physiotherapy",
+      "kind": "worry",
+      "status": "in_progress",
+      "next_step": "AIIMS checkup",
+      "sensitivity": "health",
+      "call": "c2",
+      "events": [
+        {
+          "call": "c2",
+          "text": "Started physiotherapy for right knee pain",
+          "status": "in_progress"
+        },
+        {
+          "call": "c4",
+          "text": "Knee a little better with physio"
+        }
+      ]
+    },
+    {
+      "title": "Teach grandson Aarav to play chess during the December visit",
+      "kind": "intention",
+      "about": "Aarav",
+      "call": "c4",
+      "check_in_after": "today+49"
+    }
+  ],
+  "boundaries": [
+    {
+      "topic": "Laxman aur gaon ki zameen ka jhagda",
+      "scope": "until_reopened",
+      "call": "c2"
+    }
+  ],
+  "declined_suggestions": [
+    {
+      "call": "c3",
+      "text": "Joining a laughter yoga club in the park"
+    }
+  ],
+  "reminders": [
+    {
+      "title": "Sambit's birthday",
+      "repeat": "yearly",
+      "about": "Sambit",
+      "note": "send him a gift",
+      "call": "c4",
+      "date": "today+2",
+      "time": "09:00",
+      "days_before": [
+        3,
+        0
+      ]
+    },
+    {
+      "title": "Knee checkup at AIIMS Bhubaneswar",
+      "call": "c4",
+      "date": "today+3",
+      "time": "10:30",
+      "days_before": [
+        1
+      ]
+    },
+    {
+      "title": "Video call with Sambit",
+      "repeat": "weekly",
+      "about": "Sambit",
+      "call": "c4",
+      "date": "next sunday",
+      "time": "20:00"
+    },
+    {
+      "title": "Lipsa's godh bharai",
+      "about": "Lipsa",
+      "note": "date not fixed yet",
+      "call": "c3"
+    }
+  ]
+}

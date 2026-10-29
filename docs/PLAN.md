@@ -12,13 +12,15 @@ Slice 2 is built (2026-10-29): follow-ups became storylines (threads) with event
 
 Slice 3 is built (2026-10-30): a per-user persona (casual or elder, chosen at signup) and preferences set by voice (pace, verbosity, fewer questions, how to be addressed) that apply immediately and in later calls.
 
-**Not yet:** nothing turns a finished call into a summary (so the last call's summary is empty), reminders, and scenario evals (slices 4–6).
+Slice 4 is built (2026-10-30): reminders with repeat rules and "remind me N days before", brought up in the next conversation only, never promised as notifications.
+
+**Not yet:** nothing turns a finished call into a summary (so the last call's summary is empty), and scenario evals (slices 5–6).
 
 **Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
 1. Memory structure, consent-only saving, correct and forget ✅
 2. Threads, boundaries and the call-start context ✅
 3. Persona and preferences ✅
-4. Reminders (delivered in conversation only)
+4. Reminders (delivered in conversation only) ✅
 5. End-of-call summary and retry
 6. Scenario evals
 

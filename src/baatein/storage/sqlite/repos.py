@@ -1,5 +1,6 @@
+import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 
 import aiosqlite
 
@@ -14,9 +15,13 @@ from baatein.domain.models import (
     BoundaryScope,
     DeclinedSuggestion,
     FinalizeStatus,
+    OccurrenceStatus,
     Pace,
     Person,
     Preferences,
+    Reminder,
+    ReminderStatus,
+    Repeat,
     Role,
     Sensitivity,
     Session,
@@ -105,6 +110,13 @@ class SqliteUserRepo:
                 "UPDATE users SET address_as = ?, pace = ?, verbosity = ?, fewer_questions = ?"
                 " WHERE id = ?",
                 (*_preference_values(preferences), user_id),
+            )
+            ensure_changed(cursor, "user", user_id)
+
+    async def set_persona(self, user_id: str, persona: str) -> None:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE users SET persona = ? WHERE id = ?", (persona, user_id)
             )
             ensure_changed(cursor, "user", user_id)
 
@@ -569,6 +581,123 @@ class SqliteSuggestionRepo:
         return [_suggestion(row) for row in rows]
 
 
+class SqliteReminderRepo:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, reminder: Reminder) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO reminders (id, user_id, title, event_date, local_time, repeat,"
+                    " alert_days_before, status, note, about_person_id, source_session_id,"
+                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        reminder.id,
+                        reminder.user_id,
+                        *_reminder_values(reminder),
+                        reminder.source_session_id,
+                        to_db(reminder.created_at),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("user, person or session", reminder.user_id) from exc
+            raise
+
+    async def get(self, reminder_id: str) -> Reminder | None:
+        reminders = await self._many("SELECT * FROM reminders WHERE id = ?", (reminder_id,))
+        return reminders[0] if reminders else None
+
+    async def update(self, reminder: Reminder) -> None:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE reminders SET title = ?, event_date = ?, local_time = ?, repeat = ?,"
+                " alert_days_before = ?, status = ?, note = ?, about_person_id = ? WHERE id = ?",
+                (*_reminder_values(reminder), reminder.id),
+            )
+            ensure_changed(cursor, "reminder", reminder.id)
+
+    async def list_open(self, user_id: str, limit: int) -> list[Reminder]:
+        return await self._many(
+            "SELECT * FROM reminders WHERE user_id = ? AND status IN ('needs_info', 'active')"
+            " ORDER BY created_at, id LIMIT ?",
+            (user_id, limit),
+        )
+
+    async def count_about(self, person_id: str) -> int:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT count(*) FROM reminders WHERE about_person_id = ?", (person_id,)
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def settle(
+        self, reminder_id: str, on: date, status: OccurrenceStatus, at: datetime
+    ) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO reminder_occurrences (reminder_id, occurs_on, status, updated_at)"
+                    " VALUES (?, ?, ?, ?) ON CONFLICT (reminder_id, occurs_on)"
+                    " DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at",
+                    (reminder_id, on.isoformat(), status.value, to_db(at)),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("reminder", reminder_id) from exc
+            raise
+
+    async def settled(self, reminder_id: str) -> dict[date, OccurrenceStatus]:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT occurs_on, status FROM reminder_occurrences WHERE reminder_id = ?",
+                (reminder_id,),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        return {date.fromisoformat(row[0]): OccurrenceStatus(row[1]) for row in rows}
+
+    async def _many(self, sql: str, params: tuple[object, ...]) -> list[Reminder]:
+        async with self._db.read() as conn, conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [_reminder(row) for row in rows]
+
+
+def _reminder_values(reminder: Reminder) -> tuple[object, ...]:
+    return (
+        reminder.title,
+        reminder.on.isoformat() if reminder.on else None,
+        reminder.at.strftime("%H:%M"),
+        reminder.repeat.value,
+        json.dumps(list(reminder.alert_days_before)),
+        reminder.status.value,
+        reminder.note,
+        reminder.about_person_id,
+    )
+
+
+def _reminder(row: aiosqlite.Row) -> Reminder:
+    return Reminder(
+        id=row["id"],
+        user_id=row["user_id"],
+        title=row["title"],
+        created_at=required(row["created_at"]),
+        on=date.fromisoformat(row["event_date"]) if row["event_date"] else None,
+        at=time.fromisoformat(row["local_time"]),
+        repeat=Repeat(row["repeat"]),
+        alert_days_before=tuple(json.loads(row["alert_days_before"])),
+        status=ReminderStatus(row["status"]),
+        note=row["note"],
+        about_person_id=row["about_person_id"],
+        source_session_id=row["source_session_id"],
+    )
+
+
 def _thread(row: aiosqlite.Row) -> Thread:
     return Thread(
         id=row["id"],
@@ -620,6 +749,13 @@ def _suggestion(row: aiosqlite.Row) -> DeclinedSuggestion:
         created_at=required(row["created_at"]),
         session_id=row["session_id"],
     )
+
+
+async def delete_user(db: Database, email: str) -> bool:
+    """Remove a user and everything they own; rows cascade and triggers clean the indexes."""
+    async with db.transaction() as conn:
+        cursor = await conn.execute("DELETE FROM users WHERE email = ?", (email.strip().lower(),))
+        return cursor.rowcount > 0
 
 
 def _person(row: aiosqlite.Row) -> Person:

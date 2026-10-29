@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from baatein.domain.models import DeclinedSuggestion, Person, ThreadEvent
+from baatein.domain.models import DeclinedSuggestion, OccurrenceStatus, Person, ThreadEvent
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import (
     SqliteBoundaryRepo,
     SqlitePeopleRepo,
+    SqliteReminderRepo,
     SqliteSessionRepo,
     SqliteSuggestionRepo,
     SqliteThreadRepo,
@@ -21,7 +22,15 @@ from baatein.storage.sqlite.repos import (
     fts_query,
     to_db,
 )
-from tests.factories import T0, make_boundary, make_session, make_thread, make_turn, make_user
+from tests.factories import (
+    T0,
+    make_boundary,
+    make_reminder,
+    make_session,
+    make_thread,
+    make_turn,
+    make_user,
+)
 
 
 @pytest.fixture
@@ -160,6 +169,9 @@ async def test_unexpected_integrity_errors_propagate(db: Database) -> None:
     await SqliteBoundaryRepo(db).add(boundary)
     suggestion = DeclinedSuggestion("s", user_id, "walk", T0)
     await SqliteSuggestionRepo(db).add(suggestion)
+    reminder = make_reminder(user_id)
+    reminders = SqliteReminderRepo(db)
+    await reminders.add(reminder)
     assert user is not None
     assert session is not None
 
@@ -175,6 +187,15 @@ async def test_unexpected_integrity_errors_propagate(db: Database) -> None:
         await SqliteBoundaryRepo(db).add(boundary)
     with pytest.raises(sqlite3.IntegrityError):
         await SqliteSuggestionRepo(db).add(suggestion)
+    with pytest.raises(sqlite3.IntegrityError):
+        await reminders.add(reminder)
+    async with db.transaction() as conn:
+        await conn.execute(
+            "CREATE TRIGGER reject_occurrences BEFORE INSERT ON reminder_occurrences BEGIN"
+            " SELECT RAISE(ABORT, 'rejected by test'); END"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="rejected by test"):
+        await reminders.settle(reminder.id, T0.date(), OccurrenceStatus.DONE, T0)
     async with db.transaction() as conn:
         await conn.execute(
             "CREATE TRIGGER reject_turns BEFORE INSERT ON turns BEGIN"

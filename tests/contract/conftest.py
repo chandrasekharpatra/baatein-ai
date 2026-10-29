@@ -7,6 +7,7 @@ import pytest
 from baatein.ports.repos import (
     BoundaryRepo,
     PeopleRepo,
+    ReminderRepo,
     SessionRepo,
     SuggestionRepo,
     ThreadRepo,
@@ -18,6 +19,7 @@ from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import (
     SqliteBoundaryRepo,
     SqlitePeopleRepo,
+    SqliteReminderRepo,
     SqliteSessionRepo,
     SqliteSuggestionRepo,
     SqliteThreadRepo,
@@ -27,6 +29,7 @@ from baatein.storage.sqlite.repos import (
 from tests.fakes.repos import (
     InMemoryBoundaryRepo,
     InMemoryPeopleRepo,
+    InMemoryReminderRepo,
     InMemorySessionRepo,
     InMemoryState,
     InMemorySuggestionRepo,
@@ -45,6 +48,7 @@ class Repos:
     threads: ThreadRepo
     boundaries: BoundaryRepo
     suggestions: SuggestionRepo
+    reminders: ReminderRepo
 
 
 @pytest.fixture(params=["sqlite", "memory"])
@@ -59,6 +63,7 @@ async def repos(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator
             InMemoryThreadRepo(state),
             InMemoryBoundaryRepo(state),
             InMemorySuggestionRepo(state),
+            InMemoryReminderRepo(state),
         )
         return
 
@@ -73,5 +78,6 @@ async def repos(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator
         SqliteThreadRepo(db),
         SqliteBoundaryRepo(db),
         SqliteSuggestionRepo(db),
+        SqliteReminderRepo(db),
     )
     await db.close()

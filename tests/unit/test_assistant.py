@@ -66,6 +66,11 @@ async def test_assistant_with_memory_exposes_memory_tools() -> None:
         "set_boundary",
         "lift_boundary",
         "note_declined_suggestion",
+        "create_reminder",
+        "update_reminder",
+        "complete_occurrence",
+        "skip_occurrence",
+        "cancel_reminder",
         "set_preference",
         "privacy_mode",
     }

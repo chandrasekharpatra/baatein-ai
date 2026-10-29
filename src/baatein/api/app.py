@@ -10,6 +10,7 @@ from injector import Injector
 from pydantic import BaseModel, EmailStr, Field
 
 from baatein.auth.service import AuthService
+from baatein.config import Settings
 from baatein.domain.errors import (
     DuplicateEmailError,
     InvalidCredentialsError,
@@ -17,6 +18,7 @@ from baatein.domain.errors import (
     WeakPasswordError,
 )
 from baatein.domain.models import User
+from baatein.memory.seed import Seeder, SeedError, SeedFile, SeedResult
 from baatein.ports.auth import CallTokenIssuer
 from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import UnknownLanguageError
@@ -73,6 +75,7 @@ ERROR_STATUS: dict[type[Exception], int] = {
     WeakPasswordError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     UnknownLanguageError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     UnknownPersonaError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SeedError: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 bearer = HTTPBearer(auto_error=False)
@@ -150,7 +153,23 @@ def create_app(injector: Injector) -> FastAPI:
             room_name=grant.room_name,
         )
 
+    if injector.get(Settings).dev.seed_enabled:
+        add_dev_routes(app, injector)
+
     return app
+
+
+def add_dev_routes(app: FastAPI, injector: Injector) -> None:
+    """Development-only routes, registered only when BAATEIN_DEV__SEED_ENABLED=true."""
+
+    @app.get("/dev/seed")
+    async def seed_status() -> dict[str, bool]:
+        return {"enabled": True}
+
+    @app.post("/dev/seed")
+    async def seed(body: SeedFile, user: CurrentUser) -> SeedResult:
+        """Add artificial memories, storylines, reminders and past calls to your account."""
+        return await injector.get(Seeder).load(user, body)
 
 
 def _error_handler(code: int) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:

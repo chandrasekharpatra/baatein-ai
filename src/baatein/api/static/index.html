@@ -98,6 +98,11 @@
     <button id="logout" class="secondary" type="button">Log out</button>
     <div class="error" id="call-error" role="alert"></div>
     <div class="transcript" id="transcript" aria-live="polite"></div>
+    <div id="seed" hidden>
+      <label for="seed-file">Load test memories (dev only)</label>
+      <input id="seed-file" type="file" accept="application/json,.json">
+      <div class="detail" id="seed-result"></div>
+    </div>
   </section>
 </main>
 
@@ -133,7 +138,21 @@
   function show(signedIn) {
     $("auth").hidden = signedIn;
     $("call").hidden = !signedIn;
+    if (signedIn) request("/dev/seed").then(() => { $("seed").hidden = false; }, () => {});
   }
+
+  $("seed-file").onchange = async (event) => {
+    const [file] = event.target.files;
+    if (!file) return;
+    $("seed-result").textContent = "Loading…";
+    try {
+      const counts = await request("/dev/seed", JSON.parse(await file.text()), storedToken());
+      $("seed-result").textContent = "Added " + Object.entries(counts).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
+    } catch (error) {
+      $("seed-result").textContent = `Seed failed: ${error.message}`;
+    }
+    event.target.value = "";
+  };
 
   function detail(text) { $("detail").textContent = text; }
 

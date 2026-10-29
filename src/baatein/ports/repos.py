@@ -1,11 +1,13 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
 from baatein.domain.models import (
     Boundary,
     DeclinedSuggestion,
+    OccurrenceStatus,
     Person,
     Preferences,
+    Reminder,
     Session,
     Thread,
     ThreadEvent,
@@ -19,6 +21,7 @@ class UserRepo(Protocol):
     async def get(self, user_id: str) -> User | None: ...
     async def get_by_email(self, email: str) -> User | None: ...
     async def set_preferences(self, user_id: str, preferences: Preferences) -> None: ...
+    async def set_persona(self, user_id: str, persona: str) -> None: ...
 
 
 class SessionRepo(Protocol):
@@ -95,3 +98,21 @@ class SuggestionRepo(Protocol):
     async def list_for_user(self, user_id: str, limit: int) -> list[DeclinedSuggestion]:
         """Newest first."""
         ...
+
+
+class ReminderRepo(Protocol):
+    async def add(self, reminder: Reminder) -> None: ...
+    async def get(self, reminder_id: str) -> Reminder | None: ...
+    async def update(self, reminder: Reminder) -> None: ...
+    async def list_open(self, user_id: str, limit: int) -> list[Reminder]:
+        """Active and needs-info reminders, oldest first."""
+        ...
+
+    async def count_about(self, person_id: str) -> int: ...
+    async def settle(
+        self, reminder_id: str, on: date, status: OccurrenceStatus, at: datetime
+    ) -> None:
+        """Mark one occurrence done or skipped (replacing an earlier mark)."""
+        ...
+
+    async def settled(self, reminder_id: str) -> dict[date, OccurrenceStatus]: ...

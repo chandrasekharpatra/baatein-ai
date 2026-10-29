@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime
 
 from baatein.domain.errors import (
     DuplicateEmailError,
@@ -11,8 +11,10 @@ from baatein.domain.models import (
     Boundary,
     DeclinedSuggestion,
     FinalizeStatus,
+    OccurrenceStatus,
     Person,
     Preferences,
+    Reminder,
     Session,
     Thread,
     ThreadEvent,
@@ -32,6 +34,8 @@ class InMemoryState:
     thread_events: list[ThreadEvent] = field(default_factory=list)
     boundaries: dict[str, Boundary] = field(default_factory=dict)
     suggestions: list[DeclinedSuggestion] = field(default_factory=list)
+    reminders: dict[str, Reminder] = field(default_factory=dict)
+    occurrences: dict[tuple[str, date], OccurrenceStatus] = field(default_factory=dict)
 
 
 class InMemoryUserRepo:
@@ -55,6 +59,11 @@ class InMemoryUserRepo:
         if user_id not in self._state.users:
             raise NotFoundError("user", user_id)
         self._state.users[user_id] = replace(self._state.users[user_id], preferences=preferences)
+
+    async def set_persona(self, user_id: str, persona: str) -> None:
+        if user_id not in self._state.users:
+            raise NotFoundError("user", user_id)
+        self._state.users[user_id] = replace(self._state.users[user_id], persona=persona)
 
 
 class InMemorySessionRepo:
@@ -288,3 +297,38 @@ class InMemorySuggestionRepo:
         found = [s for s in self._state.suggestions if s.user_id == user_id]
         found.sort(key=lambda s: (s.created_at, s.id), reverse=True)
         return found[:limit]
+
+
+class InMemoryReminderRepo:
+    def __init__(self, state: InMemoryState) -> None:
+        self._state = state
+
+    async def add(self, reminder: Reminder) -> None:
+        if reminder.user_id not in self._state.users:
+            raise NotFoundError("user, person or session", reminder.user_id)
+        self._state.reminders[reminder.id] = reminder
+
+    async def get(self, reminder_id: str) -> Reminder | None:
+        return self._state.reminders.get(reminder_id)
+
+    async def update(self, reminder: Reminder) -> None:
+        if reminder.id not in self._state.reminders:
+            raise NotFoundError("reminder", reminder.id)
+        self._state.reminders[reminder.id] = reminder
+
+    async def list_open(self, user_id: str, limit: int) -> list[Reminder]:
+        found = [r for r in self._state.reminders.values() if r.user_id == user_id and r.is_open]
+        return sorted(found, key=lambda r: (r.created_at, r.id))[:limit]
+
+    async def count_about(self, person_id: str) -> int:
+        return sum(1 for r in self._state.reminders.values() if r.about_person_id == person_id)
+
+    async def settle(
+        self, reminder_id: str, on: date, status: OccurrenceStatus, at: datetime
+    ) -> None:
+        if reminder_id not in self._state.reminders:
+            raise NotFoundError("reminder", reminder_id)
+        self._state.occurrences[(reminder_id, on)] = status
+
+    async def settled(self, reminder_id: str) -> dict[date, OccurrenceStatus]:
+        return {d: s for (rid, d), s in self._state.occurrences.items() if rid == reminder_id}

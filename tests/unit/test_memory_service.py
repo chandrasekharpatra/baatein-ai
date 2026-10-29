@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from dataclasses import replace
-from datetime import timedelta
+from datetime import date, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -12,8 +12,11 @@ from baatein.domain.models import (
     Certainty,
     FinalizeStatus,
     MemoryKind,
+    OccurrenceStatus,
     Pace,
     Preferences,
+    ReminderStatus,
+    Repeat,
     Role,
     ScoredFact,
     Sensitivity,
@@ -26,6 +29,7 @@ from tests.factories import (
     at,
     make_boundary,
     make_fact,
+    make_reminder,
     make_session,
     make_thread,
     make_turn,
@@ -715,3 +719,157 @@ async def test_set_preferences_changes_only_given_fields_and_persists(world: Wor
     assert second == Preferences("Bauji", Pace.SLOW, Verbosity.SHORT, False)
     assert memory.preferences == second
     assert world.state.users[user.id].preferences == second
+
+
+# T0 is Thu 1 Jan 2026, 2:30 pm in India.
+
+
+async def test_create_reminder_with_and_without_a_date(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    memory.pause_saving()
+
+    birthday = await memory.create_reminder(
+        "Ravi's birthday",
+        on=date(2026, 11, 18),
+        repeat=Repeat.YEARLY,
+        alert_days_before=(0, 7, 7, 90, -1),
+        about="Ravi",
+        note="Call him OTP 123456",
+    )
+    trip = await memory.create_reminder("Book the June trip")
+
+    assert world.state.reminders[birthday.id] == birthday
+    assert (birthday.status, birthday.at, birthday.alert_days_before) == (
+        ReminderStatus.ACTIVE,
+        time(9, 0),
+        (7, 0),
+    )
+    assert birthday.note == "Call him OTP [redacted]"
+    assert world.state.people[birthday.about_person_id or ""].name == "Ravi"
+    assert birthday.source_session_id == memory.session.id
+    assert (trip.status, trip.alert_days_before) == (ReminderStatus.NEEDS_INFO, (0,))
+    nothing = await memory.create_reminder("x", alert_days_before=(-3,))
+    assert nothing.alert_days_before == (0,)
+
+
+async def test_update_reminder_changes_the_same_reminder(world: World) -> None:
+    """Scenario #43: "purani ko hi badal do, do alag-alag mat banana"."""
+    memory = await world.service.open_call(world.user)
+    trip = await memory.create_reminder("Book the June trip")
+    glasses = await memory.create_reminder("Pick up glasses", on=date(2026, 1, 3))
+
+    dated = await memory.update_reminder(trip.id, on=date(2026, 6, 22))
+    moved = await memory.update_reminder(
+        glasses.id, on=date(2026, 1, 5), at=time(11), title="Glasses", alert_days_before=(1,)
+    )
+    noted = await memory.update_reminder(glasses.id, note="Shop opens at 11", repeat=Repeat.ONCE)
+
+    assert dated is not None
+    assert (dated.status, dated.on) == (ReminderStatus.ACTIVE, date(2026, 6, 22))
+    assert moved is not None
+    assert (moved.title, moved.on, moved.at, moved.alert_days_before) == (
+        "Glasses",
+        date(2026, 1, 5),
+        time(11),
+        (1,),
+    )
+    assert noted is not None
+    assert (noted.note, noted.on) == ("Shop opens at 11", date(2026, 1, 5))
+    assert len(world.state.reminders) == 2
+    assert await memory.update_reminder("missing", title="x") is None
+    still_undated = await memory.create_reminder("Undated")
+    renamed = await memory.update_reminder(still_undated.id, title="Still undated")
+    assert renamed is not None
+    assert renamed.status is ReminderStatus.NEEDS_INFO
+
+
+async def test_skip_one_occurrence_keeps_the_series(world: World) -> None:
+    """Scenario #44: first Sunday of every month, "sirf is baar skip kar do"."""
+    memory = await world.service.open_call(world.user)
+    sundays = await memory.create_reminder(
+        "Family video call", on=date(2025, 12, 7), repeat=Repeat.MONTHLY_WEEKDAY
+    )
+
+    skipped = await memory.settle_occurrence(sundays.id, OccurrenceStatus.SKIPPED)
+
+    assert skipped == date(2026, 1, 4)
+    assert world.state.occurrences == {(sundays.id, date(2026, 1, 4)): OccurrenceStatus.SKIPPED}
+    assert world.state.reminders[sundays.id].status is ReminderStatus.ACTIVE
+    context = await memory.context()
+    assert context.reminders == []
+
+
+async def test_completing_a_one_off_reminder_ends_it(world: World) -> None:
+    """Scenario #42: "bill bhar diya; baaki reminder hata do"."""
+    memory = await world.service.open_call(world.user)
+    bill = await memory.create_reminder(
+        "Pay electricity bill", on=date(2026, 1, 5), alert_days_before=(3, 0)
+    )
+    glasses = await memory.create_reminder("Pick up glasses", on=date(2026, 1, 2))
+
+    assert await memory.settle_occurrence(bill.id, OccurrenceStatus.DONE) == date(2026, 1, 5)
+    assert world.state.reminders[bill.id].status is ReminderStatus.DONE
+    assert await memory.settle_occurrence(bill.id, OccurrenceStatus.DONE) is None
+    assert await memory.settle_occurrence(
+        glasses.id, OccurrenceStatus.SKIPPED, on=date(2026, 1, 2)
+    ) == date(2026, 1, 2)
+    assert world.state.reminders[glasses.id].status is ReminderStatus.CANCELLED
+    undated = await memory.create_reminder("Someday")
+    assert await memory.settle_occurrence(undated.id, OccurrenceStatus.DONE) is None
+
+
+async def test_cancel_reminder_needs_confirmation(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    walk = await memory.create_reminder("Evening walk", on=date(2026, 1, 2), repeat=Repeat.WEEKLY)
+
+    assert await memory.cancel_reminder(walk.id, user_turn=1) is ForgetOutcome.NEEDS_CONFIRMATION
+    assert world.state.reminders[walk.id].status is ReminderStatus.ACTIVE
+    assert await memory.cancel_reminder(walk.id, user_turn=2) is ForgetOutcome.DELETED
+    assert world.state.reminders[walk.id].status is ReminderStatus.CANCELLED
+    assert await memory.cancel_reminder(walk.id, user_turn=3) is ForgetOutcome.NOT_FOUND
+
+
+async def test_reminders_owned_by_someone_else_are_not_found(world: World) -> None:
+    other = make_user()
+    world.state.users[other.id] = other
+    foreign = make_reminder(other.id, on=date(2026, 1, 2))
+    world.state.reminders[foreign.id] = foreign
+    memory = await world.service.open_call(world.user)
+
+    assert await memory.update_reminder(foreign.id, title="x") is None
+    assert await memory.settle_occurrence(foreign.id, OccurrenceStatus.DONE) is None
+    assert await memory.cancel_reminder(foreign.id, user_turn=1) is ForgetOutcome.NOT_FOUND
+
+
+async def test_context_brings_up_alerted_reminders_first(world: World) -> None:
+    """Scenario #34: the call after the alert brings Ravi's birthday up."""
+    last = make_session(world.user.id, started_at=world.clock.now() - timedelta(days=10))
+    world.state.sessions[last.id] = last
+    memory = await world.service.open_call(world.user)
+    birthday = await memory.create_reminder(
+        "Ravi's birthday", on=date(2026, 1, 7), repeat=Repeat.YEARLY, alert_days_before=(7, 0)
+    )
+    dentist = await memory.create_reminder("Dentist", on=date(2026, 1, 3))
+    later = await memory.create_reminder("Far away", on=date(2026, 3, 1))
+    undated = await memory.create_reminder("June trip")
+
+    context = await memory.context()
+
+    assert [(d.reminder.id, d.on, d.alerted) for d in context.reminders] == [
+        (birthday.id, date(2026, 1, 7), True),
+        (dentist.id, date(2026, 1, 3), False),
+    ]
+    assert context.undated_reminders == [undated]
+    assert later.id not in {d.reminder.id for d in context.reminders}
+
+
+async def test_reminder_people_are_kept_until_nothing_refers_to_them(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    fact = await memory.remember("Ravi loves cricket", about="Ravi")
+    await memory.create_reminder("Ravi's birthday", about="Ravi")
+    assert fact is not None
+
+    await memory.forget(fact.id, user_turn=1)
+    await memory.forget(fact.id, user_turn=2)
+
+    assert [p.name for p in world.state.people.values()] == ["Ravi"]

@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, datetime, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
 
 from baatein.domain.models import (
     Boundary,
@@ -8,13 +8,15 @@ from baatein.domain.models import (
     Fact,
     MemoryKind,
     Person,
+    Reminder,
+    Repeat,
     ScoredFact,
     Sensitivity,
     Thread,
     ThreadEvent,
     ThreadStatus,
 )
-from baatein.memory.service import MemoryContext
+from baatein.memory.service import DueReminder, MemoryContext
 
 MAX_SUMMARY_CHARS = 400
 
@@ -30,6 +32,64 @@ def _time(value: datetime) -> str:
 
 def _ago(days: int) -> str:
     return {0: "earlier today", 1: "yesterday"}.get(days, f"{days} days ago")
+
+
+REPEATS = {
+    Repeat.ONCE: "",
+    Repeat.WEEKLY: "every week",
+    Repeat.MONTHLY_DATE: "every month",
+    Repeat.MONTHLY_WEEKDAY: "every month, same weekday",
+    Repeat.YEARLY: "every year",
+}
+
+
+def _clock(value: datetime) -> str:
+    hour = value.hour % 12 or 12
+    return f"{hour}:{value.minute:02d} {'am' if value.hour < 12 else 'pm'}"
+
+
+def _coming_days(today: date) -> str:
+    days = (today + timedelta(days=n) for n in range(1, 8))
+    return ", ".join(f"{d:%a} {d.day} {d:%b}" for d in days)
+
+
+def render_reminder(reminder: Reminder, on: date | None = None) -> str:
+    """One reminder as a line Claude can update by id."""
+    notes = []
+    when = on or reminder.on
+    if when:
+        at = _clock(datetime.combine(when, reminder.at))
+        notes.append(f"on {_day(when)}, {at}")
+    if REPEATS[reminder.repeat]:
+        notes.append(REPEATS[reminder.repeat])
+    before = [d for d in reminder.alert_days_before if d]
+    if before:
+        days = (f"{d} day{'s' if d > 1 else ''}" for d in before)
+        notes.append("remind " + " and ".join(days) + " before")
+    if reminder.note:
+        notes.append(reminder.note)
+    suffix = f" ({'; '.join(notes)})" if notes else ""
+    return f"- [{reminder.id}] {reminder.title}{suffix}"
+
+
+def _reminders(due: Sequence[DueReminder], undated: Sequence[Reminder]) -> list[str]:
+    lines = []
+    alerted = [d for d in due if d.alerted]
+    coming = [d for d in due if not d.alerted]
+    if alerted:
+        lines += [
+            "",
+            "Reminders due now. They asked you to remind them: bring each up once, early and "
+            "naturally. When they have done it, call complete_occurrence:",
+        ]
+        lines += [render_reminder(d.reminder, d.on) for d in alerted]
+    if coming:
+        lines += ["", "Reminders coming up (mention only if it fits):"]
+        lines += [render_reminder(d.reminder, d.on) for d in coming]
+    if undated:
+        lines += ["", "Reminders still waiting for a date (ask only if they bring it up):"]
+        lines += [render_reminder(r) for r in undated]
+    return lines
 
 
 def _local_day(value: datetime, tz: tzinfo | None) -> str:
@@ -102,7 +162,7 @@ def render_context(context: MemoryContext) -> str:
     """Memory for the agent's instructions at call start: small and chosen."""
     now, tz = context.now, context.now.tzinfo
     people = _by_id(context.people)
-    lines = [f"Now: {_time(now)} ({tz})."]
+    lines = [f"Now: {_time(now)} ({tz}). Coming days: {_coming_days(now.date())}."]
 
     last = context.last_call
     if last is None:
@@ -157,6 +217,8 @@ def render_context(context: MemoryContext) -> str:
             render_thread(check_in, people, tz),
         ]
         lines += _events(context.check_in_events, tz)
+
+    lines += _reminders(context.reminders, context.undated_reminders)
 
     if not (context.facts or context.people or context.threads):
         lines += ["", "You have nothing saved about this user yet."]

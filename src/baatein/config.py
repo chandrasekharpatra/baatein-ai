@@ -47,6 +47,11 @@ class MemorySettings(BaseModel):
     recall_timeout_seconds: float = 0.3
 
 
+class DevSettings(BaseModel):
+    seed_enabled: bool = False
+    """Expose POST /dev/seed to load artificial memories. Never enable in production."""
+
+
 AGENT_NAME = "baatein"
 
 
@@ -97,3 +102,4 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     livekit: LiveKitSettings = Field(default_factory=LiveKitSettings)
+    dev: DevSettings = Field(default_factory=DevSettings)

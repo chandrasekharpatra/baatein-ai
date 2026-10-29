@@ -26,7 +26,7 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 | 1 ✅ | Save only with permission; correct and forget | #1, #12, #13, #14, #25, #33 |
 | 2 ✅ | Storylines (threads), boundaries, and a smarter call-start context | #1, #5, #8, #11, #15, #16, #19, #29, #31, #32 |
 | 3 ✅ | Persona and how each user likes to talk | #21, #22, #23, #28, #30 |
-| 4 | Dated reminders, brought up in the next conversation | #34–45 |
+| 4 ✅ | Dated reminders, brought up in the next conversation | #34–45 |
 | 5 | Summary after each call, with retry | #10, #14, #31 |
 | 6 | Scenario tests against real Claude | all |
 
@@ -177,7 +177,18 @@ A live call with the elder persona sounds slower and gentler, and a preference s
 
 ---
 
-## Slice 4: dated reminders, brought up in the next conversation
+## Slice 4: dated reminders, brought up in the next conversation ✅ built
+
+**Status:** built on 2026-10-30, with offline and real-Claude tests; a live call is still to do. As built:
+- A reminder (migration `0006`) has a title, an optional person, the event day `on` (none means `needs_info`), a local time (default 9:00 am), a repeat rule (once, weekly, monthly by date, monthly by weekday, yearly) and `alert_days_before` (e.g. `[7, 0]` for #34). Dates are in the user's timezone. Only exceptions are stored per occurrence (`done` or `skipped`), so skipping one keeps the series.
+- `memory/recurrence.py`: yearly 29 Feb falls on 28 Feb in other years; a monthly 31st falls on the last day of shorter months; "monthly by weekday" takes the weekday and week from the first date (a fifth weekday means the last one).
+- The call-start context has three groups. **Due now**: an alert passed since the last call; bring it up once. **Coming up**: the event or an alert is within 7 days; mention only if it fits. **Waiting for a date**. Choosing them marks nothing: "since the last call" stops a reminder repeating.
+- The context now also lists the next 7 days ("Coming days: Fri 30 Oct, Sat 31 Oct, …"), so Claude resolves "agle shanivaar" and "somvaar" correctly.
+- Tools: `create_reminder` (after reading it back; never guesses a date), `update_reminder` (in place, #43), `complete_occurrence`, `skip_occurrence` (the nearest occurrence by default; a one-off reminder ends with it), and `cancel_reminder`, which needs the same two-step confirmation as `forget`. Reminders are explicit requests, so they are saved even while saving is paused.
+- Honesty (decision 3): the first real-Claude runs said *"11 November ko subah 9 baje yaad dilaungi"*. The instructions and the tool reply now spell out that Baatein can only bring it up when they talk, with the exact wording to use.
+- Not done: moving just one occurrence of a repeating reminder (e.g. "is baar Monday ko"); for now that is a skip plus a one-off reminder.
+- `test_accepts_no_to_a_check_in` (slice 2) is a little flaky in the judge: it failed about 1 run in 8.
+
 
 ### Example (#34)
 ```

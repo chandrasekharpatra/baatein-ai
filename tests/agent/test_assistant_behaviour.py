@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import date
 from typing import Any
 
 import pytest
@@ -10,12 +11,19 @@ from livekit.plugins import anthropic
 
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
-from baatein.domain.models import Pace, ThreadStatus
+from baatein.domain.models import Pace, Repeat, ThreadStatus
 from baatein.memory.context_builder import render_context
 from baatein.memory.service import CallMemory
 from baatein.voice.languages import HINGLISH
 from baatein.voice.personas import CASUAL, ELDER, Persona
-from tests.factories import at, make_boundary, make_fact, make_session, make_thread
+from tests.factories import (
+    at,
+    make_boundary,
+    make_fact,
+    make_reminder,
+    make_session,
+    make_thread,
+)
 from tests.fakes.world import World, build_world
 
 pytestmark = [
@@ -329,3 +337,84 @@ async def test_slower_speech_when_asked() -> None:
         await session.run(user_input="Thoda dheere bolo, sunai nahi diya.")
 
         assert world.state.users[world.user.id].preferences.pace is Pace.SLOW
+
+
+# The test clock's today is Thu 1 Jan 2026.
+
+
+async def test_reads_back_a_reminder_then_saves_it_honestly() -> None:
+    """Scenario #34: Ravi's birthday, every year, a week before and on the day."""
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Asha")
+
+        asked = await session.run(
+            user_input="Mere bete Ravi ka birthday 18 November ko hai. Har saal 11 November aur "
+            "18 November subah 9 baje yaad dilana."
+        )
+        assert world.state.reminders == {}, "saved before reading it back"
+        [readback] = assistant_replies(asked)
+        assert "18" in readback, readback
+        assert "?" in readback, readback
+
+        saved = await session.run(user_input="Haan, sahi hai.")
+
+        [reminder] = world.state.reminders.values()
+        assert (reminder.on, reminder.repeat) == (date(2026, 11, 18), Repeat.YEARLY)
+        assert set(reminder.alert_days_before) == {7, 0}
+        await saved.expect.contains_message(role="assistant").judge(
+            llm,
+            intent="Confirms the reminder and makes clear it will bring it up when they talk "
+            "around that date. It must not promise to alert, notify, message or call them at a "
+            "set time (e.g. 'subah 9 baje yaad dilaungi' fails).",
+        )
+
+
+async def test_does_not_guess_an_unclear_date() -> None:
+    """Scenario #36: "Shayad June ke aakhri hafte mein"."""
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        await session.run(
+            user_input="Beti ke ghar jaane ka plan hai, shayad June ke aakhri hafte mein. Yaad "
+            "dila dena."
+        )
+        await session.run(user_input="Haan, theek hai.")
+
+        assert all(r.on is None for r in world.state.reminders.values())
+
+
+async def test_reschedules_the_same_reminder() -> None:
+    """Scenarios #37 and #43: "somvaar ko phir yaad dilao… purani ko hi badal do"."""
+    world = build_world()
+    glasses = make_reminder(world.user.id, "Pick up new glasses", on=date(2026, 1, 1))
+    world.state.reminders[glasses.id] = glasses
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        await session.run(
+            user_input="Aaj chashma lene gaya tha par dukaan band thi. Somvaar ko phir yaad "
+            "dilana, purani ko hi badal do, do alag-alag mat banana."
+        )
+        await session.run(user_input="Haan.")
+
+        [reminder] = world.state.reminders.values()
+        assert reminder.on == date(2026, 1, 5)
+
+
+async def test_brings_up_a_due_reminder() -> None:
+    world = build_world()
+    last_call = make_session(world.user.id, started_at=at(-10 * 24 * 60))
+    world.state.sessions[last_call.id] = last_call
+    birthday = make_reminder(
+        world.user.id, on=date(2026, 1, 7), repeat=Repeat.YEARLY, alert_days_before=(7, 0)
+    )
+    world.state.reminders[birthday.id] = birthday
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Asha", persona=ELDER)
+
+        replies = assistant_replies(await session.run(user_input="Namaste!"))
+        replies += assistant_replies(await session.run(user_input="Main theek hoon."))
+
+        assert any("ravi" in reply.lower() for reply in replies), replies

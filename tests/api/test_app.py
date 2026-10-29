@@ -12,7 +12,9 @@ from baatein.auth.passwords import Argon2PasswordHasher
 from baatein.config import Settings
 from baatein.container import build_root
 from baatein.ports.auth import PasswordHasher
+from baatein.ports.embedder import Embedder
 from baatein.storage.sqlite.migrate import migrate
+from tests.fakes.embedder import FakeEmbedder
 
 LIVEKIT_SECRET = "livekit-test-secret-of-sufficient-length"
 
@@ -144,3 +146,64 @@ def test_livekit_token_dispatches_agent_for_current_user(client: TestClient) -> 
     assert claims.video.room == body["room_name"]
     [dispatch] = claims.room_config.agents
     assert json.loads(dispatch.metadata) == {"user_id": session["user"]["id"]}
+
+
+def seeding_client(tmp_path: Path, enabled: bool) -> TestClient:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        database={"url": f"sqlite:///{tmp_path}/seed.db"},
+        auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
+        dev={"seed_enabled": enabled},
+    )
+    migrate(settings.database.sqlite_path())
+    return TestClient(create_app(build_root(CheapHashing(), FakeEmbedding(), settings=settings)))
+
+
+class FakeEmbedding(Module):
+    @singleton
+    @provider
+    def embedder(self) -> Embedder:
+        return FakeEmbedder()
+
+
+def test_seed_routes_exist_only_when_enabled(tmp_path: Path) -> None:
+    with seeding_client(tmp_path, enabled=False) as off:
+        token = signup(off)["access_token"]
+        assert off.get("/dev/seed").status_code == 404
+        response = off.post("/dev/seed", json={}, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code in (404, 405)
+
+
+def test_seed_loads_into_the_current_user(tmp_path: Path) -> None:
+    with seeding_client(tmp_path, enabled=True) as on:
+        token = signup(on, display_name="Mohan")["access_token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        assert on.get("/dev/seed").json() == {"enabled": True}
+
+        response = on.post(
+            "/dev/seed",
+            json={
+                "persona": "elder",
+                "memories": [{"text": "Misses Ramesh", "about": "Ramesh"}],
+                "reminders": [{"title": "Ravi's birthday", "date": "today+5"}],
+            },
+            headers=auth,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "people": 1,
+            "calls": 0,
+            "memories": 1,
+            "threads": 0,
+            "boundaries": 0,
+            "declined_suggestions": 0,
+            "reminders": 1,
+        }
+        assert on.get("/me", headers=auth).json()["persona"] == "elder"
+        assert (
+            on.post("/dev/seed", json={"memories": [{"txt": "x"}]}, headers=auth).status_code == 422
+        )
+        bad_call = {"memories": [{"text": "x", "call": "nope"}]}
+        assert on.post("/dev/seed", json=bad_call, headers=auth).status_code == 422
+        assert on.post("/dev/seed", json={}).status_code == 401

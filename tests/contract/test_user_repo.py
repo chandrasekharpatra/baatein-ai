@@ -61,3 +61,16 @@ async def test_set_preferences_round_trips(repos: Repos) -> None:
     assert (stored.preferences, stored.persona) == (preferences, "casual")
     with pytest.raises(NotFoundError):
         await repos.users.set_preferences("missing", preferences)
+
+
+async def test_set_persona(repos: Repos) -> None:
+    user = make_user()
+    await repos.users.add(user)
+
+    await repos.users.set_persona(user.id, "elder")
+
+    stored = await repos.users.get(user.id)
+    assert stored is not None
+    assert stored.persona == "elder"
+    with pytest.raises(NotFoundError):
+        await repos.users.set_persona("missing", "elder")

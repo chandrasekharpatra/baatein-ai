@@ -63,3 +63,48 @@ def test_serve_runs_api_with_host_and_port(monkeypatch: pytest.MonkeyPatch) -> N
     [(app, host, port)] = calls
     assert isinstance(app, FastAPI)
     assert (host, port) == ("0.0.0.0", 9000)
+
+
+def fake_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeEmbedding(Module):
+        @singleton
+        @provider
+        def embedder(self) -> Embedder:
+            return FakeEmbedder()
+
+    def build_with_fake(*overrides: Module, settings: Settings | None = None) -> Injector:
+        return build_root(*overrides, FakeEmbedding(), settings=settings)
+
+    monkeypatch.setattr(cli, "build_root", build_with_fake)
+
+
+def test_seed_creates_the_account_and_replaces_it_on_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    fake_embedding(monkeypatch)
+    seed = tmp_path / "ram.json"
+    seed.write_text(
+        '{"user": {"email": "ram@example.com", "password": "long-enough"},'
+        ' "memories": [{"text": "Loves rasagola", "about": "Sabitri"}]}'
+    )
+
+    assert main(["seed", str(seed)]) == 0
+    first = capsys.readouterr().out
+    assert main(["seed", str(seed), "--replace"]) == 0
+    second = capsys.readouterr().out
+
+    assert "seeded ram@example.com" in first
+    assert "1 people, 0 calls, 1 memories" in first
+    assert "removed the existing ram@example.com" in second
+    with sqlite3.connect(tmp_path / "app.db") as conn:
+        assert conn.execute("SELECT count(*) FROM users").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM facts").fetchone()[0] == 1
+
+
+def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:
+    seed = tmp_path / "no-user.json"
+    seed.write_text('{"memories": []}')
+
+    with pytest.raises(SystemExit, match="needs a 'user' section"):
+        main(["seed", str(seed)])

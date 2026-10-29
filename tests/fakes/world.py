@@ -10,6 +10,7 @@ from tests.fakes.memory import InMemoryMemoryStore
 from tests.fakes.repos import (
     InMemoryBoundaryRepo,
     InMemoryPeopleRepo,
+    InMemoryReminderRepo,
     InMemorySessionRepo,
     InMemoryState,
     InMemorySuggestionRepo,
@@ -42,6 +43,7 @@ def build_world(settings: MemorySettings | None = None) -> World:
         threads=InMemoryThreadRepo(state),
         boundaries=InMemoryBoundaryRepo(state),
         suggestions=InMemorySuggestionRepo(state),
+        reminders=InMemoryReminderRepo(state),
         store=store,
         clock=clock,
         settings=settings or MemorySettings(),

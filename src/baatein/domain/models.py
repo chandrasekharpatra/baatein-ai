@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 
 
@@ -254,3 +254,51 @@ class DeclinedSuggestion:
     text: str
     created_at: datetime
     session_id: str | None = None
+
+
+class Repeat(StrEnum):
+    ONCE = "once"
+    WEEKLY = "weekly"
+    MONTHLY_DATE = "monthly_date"
+    MONTHLY_WEEKDAY = "monthly_weekday"
+    """Same weekday and week of the month as `on`, e.g. the first Sunday (#44)."""
+    YEARLY = "yearly"
+
+
+class ReminderStatus(StrEnum):
+    NEEDS_INFO = "needs_info"
+    """The user hasn't said when yet (#36 "shayad June ke aakhri hafte"); nothing is guessed."""
+    ACTIVE = "active"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class OccurrenceStatus(StrEnum):
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class Reminder:
+    """Something the user asked to be reminded of, brought up when they next talk (decision 3).
+
+    `on` is the (first) day of the event in the user's timezone; alerts are `alert_days_before`
+    days before each occurrence, at `at`.
+    """
+
+    id: str
+    user_id: str
+    title: str
+    created_at: datetime
+    on: date | None = None
+    at: time = time(9, 0)
+    repeat: Repeat = Repeat.ONCE
+    alert_days_before: tuple[int, ...] = (0,)
+    status: ReminderStatus = ReminderStatus.ACTIVE
+    note: str | None = None
+    about_person_id: str | None = None
+    source_session_id: str | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self.status in (ReminderStatus.NEEDS_INFO, ReminderStatus.ACTIVE)

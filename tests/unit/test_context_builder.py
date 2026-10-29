@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from baatein.domain.models import (
@@ -7,6 +7,7 @@ from baatein.domain.models import (
     DeclinedSuggestion,
     MemoryKind,
     Person,
+    Repeat,
     ScoredFact,
     Sensitivity,
     ThreadEvent,
@@ -17,11 +18,19 @@ from baatein.memory.context_builder import (
     render_context,
     render_memory,
     render_recall,
+    render_reminder,
     render_search,
     render_thread,
 )
-from baatein.memory.service import MemoryContext
-from tests.factories import T0, make_boundary, make_fact, make_session, make_thread
+from baatein.memory.service import DueReminder, MemoryContext
+from tests.factories import (
+    T0,
+    make_boundary,
+    make_fact,
+    make_reminder,
+    make_session,
+    make_thread,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 NOW = datetime(2026, 10, 29, 19, 40, tzinfo=IST)
@@ -46,7 +55,10 @@ def context(**overrides: object) -> MemoryContext:
 def test_first_call_says_so_with_local_time() -> None:
     text = render_context(context())
 
-    assert text.startswith("Now: Thu 29 Oct 2026, 7:40 pm (Asia/Kolkata).")
+    assert text.startswith(
+        "Now: Thu 29 Oct 2026, 7:40 pm (Asia/Kolkata). Coming days: Fri 30 Oct, Sat 31 Oct, "
+        "Sun 1 Nov, Mon 2 Nov, Tue 3 Nov, Wed 4 Nov, Thu 5 Nov."
+    )
     assert "This is your first call with them." in text
     assert "nothing saved about this user" in text
 
@@ -200,3 +212,48 @@ def test_search_lists_memories_with_people() -> None:
     text = render_search([ScoredFact(fact, 0.4)], [RAMESH])
 
     assert text == f"- [{fact.id}] Wants to call Ramesh again (about Ramesh (college friend))"
+
+
+def test_reminder_line_shows_day_time_repeat_alerts_and_note() -> None:
+    birthday = make_reminder(
+        "u",
+        on=date(2026, 11, 18),
+        repeat=Repeat.YEARLY,
+        alert_days_before=(7, 0),
+        note="Buy a gift",
+    )
+
+    assert render_reminder(birthday) == (
+        f"- [{birthday.id}] Ravi's birthday (on Wed 18 Nov 2026, 9:00 am; every year; remind 7"
+        " days before; Buy a gift)"
+    )
+    assert render_reminder(birthday, date(2027, 11, 18)).startswith(
+        f"- [{birthday.id}] Ravi's birthday (on Thu 18 Nov 2027, 9:00 am"
+    )
+    evening = make_reminder("u", "Walk", on=date(2026, 11, 2), at=time(18, 30))
+    assert render_reminder(evening) == f"- [{evening.id}] Walk (on Mon 2 Nov 2026, 6:30 pm)"
+    assert render_reminder(make_reminder("u", "Trip")).endswith("] Trip")
+    checkup = make_reminder("u", "Checkup", on=date(2026, 11, 2), alert_days_before=(1,))
+    assert render_reminder(checkup).endswith("; remind 1 day before)")
+
+
+def test_reminders_are_split_into_due_coming_and_undated() -> None:
+    birthday = make_reminder("u", on=date(2026, 11, 18), repeat=Repeat.YEARLY)
+    dentist = make_reminder("u", "Dentist", on=date(2026, 11, 2))
+    trip = make_reminder("u", "June trip")
+
+    text = render_context(
+        context(
+            reminders=[
+                DueReminder(birthday, date(2026, 11, 18), alerted=True),
+                DueReminder(dentist, date(2026, 11, 2), alerted=False),
+            ],
+            undated_reminders=[trip],
+        )
+    )
+
+    due, coming, undated = (text.index(h) for h in ("due now", "coming up", "waiting for"))
+    assert due < text.index(birthday.id) < coming < text.index(dentist.id) < undated
+    assert text.index(trip.id) > undated
+    assert "complete_occurrence" in text
+    assert "Reminders" not in render_context(context())

@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, time, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -14,9 +14,13 @@ from baatein.domain.models import (
     DeclinedSuggestion,
     Fact,
     MemoryKind,
+    OccurrenceStatus,
     Pace,
     Person,
     Preferences,
+    Reminder,
+    ReminderStatus,
+    Repeat,
     Role,
     ScoredFact,
     Sensitivity,
@@ -30,6 +34,7 @@ from baatein.domain.models import (
     Verbosity,
 )
 from baatein.memory.ranker import CheckInRules, pick_check_in
+from baatein.memory.recurrence import due, nearest_open
 from baatein.memory.redact import redact
 from baatein.ports.clock import Clock
 from baatein.ports.embedder import Embedder
@@ -37,6 +42,7 @@ from baatein.ports.memory import MemoryStore
 from baatein.ports.repos import (
     BoundaryRepo,
     PeopleRepo,
+    ReminderRepo,
     SessionRepo,
     SuggestionRepo,
     ThreadRepo,
@@ -56,6 +62,12 @@ ABRUPT_MIN_WORDS = 4
 MAX_TOPIC_CHARS = 200
 
 
+def _alerts(days_before: tuple[int, ...]) -> tuple[int, ...]:
+    """Distinct alert offsets from 0 to 60 days, largest first; same day if none are valid."""
+    valid = sorted({d for d in days_before if 0 <= d <= 60}, reverse=True)
+    return tuple(valid) or (0,)
+
+
 def zone(name: str) -> ZoneInfo:
     """The user's timezone, or India's if the stored name is unknown."""
     try:
@@ -63,6 +75,17 @@ def zone(name: str) -> ZoneInfo:
     except (ZoneInfoNotFoundError, ValueError):
         logger.warning("unknown timezone %r, using %s", name, DEFAULT_TIMEZONE)
         return ZoneInfo(DEFAULT_TIMEZONE)
+
+
+CONTEXT_REMINDERS = 20
+
+
+@dataclass(frozen=True)
+class DueReminder:
+    reminder: Reminder
+    on: date
+    alerted: bool
+    """An alert time passed since the last call: bring it up now."""
 
 
 @dataclass(frozen=True)
@@ -77,6 +100,8 @@ class MemoryContext:
     check_in_events: list[ThreadEvent]
     boundaries: list[Boundary]
     declined: list[DeclinedSuggestion]
+    reminders: list[DueReminder] = field(default_factory=list)
+    undated_reminders: list[Reminder] = field(default_factory=list)
 
 
 class ForgetOutcome(StrEnum):
@@ -94,6 +119,7 @@ class MemoryDeps:
     threads: ThreadRepo
     boundaries: BoundaryRepo
     suggestions: SuggestionRepo
+    reminders: ReminderRepo
     store: MemoryStore
     clock: Clock
     settings: MemorySettings
@@ -164,7 +190,10 @@ class CallMemory:
             deps.boundaries.list_active(self.user_id, self.session.id, now),
             deps.suggestions.list_for_user(self.user_id, limits.context_declined),
         )
+        reminders = await deps.reminders.list_open(self.user_id, CONTEXT_REMINDERS)
         last_call = next((s for s in recent if s.id != self.session.id), None)
+        since = last_call.started_at if last_call else now - timedelta(days=1)
+        due_reminders = await self._due_reminders(reminders, since, now)
         check_in, events = None, []
         # A story cut off last time is this call's one check-in; storylines wait.
         if last_call is None or not (last_call.ended_abruptly and last_call.unfinished_topic):
@@ -188,7 +217,21 @@ class CallMemory:
             check_in_events=events,
             boundaries=boundaries,
             declined=declined,
+            reminders=due_reminders,
+            undated_reminders=[r for r in reminders if r.status is ReminderStatus.NEEDS_INFO],
         )
+
+    async def _due_reminders(
+        self, reminders: list[Reminder], since: datetime, now: datetime
+    ) -> list[DueReminder]:
+        found = []
+        for reminder in reminders:
+            if reminder.status is not ReminderStatus.ACTIVE:
+                continue
+            settled = await self._deps.reminders.settled(reminder.id)
+            for day, alerted in due(reminder, settled, since, now, self.timezone):
+                found.append(DueReminder(reminder, day, alerted))
+        return sorted(found, key=lambda d: (not d.alerted, d.on))
 
     def record(self, role: Role, text: str, interrupted: bool = False) -> None:
         """Queue a turn for writing. Turns are numbered and written in the order recorded."""
@@ -342,6 +385,7 @@ class CallMemory:
             person_id
             and await self._deps.store.count_about(person_id) == 0
             and await self._deps.threads.count_about(person_id) == 0
+            and await self._deps.reminders.count_about(person_id) == 0
         ):
             await self._deps.people.delete(person_id)
 
@@ -523,6 +567,109 @@ class CallMemory:
         )
         await self._deps.users.set_preferences(self.user_id, self.preferences)
         return self.preferences
+
+    async def create_reminder(
+        self,
+        title: str,
+        *,
+        on: date | None = None,
+        at: time | None = None,
+        repeat: Repeat = Repeat.ONCE,
+        alert_days_before: tuple[int, ...] = (0,),
+        about: str | None = None,
+        note: str | None = None,
+    ) -> Reminder:
+        """Save a reminder the user asked for. Without a date it waits for one (#36).
+
+        An explicit request, so it is saved even while saving is paused.
+        """
+        person = await self.person(about) if about else None
+        reminder = Reminder(
+            id=new_id(),
+            user_id=self.user_id,
+            title=redact(title),
+            created_at=self._deps.clock.now(),
+            on=on,
+            at=at or time(9, 0),
+            repeat=repeat,
+            alert_days_before=_alerts(alert_days_before),
+            status=ReminderStatus.ACTIVE if on else ReminderStatus.NEEDS_INFO,
+            note=redact(note) if note else None,
+            about_person_id=person.id if person else None,
+            source_session_id=self.session.id,
+        )
+        await self._deps.reminders.add(reminder)
+        return reminder
+
+    async def _own_open_reminder(self, reminder_id: str) -> Reminder | None:
+        reminder = await self._deps.reminders.get(reminder_id)
+        if reminder is None or reminder.user_id != self.user_id or not reminder.is_open:
+            return None
+        return reminder
+
+    async def update_reminder(
+        self,
+        reminder_id: str,
+        *,
+        title: str | None = None,
+        on: date | None = None,
+        at: time | None = None,
+        repeat: Repeat | None = None,
+        alert_days_before: tuple[int, ...] | None = None,
+        note: str | None = None,
+    ) -> Reminder | None:
+        """Change a reminder in place ("purani ko hi badal do", #43): never a second one."""
+        reminder = await self._own_open_reminder(reminder_id)
+        if reminder is None:
+            return None
+        on = on or reminder.on
+        updated = replace(
+            reminder,
+            title=redact(title) if title else reminder.title,
+            on=on,
+            at=at or reminder.at,
+            repeat=repeat or reminder.repeat,
+            alert_days_before=(
+                _alerts(alert_days_before) if alert_days_before else reminder.alert_days_before
+            ),
+            status=ReminderStatus.ACTIVE if on else ReminderStatus.NEEDS_INFO,
+            note=redact(note) if note else reminder.note,
+        )
+        await self._deps.reminders.update(updated)
+        return updated
+
+    async def settle_occurrence(
+        self, reminder_id: str, status: OccurrenceStatus, on: date | None = None
+    ) -> date | None:
+        """Mark one occurrence done (#42 "bill bhar diya") or skipped (#44 "sirf is baar
+        skip"); the series continues. Without a date, the occurrence nearest today. A one-off
+        reminder ends with it. Returns the occurrence, or None if there is none."""
+        reminder = await self._own_open_reminder(reminder_id)
+        if reminder is None:
+            return None
+        settled = await self._deps.reminders.settled(reminder_id)
+        today = self._deps.clock.now().astimezone(self.timezone).date()
+        day = on or nearest_open(reminder, settled, today)
+        if day is None:
+            return None
+        now = self._deps.clock.now()
+        await self._deps.reminders.settle(reminder_id, day, status, now)
+        if reminder.repeat is Repeat.ONCE:
+            final = (
+                ReminderStatus.DONE if status is OccurrenceStatus.DONE else ReminderStatus.CANCELLED
+            )
+            await self._deps.reminders.update(replace(reminder, status=final))
+        return day
+
+    async def cancel_reminder(self, reminder_id: str, user_turn: int) -> ForgetOutcome:
+        """Stop a reminder for good, confirmed in two steps like `forget`."""
+        reminder = await self._own_open_reminder(reminder_id)
+        if reminder is None:
+            return ForgetOutcome.NOT_FOUND
+        if not self._confirmed(reminder_id, user_turn):
+            return ForgetOutcome.NEEDS_CONFIRMATION
+        await self._deps.reminders.update(replace(reminder, status=ReminderStatus.CANCELLED))
+        return ForgetOutcome.DELETED
 
     def enable_privacy_mode(self) -> None:
         """Others can hear the user ("kamre mein mehmaan hain"): no personal details aloud."""
