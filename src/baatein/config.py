@@ -20,6 +20,7 @@ class LLMSettings(BaseModel):
 
 class VoiceSettings(BaseModel):
     default_language: str = "hinglish"
+    default_persona: str = "casual"
 
 
 class EmbeddingSettings(BaseModel):

@@ -12,11 +12,14 @@ from baatein.domain.models import (
     Certainty,
     FinalizeStatus,
     MemoryKind,
+    Pace,
+    Preferences,
     Role,
     ScoredFact,
     Sensitivity,
     ThreadKind,
     ThreadStatus,
+    Verbosity,
 )
 from baatein.memory.service import FORGOTTEN_TURN, CallMemory, ForgetOutcome, zone
 from tests.factories import (
@@ -697,3 +700,18 @@ async def test_a_person_stays_while_a_memory_or_storyline_is_about_them(world: W
     await memory.forget(fact.id, user_turn=3)
     await memory.forget(fact.id, user_turn=4)
     assert [p.name for p in world.state.people.values()] == ["Ramesh"]
+
+
+async def test_set_preferences_changes_only_given_fields_and_persists(world: World) -> None:
+    user = replace(world.user, preferences=Preferences(address_as="Mohan ji", fewer_questions=True))
+    world.state.users[user.id] = user
+    memory = await world.service.open_call(user)
+    memory.pause_saving()
+
+    first = await memory.set_preferences(pace=Pace.SLOW, verbosity=Verbosity.SHORT)
+    second = await memory.set_preferences(address_as="  Bauji ", fewer_questions=False)
+
+    assert first == Preferences("Mohan ji", Pace.SLOW, Verbosity.SHORT, True)
+    assert second == Preferences("Bauji", Pace.SLOW, Verbosity.SHORT, False)
+    assert memory.preferences == second
+    assert world.state.users[user.id].preferences == second

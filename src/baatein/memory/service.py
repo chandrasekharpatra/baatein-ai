@@ -14,7 +14,9 @@ from baatein.domain.models import (
     DeclinedSuggestion,
     Fact,
     MemoryKind,
+    Pace,
     Person,
+    Preferences,
     Role,
     ScoredFact,
     Sensitivity,
@@ -25,6 +27,7 @@ from baatein.domain.models import (
     ThreadStatus,
     Turn,
     User,
+    Verbosity,
 )
 from baatein.memory.ranker import CheckInRules, pick_check_in
 from baatein.memory.redact import redact
@@ -38,6 +41,7 @@ from baatein.ports.repos import (
     SuggestionRepo,
     ThreadRepo,
     TurnRepo,
+    UserRepo,
 )
 from baatein.text import words
 
@@ -83,6 +87,7 @@ class ForgetOutcome(StrEnum):
 
 @dataclass(frozen=True)
 class MemoryDeps:
+    users: UserRepo
     sessions: SessionRepo
     turns: TurnRepo
     people: PeopleRepo
@@ -115,7 +120,7 @@ class MemoryService:
             id=new_id(), user_id=user.id, started_at=self._deps.clock.now(), room_name=room_name
         )
         await self._deps.sessions.add(session)
-        return CallMemory(self._deps, session, language, zone(user.timezone))
+        return CallMemory(self._deps, session, language, zone(user.timezone), user.preferences)
 
 
 class CallMemory:
@@ -128,8 +133,10 @@ class CallMemory:
         session: Session,
         language: str | None = None,
         timezone: ZoneInfo | None = None,
+        preferences: Preferences | None = None,
     ) -> None:
         self._deps = deps
+        self.preferences = preferences or Preferences()
         self.session = session
         self._language = language
         self.timezone = timezone or ZoneInfo(DEFAULT_TIMEZONE)
@@ -493,6 +500,29 @@ class CallMemory:
         )
         await self._deps.suggestions.add(suggestion)
         return suggestion
+
+    async def set_preferences(
+        self,
+        *,
+        address_as: str | None = None,
+        pace: Pace | None = None,
+        verbosity: Verbosity | None = None,
+        fewer_questions: bool | None = None,
+    ) -> Preferences:
+        """Change how Baatein talks to the user, from now on and in later calls. Only the
+        given fields change. The user asked for this, so it is saved even while saving is
+        paused."""
+        current = self.preferences
+        self.preferences = Preferences(
+            address_as=address_as.strip() if address_as else current.address_as,
+            pace=pace or current.pace,
+            verbosity=verbosity or current.verbosity,
+            fewer_questions=(
+                current.fewer_questions if fewer_questions is None else fewer_questions
+            ),
+        )
+        await self._deps.users.set_preferences(self.user_id, self.preferences)
+        return self.preferences
 
     def enable_privacy_mode(self) -> None:
         """Others can hear the user ("kamre mein mehmaan hain"): no personal details aloud."""

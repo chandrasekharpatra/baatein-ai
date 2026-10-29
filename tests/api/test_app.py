@@ -67,6 +67,9 @@ def test_signup_returns_user_and_working_token(client: TestClient) -> None:
     assert session["token_type"] == "bearer"
     assert session["user"]["email"] == "asha@example.com"
     assert session["user"]["language"] == "english"
+    assert session["user"]["persona"] == "casual"
+    elder = signup(client, "mohan@example.com", persona="elder")
+    assert elder["user"]["persona"] == "elder"
     me = client.get("/me", headers=bearer(session["access_token"]))
     assert me.json() == session["user"]
 
@@ -87,9 +90,10 @@ def test_duplicate_signup_conflicts(client: TestClient) -> None:
         {"email": "not-an-email", "password": "password123"},
         {"email": "a@example.com", "password": "short"},
         {"email": "a@example.com", "password": "password123", "language": "klingon"},
+        {"email": "a@example.com", "password": "password123", "persona": "pirate"},
         {"email": "a@example.com"},
     ],
-    ids=["bad-email", "weak-password", "unknown-language", "missing-password"],
+    ids=["bad-email", "weak-password", "unknown-language", "unknown-persona", "missing-password"],
 )
 def test_signup_validation_errors(client: TestClient, body: dict[str, str]) -> None:
     assert client.post("/auth/signup", json=body).status_code == 422

@@ -35,6 +35,7 @@ from baatein.storage.sqlite.repos import (
     SqliteUserRepo,
 )
 from baatein.voice.languages import LanguageRegistry, default_language_registry
+from baatein.voice.personas import PersonaRegistry, default_persona_registry
 from baatein.voice.providers import (
     LLMRegistry,
     STTRegistry,
@@ -125,6 +126,7 @@ class MemoryModule(Module):
     def memory_service(
         self,
         settings: Settings,
+        users: UserRepo,
         sessions: SessionRepo,
         turns: TurnRepo,
         people: PeopleRepo,
@@ -136,6 +138,7 @@ class MemoryModule(Module):
         clock: Clock,
     ) -> MemoryService:
         deps = MemoryDeps(
+            users,
             sessions,
             turns,
             people,
@@ -189,6 +192,7 @@ class AuthModule(Module):
         hasher: PasswordHasher,
         tokens: AccessTokens,
         languages: LanguageRegistry,
+        personas: PersonaRegistry,
         clock: Clock,
     ) -> AuthService:
         return AuthService(
@@ -196,8 +200,10 @@ class AuthModule(Module):
             hasher,
             tokens,
             languages,
+            personas,
             clock,
             default_language=settings.voice.default_language,
+            default_persona=settings.voice.default_persona,
             min_password_length=settings.auth.min_password_length,
         )
 
@@ -207,6 +213,11 @@ class VoiceModule(Module):
     @provider
     def languages(self) -> LanguageRegistry:
         return default_language_registry()
+
+    @singleton
+    @provider
+    def personas(self) -> PersonaRegistry:
+        return default_persona_registry()
 
     @singleton
     @provider

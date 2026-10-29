@@ -25,7 +25,7 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 |---|---|---|
 | 1 ✅ | Save only with permission; correct and forget | #1, #12, #13, #14, #25, #33 |
 | 2 ✅ | Storylines (threads), boundaries, and a smarter call-start context | #1, #5, #8, #11, #15, #16, #19, #29, #31, #32 |
-| 3 | Persona and how each user likes to talk | #21, #22, #23, #28, #30 |
+| 3 ✅ | Persona and how each user likes to talk | #21, #22, #23, #28, #30 |
 | 4 | Dated reminders, brought up in the next conversation | #34–45 |
 | 5 | Summary after each call, with retry | #10, #14, #31 |
 | 6 | Scenario tests against real Claude | all |
@@ -135,7 +135,16 @@ A live sequence of three probe calls reproduces Mohan's storyline (#1), with the
 
 ---
 
-## Slice 3: persona and how each user likes to talk
+## Slice 3: persona and how each user likes to talk ✅ built
+
+**Status:** built on 2026-10-30, with offline and real-Claude tests; a live call is still to do. As built:
+- `voice/personas.py`: `casual` (default, the old style) and `elder` (respectful "aap", "Mohan ji", Hindi first, short sentences, few questions, slower TTS at pace 0.85, an honest "I'm an AI companion"). Each persona also has its own greeting.
+- Preferences live on the user (migration `0005`): `address_as`, `pace` (slow 0.85, normal 1.0, fast 1.15), `verbosity` (short, normal, detailed), `fewer_questions`. They override the persona and are listed in the instructions as "the user asked for this".
+- `set_preference` saves them and applies them **in the same call**: the agent rebuilds its instructions and calls Sarvam `update_options(pace=...)`. It works while saving is paused, because the user asked for it directly.
+- Signup in the web client has a "How Baatein talks" choice; `/auth/signup` takes `persona` and `/me` returns it. Changing persona after signup isn't built yet.
+- Fixes from slice 2 testing: the Hinglish style now says "never Devanagari, even when the user's words reach you in Devanagari" (the STT returns Devanagari); the base rules say "End with at most one question, never two, and often none".
+- Not done: #22 language mix as a preference (the language profile already matches the user's mix), and a persona switch tool.
+
 
 ### Example (#21 and #23)
 ```

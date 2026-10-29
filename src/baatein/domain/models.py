@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -15,6 +15,29 @@ class FinalizeStatus(StrEnum):
     FAILED = "failed"
 
 
+class Pace(StrEnum):
+    SLOW = "slow"
+    NORMAL = "normal"
+    FAST = "fast"
+
+
+class Verbosity(StrEnum):
+    SHORT = "short"
+    NORMAL = "normal"
+    DETAILED = "detailed"
+
+
+@dataclass(frozen=True)
+class Preferences:
+    """How the user asked Baatein to talk to them (#21 "itne sawaal mat poochho", #23 "dheere
+    bolo"). None means the persona's default."""
+
+    address_as: str | None = None
+    pace: Pace | None = None
+    verbosity: Verbosity | None = None
+    fewer_questions: bool = False
+
+
 @dataclass(frozen=True)
 class User:
     id: str
@@ -24,6 +47,8 @@ class User:
     display_name: str | None = None
     language: str = "hinglish"
     timezone: str = "Asia/Kolkata"
+    persona: str = "casual"
+    preferences: Preferences = field(default_factory=Preferences)
 
 
 @dataclass(frozen=True)

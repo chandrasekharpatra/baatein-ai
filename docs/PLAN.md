@@ -10,12 +10,14 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 Slice 2 is built (2026-10-29): follow-ups became storylines (threads) with events, the user can set and lift boundaries, decline suggestions and switch on privacy mode, and the call-start context offers at most one check-in. Details in `docs/PHASE5_SLICES.md`.
 
-**Not yet:** nothing turns a finished call into a summary (so the last call's summary is empty), persona and preferences, reminders, and scenario evals (slices 3–6).
+Slice 3 is built (2026-10-30): a per-user persona (casual or elder, chosen at signup) and preferences set by voice (pace, verbosity, fewer questions, how to be addressed) that apply immediately and in later calls.
+
+**Not yet:** nothing turns a finished call into a summary (so the last call's summary is empty), reminders, and scenario evals (slices 4–6).
 
 **Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
 1. Memory structure, consent-only saving, correct and forget ✅
 2. Threads, boundaries and the call-start context ✅
-3. Persona and preferences
+3. Persona and preferences ✅
 4. Reminders (delivered in conversation only)
 5. End-of-call summary and retry
 6. Scenario evals

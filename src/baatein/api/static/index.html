@@ -74,6 +74,11 @@
         <option value="hinglish">Hinglish</option>
         <option value="english">English</option>
       </select>
+      <label for="persona">How Baatein talks</label>
+      <select id="persona">
+        <option value="casual">Casual, like a friend</option>
+        <option value="elder">Respectful and slow, for elders</option>
+      </select>
     </div>
     <label for="email">Email</label>
     <input id="email" type="email" autocomplete="email" required>
@@ -162,7 +167,7 @@
     $("auth-error").textContent = "";
     try {
       const body = { email: $("email").value, password: $("password").value };
-      if (mode === "signup") Object.assign(body, { display_name: $("name").value || null, language: $("language").value });
+      if (mode === "signup") Object.assign(body, { display_name: $("name").value || null, language: $("language").value, persona: $("persona").value });
       const session = await request(`/auth/${mode}`, body);
       storeToken(session.access_token);
       show(true);

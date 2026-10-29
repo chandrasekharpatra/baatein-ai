@@ -1,7 +1,12 @@
+from types import SimpleNamespace
+from typing import Any
+
 from livekit.agents import llm
 
 from baatein.agent.assistant import Assistant, build_instructions
+from baatein.domain.models import Pace, Preferences
 from baatein.voice.languages import LanguageProfile, ProviderSpec
+from baatein.voice.personas import ELDER
 from tests.factories import make_fact
 from tests.fakes.world import build_world
 
@@ -61,6 +66,7 @@ async def test_assistant_with_memory_exposes_memory_tools() -> None:
         "set_boundary",
         "lift_boundary",
         "note_declined_suggestion",
+        "set_preference",
         "privacy_mode",
     }
 
@@ -112,3 +118,68 @@ async def test_user_turn_recalls_nothing_in_privacy_mode() -> None:
     )
 
     assert turn_ctx.items == []
+
+
+def test_hinglish_replies_stay_in_roman_script() -> None:
+    from baatein.voice.languages import HINGLISH
+
+    assert "never Devanagari" in build_instructions(HINGLISH)
+
+
+def test_instructions_follow_persona_address_and_preferences() -> None:
+    text = build_instructions(
+        PROFILE, "Mohan", persona=ELDER, preferences=Preferences(fewer_questions=True)
+    )
+
+    assert ELDER.style in text
+    assert 'You are talking with Mohan. Address them as "Mohan ji".' in text
+    assert "it overrides the style above:\n- They don't like many questions" in text
+    assert "overrides" not in build_instructions(PROFILE, "Mohan")
+    assert 'Address the user as "Bauji".' in build_instructions(
+        PROFILE, preferences=Preferences(address_as="Bauji")
+    )
+
+
+class FakeTTS:
+    def __init__(self) -> None:
+        self.options: dict[str, Any] = {}
+
+    def update_options(self, **options: Any) -> None:
+        self.options.update(options)
+
+
+async def apply(profile: LanguageProfile, tts: object, preferences: Preferences) -> Assistant:
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+    assistant = Assistant(profile, "Mohan", memory=memory, memory_context="ctx", persona=ELDER)
+    assistant._activity = SimpleNamespace(session=SimpleNamespace(tts=tts))  # type: ignore[assignment]
+    instructions: list[str] = []
+
+    async def record(text: str) -> None:
+        instructions.append(text)
+
+    assistant.update_instructions = record  # type: ignore[method-assign]
+    await assistant.apply_preferences(preferences)
+    assistant.recorded = instructions  # type: ignore[attr-defined]
+    return assistant
+
+
+async def test_apply_preferences_updates_instructions_and_tts_pace() -> None:
+    tts = FakeTTS()
+    paced = LanguageProfile("h", ProviderSpec("s"), ProviderSpec("t"), "x", pace_option="pace")
+
+    assistant = await apply(paced, tts, Preferences(pace=Pace.SLOW, fewer_questions=True))
+
+    [text] = assistant.recorded  # type: ignore[attr-defined]
+    assert "don't like many questions" in text
+    assert "ctx" in text
+    assert tts.options == {"pace": 0.85}
+
+
+async def test_apply_preferences_skips_tts_without_a_pace_option() -> None:
+    tts = FakeTTS()
+
+    await apply(PROFILE, tts, Preferences(pace=Pace.SLOW))
+    await apply(PROFILE, None, Preferences(pace=Pace.SLOW))
+
+    assert tts.options == {}

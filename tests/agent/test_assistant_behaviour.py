@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any
 
 import pytest
@@ -9,10 +10,11 @@ from livekit.plugins import anthropic
 
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
-from baatein.domain.models import ThreadStatus
+from baatein.domain.models import Pace, ThreadStatus
 from baatein.memory.context_builder import render_context
 from baatein.memory.service import CallMemory
 from baatein.voice.languages import HINGLISH
+from baatein.voice.personas import CASUAL, ELDER, Persona
 from tests.factories import at, make_boundary, make_fact, make_session, make_thread
 from tests.fakes.world import World, build_world
 
@@ -78,12 +80,17 @@ def assistant_replies(result: RunResult[None]) -> list[str]:
 
 
 async def start_with_memory(
-    session: AgentSession[None], world: World, user_name: str | None = None
+    session: AgentSession[None],
+    world: World,
+    user_name: str | None = None,
+    persona: Persona = CASUAL,
 ) -> CallMemory:
     memory = await world.service.open_call(world.user)
     context = render_context(await memory.context())
     await session.start(
-        Assistant(HINGLISH, user_name=user_name, memory=memory, memory_context=context)
+        Assistant(
+            HINGLISH, user_name=user_name, memory=memory, memory_context=context, persona=persona
+        )
     )
     return memory
 
@@ -263,3 +270,62 @@ async def test_forgets_a_storyline_only_after_confirmation() -> None:
 
         await session.run(user_input="Haan, mita do.")
         assert thread_id not in world.state.threads
+
+
+DEVANAGARI = re.compile("[\u0900-\u097f]")
+
+
+async def test_elder_persona_is_respectful_and_brief() -> None:
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Mohan", persona=ELDER)
+
+        result = await session.run(user_input="Namaste beta. Aaj ghutno mein thoda dard tha.")
+
+        [reply] = assistant_replies(result)
+        assert re.search(r"\bji\b", reply, re.IGNORECASE), reply
+        assert reply.count("?") <= 1, reply
+        await result.expect.contains_message(role="assistant").judge(
+            llm,
+            intent="Replies respectfully to Mohan ji (respectful forms such as 'aap' or "
+            "'dikhaiye', never 'tum'), mostly in Hindi, in short simple sentences, with sympathy "
+            "and at most one question.",
+        )
+
+
+async def test_replies_in_roman_script_to_devanagari_input() -> None:
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        result = await session.run(user_input="आज मैंने अपनी बेटी से बहुत देर तक बात की।")
+
+        [reply] = assistant_replies(result)
+        assert not DEVANAGARI.search(reply), reply
+
+
+async def test_fewer_questions_when_asked_and_remembered() -> None:
+    """Scenario #21: "Arre, itne sawaal mat poochho"."""
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Kamala")
+
+        await session.run(user_input="Arre, itne sawaal mat poochho, bas suno.")
+        assert world.state.users[world.user.id].preferences.fewer_questions
+
+        result = await session.run(
+            user_input="Aaj bazaar gayi thi, sabzi bahut mehngi ho gayi hai aajkal."
+        )
+        [reply] = assistant_replies(result)
+        assert reply.count("?") <= 1, reply
+
+
+async def test_slower_speech_when_asked() -> None:
+    """Scenario #23: "Dheere bolo, sunai nahi diya"."""
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        await session.run(user_input="Thoda dheere bolo, sunai nahi diya.")
+
+        assert world.state.users[world.user.id].preferences.pace is Pace.SLOW

@@ -1,12 +1,19 @@
 import pytest
 
-from baatein.domain.errors import DuplicateEmailError
+from baatein.domain.errors import DuplicateEmailError, NotFoundError
+from baatein.domain.models import Pace, Preferences, Verbosity
 from tests.contract.conftest import Repos
 from tests.factories import make_user
 
 
 async def test_add_then_get_round_trips(repos: Repos) -> None:
-    user = make_user(display_name="Asha", language="english", timezone="Europe/London")
+    user = make_user(
+        display_name="Asha",
+        language="english",
+        timezone="Europe/London",
+        persona="elder",
+        preferences=Preferences("Asha ji", Pace.SLOW, Verbosity.SHORT, True),
+    )
 
     await repos.users.add(user)
 
@@ -40,3 +47,17 @@ async def test_duplicate_email_rejected_regardless_of_case(repos: Repos) -> None
 
     with pytest.raises(DuplicateEmailError):
         await repos.users.add(make_user(email="Asha@Example.com"))
+
+
+async def test_set_preferences_round_trips(repos: Repos) -> None:
+    user = make_user()
+    await repos.users.add(user)
+    preferences = Preferences(pace=Pace.FAST, verbosity=Verbosity.DETAILED)
+
+    await repos.users.set_preferences(user.id, preferences)
+
+    stored = await repos.users.get(user.id)
+    assert stored is not None
+    assert (stored.preferences, stored.persona) == (preferences, "casual")
+    with pytest.raises(NotFoundError):
+        await repos.users.set_preferences("missing", preferences)

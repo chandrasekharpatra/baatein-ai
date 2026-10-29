@@ -10,6 +10,8 @@ class LanguageProfile:
     stt: ProviderSpec
     tts: ProviderSpec
     reply_style: str
+    pace_option: str | None = None
+    """The TTS option that sets speaking speed, if the provider has one."""
 
 
 class UnknownLanguageError(LookupError):
@@ -48,8 +50,10 @@ HINGLISH = LanguageProfile(
     reply_style=(
         "Speak in natural, casual Hinglish the way urban Indians talk: mix Hindi and English "
         "freely, written in Roman script (e.g. 'Aaj ka din kaisa raha?'). Match the user's "
-        "balance of Hindi and English."
+        "balance of Hindi and English. Always write in Roman script, never Devanagari, even "
+        "when the user's words reach you in Devanagari."
     ),
+    pace_option="pace",
 )
 
 ENGLISH = LanguageProfile(

@@ -11,6 +11,8 @@ from baatein.domain.models import (
     BoundaryScope,
     Certainty,
     MemoryKind,
+    Pace,
+    Preferences,
     Sensitivity,
     ThreadKind,
     ThreadStatus,
@@ -78,6 +80,7 @@ async def test_tools_are_named_for_the_llm() -> None:
         "set_boundary",
         "lift_boundary",
         "note_declined_suggestion",
+        "set_preference",
         "privacy_mode",
     }
 
@@ -307,3 +310,23 @@ async def test_forget_thread_reports_outcomes() -> None:
     assert await tools["forget_thread"](run_context(user_messages=2), thread.id) == "Deleted."
     gone = await tools["forget_thread"](run_context(user_messages=3), thread.id)
     assert gone == "No storyline with that id."
+
+
+async def test_set_preference_saves_and_applies_right_away() -> None:
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+    applied: list[Preferences] = []
+
+    async def on_preferences(preferences: Preferences) -> None:
+        applied.append(preferences)
+
+    tools = {t.info.name: t for t in memory_tools(memory, on_preferences)}  # type: ignore[union-attr]
+
+    reply = await tools["set_preference"](pace="slow", fewer_questions=True, verbosity="chatty")
+
+    expected = Preferences(pace=Pace.SLOW, fewer_questions=True)
+    assert reply.startswith("Done.")
+    assert applied == [expected]
+    assert world.state.users[world.user.id].preferences == expected
+    _, plain = await tools_for(world)
+    assert (await plain["set_preference"](address_as="Mohan ji")).startswith("Done.")

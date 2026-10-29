@@ -14,11 +14,12 @@ from baatein.agent.assistant import Assistant
 from baatein.config import Settings
 from baatein.container import build_root
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import Role
+from baatein.domain.models import Pace, Preferences, Role
 from baatein.memory.service import MemoryService
 from baatein.ports.repos import UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import LanguageProfile, ProviderSpec
+from baatein.voice.personas import CASUAL, ELDER, PersonaRegistry, default_persona_registry
 from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
 from tests.factories import make_thread, make_user
 from tests.fakes.repos import InMemoryState, InMemoryUserRepo
@@ -64,9 +65,11 @@ class FakeFactory:
     def __init__(self, pipeline: VoicePipeline) -> None:
         self.pipeline = pipeline
         self.requested: list[str] = []
+        self.paces: list[float] = []
 
-    def build(self, language_code: str) -> VoicePipeline:
+    def build(self, language_code: str, pace: float = 1.0) -> VoicePipeline:
         self.requested.append(language_code)
+        self.paces.append(pace)
         return self.pipeline
 
 
@@ -128,7 +131,8 @@ async def test_entrypoint_starts_assistant_for_default_language(
     assert start_kwargs["room"] is room
     assert isinstance(start_kwargs["agent"], Assistant)
     assert reply == "generate_reply"
-    assert reply_kwargs == {"instructions": entrypoint.GREETING}
+    assert reply_kwargs == {"instructions": CASUAL.greeting}
+    assert factory.paces == [1.0]
     [close] = shutdown
     await close("done")
     assert database.closed
@@ -173,7 +177,12 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = InMemoryState()
-    user = make_user(display_name="Asha", language="english")
+    user = make_user(
+        display_name="Asha",
+        language="english",
+        persona="elder",
+        preferences=Preferences(pace=Pace.FAST),
+    )
     await InMemoryUserRepo(state).add(user)
     session = FakeSession()
     monkeypatch.setattr(entrypoint, "create_session", lambda p, v: session)
@@ -183,6 +192,7 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     injector.binder.bind(Settings, to=Settings(_env_file=None))  # type: ignore[call-arg]
     injector.binder.bind(VoicePipelineFactory, to=factory)  # type: ignore[arg-type]
     injector.binder.bind(UserRepo, to=InstanceProvider(InMemoryUserRepo(state)))  # type: ignore[type-abstract]
+    injector.binder.bind(PersonaRegistry, to=default_persona_registry())
     world = build_world()
     world.state.users[user.id] = user
     thread = make_thread(user.id, "Ask how the interview went")
@@ -201,9 +211,11 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     await entrypoint.entrypoint(ctx)  # type: ignore[arg-type]
     await ctx.proc.userdata["warm_up"]
 
-    assert factory.requested == ["english"]
+    assert (factory.requested, factory.paces) == (["english"], [1.15])
     agent = session.calls[0][1]["agent"]
-    assert "You are talking with Asha." in agent.instructions
+    assert 'You are talking with Asha. Address them as "Asha ji".' in agent.instructions
+    assert ELDER.style in agent.instructions
+    assert session.calls[1][1] == {"instructions": ELDER.greeting}
     assert f"[{thread.id}] Ask how the interview went" in agent.instructions
     assert "Today's one check-in." in agent.instructions
     [call] = world.state.sessions.values()
@@ -221,6 +233,16 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     ]
     assert world.state.sessions[call.id].end_reason == "user_left"
     assert database.closed
+
+
+def test_resolve_persona_falls_back_to_casual(caplog: pytest.LogCaptureFixture) -> None:
+    injector = Injector()
+    injector.binder.bind(PersonaRegistry, to=default_persona_registry())
+
+    assert entrypoint.resolve_persona(injector, None) is CASUAL
+    assert entrypoint.resolve_persona(injector, make_user(persona="elder")) is ELDER
+    assert entrypoint.resolve_persona(injector, make_user(persona="pirate")) is CASUAL
+    assert "unknown persona 'pirate'" in caplog.text
 
 
 async def test_end_call_closes_database_even_if_session_end_fails() -> None:

@@ -14,7 +14,9 @@ from baatein.domain.models import (
     BoundaryScope,
     DeclinedSuggestion,
     FinalizeStatus,
+    Pace,
     Person,
+    Preferences,
     Role,
     Sensitivity,
     Session,
@@ -24,6 +26,7 @@ from baatein.domain.models import (
     ThreadStatus,
     Turn,
     User,
+    Verbosity,
 )
 from baatein.storage.sqlite.db import Database
 from baatein.text import search_terms
@@ -71,7 +74,8 @@ class SqliteUserRepo:
             async with self._db.transaction() as conn:
                 await conn.execute(
                     "INSERT INTO users (id, email, password_hash, display_name, language,"
-                    " timezone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    " timezone, persona, address_as, pace, verbosity, fewer_questions,"
+                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user.id,
                         user.email,
@@ -79,6 +83,8 @@ class SqliteUserRepo:
                         user.display_name,
                         user.language,
                         user.timezone,
+                        user.persona,
+                        *_preference_values(user.preferences),
                         to_db(user.created_at),
                     ),
                 )
@@ -92,6 +98,15 @@ class SqliteUserRepo:
 
     async def get_by_email(self, email: str) -> User | None:
         return await self._one("SELECT * FROM users WHERE email = ?", email)
+
+    async def set_preferences(self, user_id: str, preferences: Preferences) -> None:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE users SET address_as = ?, pace = ?, verbosity = ?, fewer_questions = ?"
+                " WHERE id = ?",
+                (*_preference_values(preferences), user_id),
+            )
+            ensure_changed(cursor, "user", user_id)
 
     async def _one(self, sql: str, param: str) -> User | None:
         async with self._db.read() as conn, conn.execute(sql, (param,)) as cursor:
@@ -626,6 +641,22 @@ def _user(row: aiosqlite.Row) -> User:
         display_name=row["display_name"],
         language=row["language"],
         timezone=row["timezone"],
+        persona=row["persona"],
+        preferences=Preferences(
+            address_as=row["address_as"],
+            pace=Pace(row["pace"]) if row["pace"] else None,
+            verbosity=Verbosity(row["verbosity"]) if row["verbosity"] else None,
+            fewer_questions=bool(row["fewer_questions"]),
+        ),
+    )
+
+
+def _preference_values(preferences: Preferences) -> tuple[object, ...]:
+    return (
+        preferences.address_as,
+        preferences.pace.value if preferences.pace else None,
+        preferences.verbosity.value if preferences.verbosity else None,
+        int(preferences.fewer_questions),
     )
 
 

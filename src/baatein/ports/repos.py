@@ -5,6 +5,7 @@ from baatein.domain.models import (
     Boundary,
     DeclinedSuggestion,
     Person,
+    Preferences,
     Session,
     Thread,
     ThreadEvent,
@@ -17,6 +18,7 @@ class UserRepo(Protocol):
     async def add(self, user: User) -> None: ...
     async def get(self, user_id: str) -> User | None: ...
     async def get_by_email(self, email: str) -> User | None: ...
+    async def set_preferences(self, user_id: str, preferences: Preferences) -> None: ...
 
 
 class SessionRepo(Protocol):

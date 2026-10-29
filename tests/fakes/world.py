@@ -15,6 +15,7 @@ from tests.fakes.repos import (
     InMemorySuggestionRepo,
     InMemoryThreadRepo,
     InMemoryTurnRepo,
+    InMemoryUserRepo,
 )
 
 
@@ -34,6 +35,7 @@ def build_world(settings: MemorySettings | None = None) -> World:
     store = InMemoryMemoryStore(state, embedder, min_similarity=0.1)
     clock = FrozenClock()
     deps = MemoryDeps(
+        users=InMemoryUserRepo(state),
         sessions=InMemorySessionRepo(state),
         turns=InMemoryTurnRepo(state),
         people=InMemoryPeopleRepo(state),

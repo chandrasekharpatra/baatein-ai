@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from datetime import datetime, tzinfo
 from enum import StrEnum
 
@@ -7,9 +8,12 @@ from baatein.domain.models import (
     BoundaryScope,
     Certainty,
     MemoryKind,
+    Pace,
+    Preferences,
     Sensitivity,
     ThreadKind,
     ThreadStatus,
+    Verbosity,
 )
 from baatein.memory.context_builder import render_search
 from baatein.memory.service import CallMemory, ForgetOutcome
@@ -63,7 +67,10 @@ def choice[E: StrEnum, D](enum: type[E], value: str | None, default: D) -> E | D
         return default
 
 
-def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
+def memory_tools(
+    memory: CallMemory,
+    on_preferences: Callable[[Preferences], Awaitable[None]] | None = None,
+) -> list[llm.Tool | llm.Toolset]:
     @function_tool
     async def recall(query: str) -> str:
         """Look up what the user has asked you to remember, when they refer to something from
@@ -280,6 +287,34 @@ def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
         return "Noted. Never suggest it again."
 
     @function_tool
+    async def set_preference(
+        address_as: str | None = None,
+        pace: str | None = None,
+        verbosity: str | None = None,
+        fewer_questions: bool | None = None,
+    ) -> str:
+        """Change how you talk to the user when they ask, e.g. "dheere bolo" (pace "slow"),
+        "itne sawaal mat poochho" (fewer_questions), "chhota jawab do" (verbosity "short") or
+        "mujhe Mohan kaho" (address_as). It applies now and in later calls. Likes and dislikes
+        about other things ("chai mein elaichi nahi") are memories, not preferences.
+
+        Args:
+            address_as: How they want to be addressed, e.g. "Mohan ji".
+            pace: "slow", "normal" or "fast" speech.
+            verbosity: "short", "normal" or "detailed" replies.
+            fewer_questions: True if they want fewer questions, False to undo that.
+        """
+        preferences = await memory.set_preferences(
+            address_as=address_as,
+            pace=choice(Pace, pace, None),
+            verbosity=choice(Verbosity, verbosity, None),
+            fewer_questions=fewer_questions,
+        )
+        if on_preferences is not None:
+            await on_preferences(preferences)
+        return "Done. From now on, talk to them this way."
+
+    @function_tool
     async def privacy_mode() -> str:
         """Others can hear the user, e.g. "kamre mein mehmaan hain". For the rest of this call,
         don't say anything personal aloud."""
@@ -302,5 +337,6 @@ def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
         set_boundary,
         lift_boundary,
         note_declined_suggestion,
+        set_preference,
         privacy_mode,
     ]

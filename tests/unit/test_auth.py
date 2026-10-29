@@ -16,6 +16,7 @@ from baatein.domain.errors import (
     WeakPasswordError,
 )
 from baatein.voice.languages import UnknownLanguageError, default_language_registry
+from baatein.voice.personas import UnknownPersonaError, default_persona_registry
 from tests.factories import T0, make_user
 from tests.fakes.clock import FrozenClock
 from tests.fakes.repos import InMemoryState, InMemoryUserRepo
@@ -125,6 +126,7 @@ def service() -> tuple[AuthService, InMemoryUserRepo, RecordingHasher]:
         hasher,
         JwtAccessTokens(SECRET, timedelta(hours=1), FrozenClock()),
         default_language_registry(),
+        default_persona_registry(),
         FrozenClock(),
         default_language="hinglish",
     )
@@ -151,7 +153,17 @@ async def test_signup_defaults_language_and_blank_name(service) -> None:  # type
 
     user = await auth.signup("a@example.com", "password123", "   ")
 
-    assert (user.language, user.display_name) == ("hinglish", None)
+    assert (user.language, user.display_name, user.persona) == ("hinglish", None, "casual")
+
+
+async def test_signup_with_a_persona(service) -> None:  # type: ignore[no-untyped-def]
+    auth, users, _ = service
+
+    user = await auth.signup("a@example.com", "password123", persona="elder")
+
+    assert (await users.get(user.id)).persona == "elder"
+    with pytest.raises(UnknownPersonaError):
+        await auth.signup("b@example.com", "password123", persona="pirate")
 
 
 async def test_signup_rejects_weak_password_unknown_language_and_duplicates(service) -> None:  # type: ignore[no-untyped-def]

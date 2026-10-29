@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 from dotenv import find_dotenv, load_dotenv
 from injector import Injector
@@ -16,9 +17,16 @@ from baatein.memory.service import CallMemory, MemoryService
 from baatein.ports.repos import UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import migrate
+from baatein.voice.personas import (
+    CASUAL,
+    Persona,
+    PersonaRegistry,
+    UnknownPersonaError,
+    effective_pace,
+)
 from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
 
-GREETING = "Greet the user warmly in one short sentence and ask how their day is going."
+logger = logging.getLogger(__name__)
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -43,6 +51,17 @@ async def resolve_user(injector: Injector, metadata: str | None) -> User | None:
         return None
     users: UserRepo = injector.get(UserRepo)  # type: ignore[type-abstract]
     return await users.get(user_id)
+
+
+def resolve_persona(injector: Injector, user: User | None) -> Persona:
+    """The user's persona, or the casual one if theirs is no longer registered."""
+    if user is None:
+        return CASUAL
+    try:
+        return injector.get(PersonaRegistry).get(user.persona)
+    except UnknownPersonaError:
+        logger.warning("unknown persona %r for user %s, using casual", user.persona, user.id)
+        return CASUAL
 
 
 def create_session(pipeline: VoicePipeline, vad_model: vad.VAD) -> AgentSession[None]:
@@ -74,7 +93,9 @@ async def entrypoint(ctx: JobContext) -> None:
     injector: Injector = ctx.proc.userdata["injector"]
     user = await resolve_user(injector, ctx.job.metadata)
     language = user.language if user else injector.get(Settings).voice.default_language
-    pipeline = injector.get(VoicePipelineFactory).build(language)
+    persona = resolve_persona(injector, user)
+    pace = effective_pace(persona, user.preferences) if user else 1.0
+    pipeline = injector.get(VoicePipelineFactory).build(language, pace)
     session = create_session(pipeline, ctx.proc.userdata["vad"])
     user_name = user.display_name if user else None
     memory: CallMemory | None = None
@@ -85,7 +106,7 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(on_shutdown)
 
     if user is None:
-        assistant = Assistant(pipeline.profile, user_name=user_name)
+        assistant = Assistant(pipeline.profile, user_name=user_name, persona=persona)
     else:
         service = injector.get(MemoryService)
         # Runs alongside the greeting; kept in userdata so the task isn't garbage-collected.
@@ -100,11 +121,15 @@ async def entrypoint(ctx: JobContext) -> None:
 
         context = render_context(await memory.context())
         assistant = Assistant(
-            pipeline.profile, user_name=user_name, memory=memory, memory_context=context
+            pipeline.profile,
+            user_name=user_name,
+            memory=memory,
+            memory_context=context,
+            persona=persona,
         )
 
     await session.start(agent=assistant, room=ctx.room)
-    await session.generate_reply(instructions=GREETING)
+    await session.generate_reply(instructions=persona.greeting)
 
 
 def main() -> None:

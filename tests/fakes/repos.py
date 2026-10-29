@@ -12,6 +12,7 @@ from baatein.domain.models import (
     DeclinedSuggestion,
     FinalizeStatus,
     Person,
+    Preferences,
     Session,
     Thread,
     ThreadEvent,
@@ -49,6 +50,11 @@ class InMemoryUserRepo:
         return next(
             (u for u in self._state.users.values() if u.email.lower() == email.lower()), None
         )
+
+    async def set_preferences(self, user_id: str, preferences: Preferences) -> None:
+        if user_id not in self._state.users:
+            raise NotFoundError("user", user_id)
+        self._state.users[user_id] = replace(self._state.users[user_id], preferences=preferences)
 
 
 class InMemorySessionRepo:

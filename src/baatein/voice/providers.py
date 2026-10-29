@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from livekit.agents import llm, stt, tts
@@ -64,11 +64,14 @@ class VoicePipelineFactory:
         self._llm = llm
         self._llm_spec = llm_spec
 
-    def build(self, language_code: str) -> VoicePipeline:
+    def build(self, language_code: str, pace: float = 1.0) -> VoicePipeline:
         profile = self._languages.get(language_code)
+        tts_spec = profile.tts
+        if profile.pace_option and pace != 1.0:
+            tts_spec = replace(tts_spec, options={**tts_spec.options, profile.pace_option: pace})
         return VoicePipeline(
             profile=profile,
             stt=self._stt.create(profile.stt),
             llm=self._llm.create(self._llm_spec),
-            tts=self._tts.create(profile.tts),
+            tts=self._tts.create(tts_spec),
         )

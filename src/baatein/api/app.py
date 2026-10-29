@@ -20,6 +20,7 @@ from baatein.domain.models import User
 from baatein.ports.auth import CallTokenIssuer
 from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import UnknownLanguageError
+from baatein.voice.personas import UnknownPersonaError
 
 
 class SignupRequest(BaseModel):
@@ -27,6 +28,7 @@ class SignupRequest(BaseModel):
     password: str = Field(max_length=256)
     display_name: str | None = Field(default=None, max_length=80)
     language: str | None = None
+    persona: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -39,11 +41,16 @@ class UserOut(BaseModel):
     email: str
     display_name: str | None
     language: str
+    persona: str
 
     @classmethod
     def of(cls, user: User) -> "UserOut":
         return cls(
-            id=user.id, email=user.email, display_name=user.display_name, language=user.language
+            id=user.id,
+            email=user.email,
+            display_name=user.display_name,
+            language=user.language,
+            persona=user.persona,
         )
 
 
@@ -65,6 +72,7 @@ ERROR_STATUS: dict[type[Exception], int] = {
     InvalidTokenError: status.HTTP_401_UNAUTHORIZED,
     WeakPasswordError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     UnknownLanguageError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    UnknownPersonaError: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 bearer = HTTPBearer(auto_error=False)
@@ -117,7 +125,9 @@ def create_app(injector: Injector) -> FastAPI:
 
     @app.post("/auth/signup", status_code=status.HTTP_201_CREATED)
     async def signup(body: SignupRequest, auth: Auth) -> SessionOut:
-        user = await auth.signup(body.email, body.password, body.display_name, body.language)
+        user = await auth.signup(
+            body.email, body.password, body.display_name, body.language, body.persona
+        )
         return SessionOut(access_token=auth.issue_token(user), user=UserOut.of(user))
 
     @app.post("/auth/login")
