@@ -70,6 +70,34 @@ class InMemoryMemoryStore:
         scored.sort(key=lambda s: (-s.score, -s.fact.importance, -s.fact.created_at.timestamp()))
         return scored[:limit]
 
+    async def count_about(self, person_id: str) -> int:
+        return sum(
+            1 for f in self._facts.values() if f.about_person_id == person_id and f.is_active
+        )
+
+    async def forget(self, fact_id: str, at: datetime) -> list[str]:
+        self._require(fact_id)
+        chain: list[Fact] = []
+        frontier = {fact_id}
+        while frontier:
+            found = [
+                f
+                for f in self._facts.values()
+                if (f.id in frontier or f.superseded_by in frontier) and f not in chain
+            ]
+            chain += found
+            frontier = {f.id for f in found}
+        for fact in chain:
+            self._facts[fact.id] = replace(
+                fact,
+                text="",
+                quote=None,
+                deleted_at=fact.deleted_at or at,
+                retired_at=fact.retired_at or at,
+            )
+            self._vectors.pop(fact.id, None)
+        return sorted({f.source_session_id for f in chain if f.source_session_id})
+
     def _require(self, fact_id: str) -> Fact:
         try:
             return self._facts[fact_id]

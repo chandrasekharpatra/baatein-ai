@@ -6,11 +6,24 @@ import aiosqlite
 from sqlite_vec import serialize_float32
 
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import Fact, FactCategory, ScoredFact
+from baatein.domain.models import (
+    Certainty,
+    Fact,
+    FactCategory,
+    MemoryKind,
+    ScoredFact,
+    Sensitivity,
+)
 from baatein.memory.ranking import reciprocal_rank_fusion
 from baatein.ports.embedder import Embedder
 from baatein.storage.sqlite.db import Database
-from baatein.storage.sqlite.repos import fts_query, is_fk_violation, required, to_db
+from baatein.storage.sqlite.repos import (
+    from_db,
+    fts_query,
+    is_fk_violation,
+    required,
+    to_db,
+)
 
 CANDIDATE_MULTIPLIER = 4
 REINDEX_BATCH = 64
@@ -129,6 +142,43 @@ class SqliteMemoryStore:
         scored.sort(key=lambda s: (-s.score, -s.fact.importance, -s.fact.created_at.timestamp()))
         return scored[:limit]
 
+    async def count_about(self, person_id: str) -> int:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT COUNT(*) FROM facts WHERE about_person_id = ? AND retired_at IS NULL",
+                (person_id,),
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def forget(self, fact_id: str, at: datetime) -> list[str]:
+        await self._ensure_index()
+        async with self._db.transaction() as conn:
+            await self._lookup(conn, fact_id)
+            chain: dict[int, str | None] = {}
+            frontier = [fact_id]
+            while frontier:
+                marks = ", ".join("?" * len(frontier))
+                async with conn.execute(
+                    "SELECT pk, id, source_session_id FROM facts"
+                    f" WHERE id IN ({marks}) OR superseded_by IN ({marks})",
+                    (*frontier, *frontier),
+                ) as cursor:
+                    rows = [row for row in await cursor.fetchall() if row["pk"] not in chain]
+                chain |= {row["pk"]: row["source_session_id"] for row in rows}
+                frontier = [row["id"] for row in rows]
+            for pk in chain:
+                await conn.execute(
+                    "UPDATE facts SET text = '', quote = NULL,"
+                    " deleted_at = COALESCE(deleted_at, ?), retired_at = COALESCE(retired_at, ?)"
+                    " WHERE pk = ?",
+                    (to_db(at), to_db(at), pk),
+                )
+                await conn.execute(f"DELETE FROM {self._table} WHERE rowid = ?", (pk,))
+        return sorted({session_id for session_id in chain.values() if session_id})
+
     async def rebuild_index(self) -> int:
         async with self._db.transaction() as conn:
             await conn.execute(f"DROP TRIGGER IF EXISTS {self._table}_ad")
@@ -179,7 +229,8 @@ class SqliteMemoryStore:
     async def _insert(self, conn: aiosqlite.Connection, fact: Fact, vector: list[float]) -> None:
         cursor = await conn.execute(
             "INSERT INTO facts (id, user_id, text, category, importance, source_session_id,"
-            " superseded_by, created_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " superseded_by, created_at, retired_at, kind, quote, about_person_id, certainty,"
+            " sensitivity, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 fact.id,
                 fact.user_id,
@@ -190,6 +241,12 @@ class SqliteMemoryStore:
                 fact.superseded_by,
                 to_db(fact.created_at),
                 to_db(fact.retired_at),
+                fact.kind.value,
+                fact.quote,
+                fact.about_person_id,
+                fact.certainty.value,
+                fact.sensitivity.value,
+                to_db(fact.deleted_at),
             ),
         )
         if fact.is_active:
@@ -220,5 +277,11 @@ def _fact(row: aiosqlite.Row) -> Fact:
         importance=row["importance"],
         source_session_id=row["source_session_id"],
         superseded_by=row["superseded_by"],
-        retired_at=None if row["retired_at"] is None else required(row["retired_at"]),
+        retired_at=from_db(row["retired_at"]),
+        kind=MemoryKind(row["kind"]),
+        quote=row["quote"],
+        about_person_id=row["about_person_id"],
+        certainty=Certainty(row["certainty"]),
+        sensitivity=Sensitivity(row["sensitivity"]),
+        deleted_at=from_db(row["deleted_at"]),
     )

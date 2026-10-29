@@ -9,6 +9,7 @@ from tests.fakes.embedder import FakeEmbedder
 from tests.fakes.memory import InMemoryMemoryStore
 from tests.fakes.repos import (
     InMemoryFollowUpRepo,
+    InMemoryPeopleRepo,
     InMemorySessionRepo,
     InMemoryState,
     InMemoryTurnRepo,
@@ -34,6 +35,7 @@ def build_world(settings: MemorySettings | None = None) -> World:
         sessions=InMemorySessionRepo(state),
         turns=InMemoryTurnRepo(state),
         followups=InMemoryFollowUpRepo(state),
+        people=InMemoryPeopleRepo(state),
         store=store,
         clock=clock,
         settings=settings or MemorySettings(),

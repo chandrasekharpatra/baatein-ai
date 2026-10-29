@@ -4,10 +4,10 @@ from typing import Any
 import pytest
 from livekit.agents import llm
 
-from baatein.agent.tools import memory_tools, parse_due_date
-from baatein.domain.models import FollowUpStatus
+from baatein.agent.tools import PAUSED, choice, memory_tools, parse_due_date
+from baatein.domain.models import Certainty, FollowUpStatus, MemoryKind, Sensitivity
 from baatein.memory.service import CallMemory
-from tests.factories import make_fact, make_followup
+from tests.factories import make_followup
 from tests.fakes.world import World, build_world
 
 
@@ -41,16 +41,102 @@ async def tools_for(world: World) -> tuple[CallMemory, dict[str, Any]]:
 async def test_tools_are_named_for_the_llm() -> None:
     _, tools = await tools_for(build_world())
 
-    assert set(tools) == {"recall_memory", "add_followup", "resolve_followup"}
+    assert set(tools) == {
+        "recall",
+        "remember",
+        "correct_memory",
+        "forget",
+        "pause_saving",
+        "rename_person",
+        "add_followup",
+        "resolve_followup",
+    }
 
 
-async def test_recall_memory_renders_search_results() -> None:
+async def test_recall_renders_saved_memories_with_people() -> None:
     world = build_world()
-    await world.store.add(make_fact(world.user.id, "Plays cricket on Sundays"))
+    memory, tools = await tools_for(world)
+    fact = await memory.remember("Plays cricket with Ravi on Sundays", about="Ravi", relation="son")
+    assert fact is not None
+
+    assert await tools["recall"]("cricket") == (
+        f"- [{fact.id}] Plays cricket with Ravi on Sundays (about Ravi (son))"
+    )
+    assert (await tools["recall"]("zebra")).startswith("Nothing saved about that.")
+
+
+async def test_remember_saves_with_kind_sensitivity_and_uncertainty() -> None:
+    world = build_world()
     _, tools = await tools_for(world)
 
-    assert "- Plays cricket on Sundays" in await tools["recall_memory"]("cricket")
-    assert await tools["recall_memory"]("zebra") == "Nothing found in memory."
+    reply = await tools["remember"](
+        "Mother made a special Diwali pulao",
+        kind="story",
+        quote="Woh masala khud banaati thi",
+        about="Maa",
+        relation="mother",
+        sensitivity="personal",
+        uncertain=True,
+    )
+
+    [fact] = await world.store.active(world.user.id, limit=5)
+    assert reply == f"Saved as [{fact.id}]."
+    assert (fact.kind, fact.sensitivity, fact.certainty, fact.quote) == (
+        MemoryKind.STORY,
+        Sensitivity.PERSONAL,
+        Certainty.UNCERTAIN,
+        "Woh masala khud banaati thi",
+    )
+
+
+async def test_remember_defaults_to_a_sure_normal_fact() -> None:
+    world = build_world()
+    _, tools = await tools_for(world)
+
+    await tools["remember"]("Likes masala chai")
+
+    [fact] = await world.store.active(world.user.id, limit=5)
+    assert (fact.kind, fact.sensitivity, fact.certainty, fact.about_person_id) == (
+        MemoryKind.FACT,
+        Sensitivity.NORMAL,
+        Certainty.SURE,
+        None,
+    )
+
+
+async def test_pause_saving_blocks_remember_and_followups() -> None:
+    world = build_world()
+    _, tools = await tools_for(world)
+
+    assert await tools["pause_saving"]() == "Saving is off for this call."
+    assert await tools["remember"]("Likes gardening") == PAUSED
+    assert await tools["add_followup"]("Ask about the garden") == PAUSED
+    assert world.state.followups == {}
+
+
+async def test_correct_memory_and_forget_report_outcomes() -> None:
+    world = build_world()
+    memory, tools = await tools_for(world)
+    fact = await memory.remember("Suman is my sister")
+    assert fact is not None
+
+    corrected = await tools["correct_memory"](fact.id, "Sunita is my neighbour")
+    [current] = await world.store.active(world.user.id, limit=5)
+
+    assert corrected == f"Corrected as [{current.id}]."
+    assert await tools["correct_memory"](fact.id, "x") == "No current memory with that id."
+    assert await tools["forget"](current.id) == "Deleted."
+    assert await tools["forget"](current.id) == "No saved memory with that id."
+    assert await world.store.active(world.user.id, limit=5) == []
+
+
+async def test_rename_person_reports_outcome() -> None:
+    world = build_world()
+    memory, tools = await tools_for(world)
+    await memory.person("Suman")
+
+    assert await tools["rename_person"]("Suman", "Sunita") == "Renamed."
+    assert await tools["rename_person"]("Suman", "X") == "No saved person with that name."
 
 
 async def test_add_followup_saves_with_parsed_date() -> None:
@@ -77,3 +163,28 @@ async def test_resolve_followup_reports_outcome() -> None:
     assert await tools["resolve_followup"](followup.id, "dropped") == (
         "No open follow-up with that id."
     )
+
+
+def _schemas_with_enums(node: object) -> list[dict[str, Any]]:
+    if isinstance(node, dict):
+        found = [node] if "enum" in node else []
+        return found + [s for value in node.values() for s in _schemas_with_enums(value)]
+    if isinstance(node, list):
+        return [s for value in node for s in _schemas_with_enums(value)]
+    return []
+
+
+async def test_strict_anthropic_schemas_keep_enums_consistent_with_nullable_types() -> None:
+    _, tools = await tools_for(build_world())
+    schemas = llm.ToolContext(list(tools.values())).parse_function_tools("anthropic", strict=True)
+
+    for schema in _schemas_with_enums(schemas):
+        types = schema.get("type")
+        if isinstance(types, list) and "null" in types:
+            assert None in schema["enum"], schema
+
+
+def test_choice_falls_back_to_default_for_missing_or_unknown_values() -> None:
+    assert choice(MemoryKind, "story", MemoryKind.FACT) is MemoryKind.STORY
+    assert choice(MemoryKind, None, MemoryKind.FACT) is MemoryKind.FACT
+    assert choice(MemoryKind, "anecdote", MemoryKind.FACT) is MemoryKind.FACT

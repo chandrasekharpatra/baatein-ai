@@ -4,17 +4,19 @@ from pathlib import Path
 
 import pytest
 
-from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
+from baatein.ports.repos import FollowUpRepo, PeopleRepo, SessionRepo, TurnRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import (
     SqliteFollowUpRepo,
+    SqlitePeopleRepo,
     SqliteSessionRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
 )
 from tests.fakes.repos import (
     InMemoryFollowUpRepo,
+    InMemoryPeopleRepo,
     InMemorySessionRepo,
     InMemoryState,
     InMemoryTurnRepo,
@@ -28,6 +30,7 @@ class Repos:
     sessions: SessionRepo
     turns: TurnRepo
     followups: FollowUpRepo
+    people: PeopleRepo
 
 
 @pytest.fixture(params=["sqlite", "memory"])
@@ -39,6 +42,7 @@ async def repos(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator
             InMemorySessionRepo(state),
             InMemoryTurnRepo(state),
             InMemoryFollowUpRepo(state),
+            InMemoryPeopleRepo(state),
         )
         return
 
@@ -46,6 +50,10 @@ async def repos(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator
     migrate(path)
     db = Database(path)
     yield Repos(
-        SqliteUserRepo(db), SqliteSessionRepo(db), SqliteTurnRepo(db), SqliteFollowUpRepo(db)
+        SqliteUserRepo(db),
+        SqliteSessionRepo(db),
+        SqliteTurnRepo(db),
+        SqliteFollowUpRepo(db),
+        SqlitePeopleRepo(db),
     )
     await db.close()

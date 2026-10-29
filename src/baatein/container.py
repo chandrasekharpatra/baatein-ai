@@ -14,11 +14,12 @@ from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
+from baatein.ports.repos import FollowUpRepo, PeopleRepo, SessionRepo, TurnRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
     SqliteFollowUpRepo,
+    SqlitePeopleRepo,
     SqliteSessionRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
@@ -70,6 +71,11 @@ class StorageModule(Module):
     def followups(self, db: Database) -> FollowUpRepo:
         return SqliteFollowUpRepo(db)
 
+    @singleton
+    @provider
+    def people(self, db: Database) -> PeopleRepo:
+        return SqlitePeopleRepo(db)
+
 
 class MemoryModule(Module):
     @singleton
@@ -102,11 +108,12 @@ class MemoryModule(Module):
         sessions: SessionRepo,
         turns: TurnRepo,
         followups: FollowUpRepo,
+        people: PeopleRepo,
         store: MemoryStore,
         embedder: Embedder,
         clock: Clock,
     ) -> MemoryService:
-        deps = MemoryDeps(sessions, turns, followups, store, clock, settings.memory)
+        deps = MemoryDeps(sessions, turns, followups, people, store, clock, settings.memory)
         return MemoryService(deps, embedder)
 
 

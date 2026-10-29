@@ -30,8 +30,9 @@ def test_instructions_include_memory_context_and_guidance() -> None:
     text = build_instructions(PROFILE, memory_context="Today is Thu 1 Jan 2026.")
 
     assert "Today is Thu 1 Jan 2026." in text
-    assert "add_followup" in text
-    assert "add_followup" not in build_instructions(PROFILE)
+    assert "Kya main yeh yaad rakhun?" in text
+    assert "pause_saving" in text
+    assert "pause_saving" not in build_instructions(PROFILE)
 
 
 def test_assistant_without_memory_has_no_tools() -> None:
@@ -45,7 +46,16 @@ async def test_assistant_with_memory_exposes_memory_tools() -> None:
     assistant = Assistant(PROFILE, memory=memory, memory_context="ctx")
 
     names = {tool.info.name for tool in assistant.tools if isinstance(tool, llm.FunctionTool)}
-    assert names == {"recall_memory", "add_followup", "resolve_followup"}
+    assert names == {
+        "recall",
+        "remember",
+        "correct_memory",
+        "forget",
+        "pause_saving",
+        "rename_person",
+        "add_followup",
+        "resolve_followup",
+    }
 
 
 async def test_user_turn_injects_recalled_facts() -> None:

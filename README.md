@@ -4,7 +4,7 @@ A Hinglish voice companion that remembers you. Talk to it in the browser in the 
 
 Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam and SQLite. Python 3.12, no Docker.
 
-> **Status:** Phases 0–4 of 6 are done. You can sign up, start a call and have a live Hinglish voice conversation. Calls are saved turn by turn, the agent starts with what it remembers, looks up relevant facts on every turn, and saves follow-ups ("ask how Friday's interview went") for the next call. Turning finished calls into summaries and facts is Phase 5. See [Roadmap](#roadmap) and [docs/PLAN.md](docs/PLAN.md).
+> **Status:** Phases 0–4 of 6 are done. You can sign up, start a call and have a live Hinglish voice conversation. Calls are saved turn by turn, the agent starts with what it remembers, looks up relevant memories on every turn, and saves follow-ups ("ask how Friday's interview went") for the next call. Phase 5 is in progress: memories are now saved only after the user agrees ("Kya main yeh yaad rakhun?"), and can be corrected or forgotten. See [docs/PHASE5_SLICES.md](docs/PHASE5_SLICES.md). See [Roadmap](#roadmap) and [docs/PLAN.md](docs/PLAN.md).
 
 ## How it works
 
@@ -19,7 +19,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 
 1. The web client signs you up or logs you in and gets an access token.
 2. `/livekit/token` creates a fresh room and a LiveKit token that dispatches the `baatein` agent, signed with your user id.
-3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens; on each of your turns it searches your facts, and it can save or resolve follow-ups.
+3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens (with codes and long numbers redacted); on each of your turns it searches your saved memories. It asks before saving anything, and can correct or forget a memory when you ask.
 
 ## Tech stack
 

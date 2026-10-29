@@ -5,36 +5,59 @@ from pathlib import Path
 import pytest
 
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import FactCategory
+from baatein.domain.models import (
+    Certainty,
+    FactCategory,
+    MemoryKind,
+    Person,
+    Sensitivity,
+)
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import UserRepo
+from baatein.ports.repos import PeopleRepo, SessionRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.migrate import migrate
-from baatein.storage.sqlite.repos import SqliteUserRepo
-from tests.factories import at, make_fact, make_user
+from baatein.storage.sqlite.repos import SqlitePeopleRepo, SqliteSessionRepo, SqliteUserRepo
+from tests.factories import T0, at, make_fact, make_session, make_user
 from tests.fakes.embedder import FakeEmbedder
 from tests.fakes.memory import InMemoryMemoryStore
-from tests.fakes.repos import InMemoryState, InMemoryUserRepo
+from tests.fakes.repos import (
+    InMemoryPeopleRepo,
+    InMemorySessionRepo,
+    InMemoryState,
+    InMemoryUserRepo,
+)
 
 
 @dataclass(frozen=True)
 class Memory:
     store: MemoryStore
     users: UserRepo
+    sessions: SessionRepo
+    people: PeopleRepo
 
 
 @pytest.fixture(params=["sqlite", "memory"])
 async def memory(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[Memory]:
     if request.param == "memory":
         state = InMemoryState()
-        yield Memory(InMemoryMemoryStore(state, FakeEmbedder()), InMemoryUserRepo(state))
+        yield Memory(
+            InMemoryMemoryStore(state, FakeEmbedder()),
+            InMemoryUserRepo(state),
+            InMemorySessionRepo(state),
+            InMemoryPeopleRepo(state),
+        )
         return
 
     path = tmp_path / "test.db"
     migrate(path)
     db = Database(path)
-    yield Memory(SqliteMemoryStore(db, FakeEmbedder()), SqliteUserRepo(db))
+    yield Memory(
+        SqliteMemoryStore(db, FakeEmbedder()),
+        SqliteUserRepo(db),
+        SqliteSessionRepo(db),
+        SqlitePeopleRepo(db),
+    )
     await db.close()
 
 
@@ -170,3 +193,84 @@ async def test_retire_hides_fact_and_is_idempotent(memory: Memory) -> None:
 async def test_retire_missing_raises(memory: Memory) -> None:
     with pytest.raises(NotFoundError):
         await memory.store.retire("missing", at(0))
+
+
+async def add_session(memory: Memory, user_id: str) -> str:
+    session = make_session(user_id)
+    await memory.sessions.add(session)
+    return session.id
+
+
+async def test_memory_fields_round_trip(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    ramesh = Person("p-ramesh", user_id, "Ramesh", T0, relation="college friend")
+    await memory.people.add(ramesh)
+    fact = make_fact(
+        user_id,
+        "Misses college friend Ramesh",
+        kind=MemoryKind.STORY,
+        quote="Hum har shaam saath chai peete the",
+        about_person_id=ramesh.id,
+        certainty=Certainty.UNCERTAIN,
+        sensitivity=Sensitivity.PERSONAL,
+        source_session_id=await add_session(memory, user_id),
+    )
+
+    await memory.store.add(fact)
+
+    assert await memory.store.get(fact.id) == fact
+
+
+async def test_forget_tombstones_fact_and_earlier_versions(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    first, second = await add_session(memory, user_id), await add_session(memory, user_id)
+    original = make_fact(user_id, "Suman is my sister", quote="Suman", source_session_id=first)
+    await memory.store.add(original)
+    corrected = make_fact(
+        user_id, "Sunita is my neighbour", created_at=at(5), source_session_id=second
+    )
+    await memory.store.supersede(original.id, corrected)
+    unrelated = make_fact(user_id, "Likes masala chai")
+    await memory.store.add(unrelated)
+
+    sessions = await memory.store.forget(corrected.id, at(10))
+
+    assert sessions == sorted([first, second])
+    for fact_id in (original.id, corrected.id):
+        tombstone = await memory.store.get(fact_id)
+        assert tombstone is not None
+        assert (tombstone.text, tombstone.quote) == ("", None)
+        assert tombstone.is_deleted
+        assert not tombstone.is_active
+    assert (await memory.store.get(corrected.id)).deleted_at == at(10)  # type: ignore[union-attr]
+    assert await memory.store.active(user_id, limit=10) == [unrelated]
+    assert await memory.store.search(user_id, "Sunita neighbour Suman sister", limit=5) == []
+
+
+async def test_forget_is_idempotent_and_keeps_first_deletion_time(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    fact = make_fact(user_id, "Something private")
+    await memory.store.add(fact)
+    await memory.store.forget(fact.id, at(1))
+
+    assert await memory.store.forget(fact.id, at(2)) == []
+    assert (await memory.store.get(fact.id)).deleted_at == at(1)  # type: ignore[union-attr]
+
+
+async def test_forget_missing_raises(memory: Memory) -> None:
+    with pytest.raises(NotFoundError):
+        await memory.store.forget("missing", at(0))
+
+
+async def test_count_about_counts_current_facts_only(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    await memory.people.add(Person("p1", user_id, "Ravi", T0))
+    current = make_fact(user_id, "Ravi plays cricket", about_person_id="p1")
+    retired = make_fact(user_id, "Ravi lives in Pune", about_person_id="p1")
+    for fact in (current, retired, make_fact(user_id, "Likes chai")):
+        await memory.store.add(fact)
+    await memory.store.retire(retired.id, at(1))
+
+    assert await memory.store.count_about("p1") == 1
+    await memory.store.forget(current.id, at(2))
+    assert await memory.store.count_about("p1") == 0

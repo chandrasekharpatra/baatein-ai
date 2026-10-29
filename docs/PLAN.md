@@ -6,10 +6,12 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 **Done:** Phases 0–4. You can sign up in the web client, start a call and have a live Hinglish voice conversation (Sarvam STT → Claude Haiku 5.5 → Sarvam TTS). Each call now has a `sessions` row, every message is saved as a turn while the call runs, the agent starts with memory context (recent summaries, open follow-ups, top facts), searches facts on every user turn, and has `recall_memory`, `add_followup` and `resolve_followup` tools. Verified end to end on 2026-10-29: in one call the user mentioned an interview and the agent saved a dated follow-up; in the next call it remembered the interview and resolved the follow-up.
 
-**Not yet:** nothing turns a finished call into summaries or memories, and memory is saved without asking the user first.
+**Phase 5 progress:** slice 1 is done (2026-10-29): memories are saved only after the user agrees, can be corrected, and can be forgotten (tombstone). Verified live: Baatein asked "Kya main yeh yaad rakhun?", saved only after "Haan, yaad rakhna", and on "bhool jao" deleted the memory, redacted the call it came from and removed the person.
+
+**Not yet:** nothing turns a finished call into a summary, follow-ups are still the Phase 4 kind, and every open follow-up goes into every call (slices 2–6).
 
 **Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
-1. Memory structure, consent-only saving, correct and forget
+1. Memory structure, consent-only saving, correct and forget ✅
 2. Threads, boundaries and the call-start context
 3. Persona and preferences
 4. Reminders (delivered in conversation only)
@@ -25,6 +27,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 **How to run** (see README): `cp .env.example .env` and fill keys, then `livekit-server --dev`, `uv run baatein-agent dev`, `uv run baatein serve`, open http://localhost:8000.
 
 **Gotchas found so far**
+- Anthropic rejects a tool parameter that has an enum and a nullable type (`Enum value 'fact' does not match declared type ['string', 'null']`). The LiveKit plugin makes every defaulted parameter nullable in strict mode, so optional parameters with fixed choices are plain `str | None` and mapped with `agent/tools.py:choice`. `tests/unit/test_tools.py` checks the generated schemas.
 - Claude 5.5 rejects `temperature`; `BAATEIN_LLM__TEMPERATURE` is unset by default and only sent when set.
 - LiveKit's test judge hardcodes `temperature=0.0`; `tests/agent/test_assistant_behaviour.py` uses a `JudgeLLM` subclass that strips it.
 - The agent CLI doesn't read `.env` by itself; `entrypoint.main()` loads it from the current directory before LiveKit spawns workers.
@@ -287,7 +290,9 @@ Design and the full scenario review are in `docs/MEMORY_DESIGN.md`. Decisions: s
 
 Each slice below says **what it is for, with a scenario from the library**, then what changes and how it is tested. Scenario numbers refer to the library (#1–45). Every slice is committed separately, keeps coverage at 100%, and is checked with a live probe call before the next one starts.
 
-### Slice 1: memory structure, consent, correct and forget
+### Slice 1: memory structure, consent, correct and forget ✅
+
+**As built:** the `facts` table and `Fact` model were extended rather than renamed. There is no consent column: with strict consent a memory can only be created through `remember` after a "yes", and `source_session_id` is the call where the user agreed. `forget` tombstones the memory and every earlier version it replaced, redacts the whole transcript of each call those versions came from (the transcript is in Devanagari while memories are in English, so the exact lines can't be matched reliably), clears those calls' summaries, and deletes the person if no current memory is about them. `rename_person` was added for name corrections (#12); `recall_memory` became `recall` over saved memories only. Turns are redacted for codes and long numbers as they are written.
 
 **Why, in the scenarios**
 - #1 Mohan: *"Kya main yaad rakhun ki aap Ramesh ko miss karte hain?" "Haan, yaad rakhna."* Only after this "haan" may anything be saved.

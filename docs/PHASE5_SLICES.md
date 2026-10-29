@@ -23,7 +23,7 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 
 | Slice | In one line | Key scenarios |
 |---|---|---|
-| 1 | Save only with permission; correct and forget | #1, #12, #13, #14, #25, #33 |
+| 1 ✅ | Save only with permission; correct and forget | #1, #12, #13, #14, #25, #33 |
 | 2 | Storylines (threads), boundaries, and a smarter call-start context | #1, #5, #8, #11, #15, #16, #19, #29, #31, #32 |
 | 3 | Persona and how each user likes to talk | #21, #22, #23, #28, #30 |
 | 4 | Dated reminders, brought up in the next conversation | #34–45 |
@@ -32,7 +32,9 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 
 ---
 
-## Slice 1: save only with permission; correct and forget
+## Slice 1: save only with permission; correct and forget ✅ done
+
+**Status:** built and verified live on 2026-10-29. Differences from the brief: the `facts` table was extended rather than renamed; consent needs no column (only `remember` creates memories, after a yes); `forget` also redacts the whole transcript of the call the memory came from and deletes the person when nothing else is about them; a `rename_person` tool handles name corrections; `remember`'s `kind` and `sensitivity` are plain strings because Anthropic rejects enums on optional parameters.
 
 ### Example (#1 and #13)
 ```

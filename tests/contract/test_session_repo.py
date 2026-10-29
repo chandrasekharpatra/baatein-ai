@@ -122,3 +122,18 @@ async def test_set_memory_synced_seq(repos: Repos) -> None:
 async def test_updates_on_missing_session_raise(repos: Repos, action) -> None:  # type: ignore[no-untyped-def]
     with pytest.raises(NotFoundError):
         await action(repos)
+
+
+async def test_clear_summary(repos: Repos) -> None:
+    user = make_user()
+    await repos.users.add(user)
+    session = make_session(user.id, summary="Talked about Ramesh")
+    await repos.sessions.add(session)
+
+    await repos.sessions.clear_summary(session.id)
+
+    stored = await repos.sessions.get(session.id)
+    assert stored is not None
+    assert stored.summary is None
+    with pytest.raises(NotFoundError):
+        await repos.sessions.clear_summary("missing")

@@ -1,8 +1,21 @@
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-from baatein.domain.errors import DuplicateEmailError, DuplicateTurnError, NotFoundError
-from baatein.domain.models import FinalizeStatus, FollowUp, FollowUpStatus, Session, Turn, User
+from baatein.domain.errors import (
+    DuplicateEmailError,
+    DuplicatePersonError,
+    DuplicateTurnError,
+    NotFoundError,
+)
+from baatein.domain.models import (
+    FinalizeStatus,
+    FollowUp,
+    FollowUpStatus,
+    Person,
+    Session,
+    Turn,
+    User,
+)
 from baatein.text import search_terms, words
 
 
@@ -12,6 +25,7 @@ class InMemoryState:
     sessions: dict[str, Session] = field(default_factory=dict)
     turns: list[Turn] = field(default_factory=list)
     followups: dict[str, FollowUp] = field(default_factory=dict)
+    people: dict[str, Person] = field(default_factory=dict)
 
 
 class InMemoryUserRepo:
@@ -79,6 +93,9 @@ class InMemorySessionRepo:
         ]
         return sorted(sessions, key=lambda s: (s.ended_at is not None, s.ended_at, s.id))[:limit]
 
+    async def clear_summary(self, session_id: str) -> None:
+        self._update(session_id, summary=None)
+
     def _get(self, session_id: str) -> Session:
         try:
             return self._state.sessions[session_id]
@@ -117,6 +134,14 @@ class InMemoryTurnRepo:
         matches = [(score, t) for score, t in scored if score]
         matches.sort(key=lambda pair: (-pair[0], -pair[1].created_at.timestamp()))
         return [t for _, t in matches][:limit]
+
+    async def redact_session(self, session_id: str, text: str) -> int:
+        changed = 0
+        for index, turn in enumerate(self._state.turns):
+            if turn.session_id == session_id:
+                self._state.turns[index] = replace(turn, text=text)
+                changed += 1
+        return changed
 
 
 class InMemoryFollowUpRepo:
@@ -157,3 +182,43 @@ class InMemoryFollowUpRepo:
         self._state.followups[followup_id] = replace(
             self._state.followups[followup_id], status=status, resolved_at=resolved_at
         )
+
+
+class InMemoryPeopleRepo:
+    def __init__(self, state: InMemoryState) -> None:
+        self._state = state
+
+    async def add(self, person: Person) -> None:
+        if person.user_id not in self._state.users:
+            raise NotFoundError("user", person.user_id)
+        if await self.find_by_name(person.user_id, person.name) is not None:
+            raise DuplicatePersonError(person.name)
+        self._state.people[person.id] = person
+
+    async def get(self, person_id: str) -> Person | None:
+        return self._state.people.get(person_id)
+
+    async def find_by_name(self, user_id: str, name: str) -> Person | None:
+        return next(
+            (
+                p
+                for p in self._state.people.values()
+                if p.user_id == user_id and p.name.lower() == name.strip().lower()
+            ),
+            None,
+        )
+
+    async def list_for_user(self, user_id: str, limit: int) -> list[Person]:
+        people = [p for p in self._state.people.values() if p.user_id == user_id]
+        return sorted(people, key=lambda p: (p.created_at, p.name))[:limit]
+
+    async def update(self, person: Person) -> None:
+        if person.id not in self._state.people:
+            raise NotFoundError("person", person.id)
+        clash = await self.find_by_name(person.user_id, person.name)
+        if clash is not None and clash.id != person.id:
+            raise DuplicatePersonError(person.name)
+        self._state.people[person.id] = person
+
+    async def delete(self, person_id: str) -> None:
+        self._state.people.pop(person_id, None)

@@ -3,11 +3,17 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from baatein.domain.errors import DuplicateEmailError, DuplicateTurnError, NotFoundError
+from baatein.domain.errors import (
+    DuplicateEmailError,
+    DuplicatePersonError,
+    DuplicateTurnError,
+    NotFoundError,
+)
 from baatein.domain.models import (
     FinalizeStatus,
     FollowUp,
     FollowUpStatus,
+    Person,
     Role,
     Session,
     Turn,
@@ -162,6 +168,11 @@ class SqliteSessionRepo:
             (max_attempts, limit),
         )
 
+    async def clear_summary(self, session_id: str) -> None:
+        await self._update(
+            session_id, "UPDATE sessions SET summary = NULL WHERE id = ?", (session_id,)
+        )
+
     async def _update(self, session_id: str, sql: str, params: tuple[object, ...]) -> None:
         async with self._db.transaction() as conn:
             cursor = await conn.execute(sql, params)
@@ -230,6 +241,13 @@ class SqliteTurnRepo:
             (match, user_id, limit),
         )
 
+    async def redact_session(self, session_id: str, text: str) -> int:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE turns SET text = ? WHERE session_id = ?", (text, session_id)
+            )
+            return cursor.rowcount
+
     async def _many(self, sql: str, params: tuple[object, ...]) -> list[Turn]:
         async with self._db.read() as conn, conn.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
@@ -291,6 +309,81 @@ class SqliteFollowUpRepo:
         async with self._db.read() as conn, conn.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
         return [_followup(row) for row in rows]
+
+
+class SqlitePeopleRepo:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, person: Person) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO people (id, user_id, name, relation, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        person.id,
+                        person.user_id,
+                        person.name,
+                        person.relation,
+                        to_db(person.created_at),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("user", person.user_id) from exc
+            if is_unique_violation(exc):
+                raise DuplicatePersonError(person.name) from exc
+            raise
+
+    async def get(self, person_id: str) -> Person | None:
+        people = await self._many("SELECT * FROM people WHERE id = ?", (person_id,))
+        return people[0] if people else None
+
+    async def find_by_name(self, user_id: str, name: str) -> Person | None:
+        people = await self._many(
+            "SELECT * FROM people WHERE user_id = ? AND name = ? COLLATE NOCASE",
+            (user_id, name.strip()),
+        )
+        return people[0] if people else None
+
+    async def list_for_user(self, user_id: str, limit: int) -> list[Person]:
+        return await self._many(
+            "SELECT * FROM people WHERE user_id = ? ORDER BY created_at, name LIMIT ?",
+            (user_id, limit),
+        )
+
+    async def update(self, person: Person) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                cursor = await conn.execute(
+                    "UPDATE people SET name = ?, relation = ? WHERE id = ?",
+                    (person.name, person.relation, person.id),
+                )
+                ensure_changed(cursor, "person", person.id)
+        except sqlite3.IntegrityError as exc:
+            if is_unique_violation(exc):
+                raise DuplicatePersonError(person.name) from exc
+            raise
+
+    async def delete(self, person_id: str) -> None:
+        async with self._db.transaction() as conn:
+            await conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+
+    async def _many(self, sql: str, params: tuple[object, ...]) -> list[Person]:
+        async with self._db.read() as conn, conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [_person(row) for row in rows]
+
+
+def _person(row: aiosqlite.Row) -> Person:
+    return Person(
+        id=row["id"],
+        user_id=row["user_id"],
+        name=row["name"],
+        created_at=required(row["created_at"]),
+        relation=row["relation"],
+    )
 
 
 def _user(row: aiosqlite.Row) -> User:

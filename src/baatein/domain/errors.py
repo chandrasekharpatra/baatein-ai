@@ -22,6 +22,12 @@ class DuplicateTurnError(BaateinError):
         self.seq = seq
 
 
+class DuplicatePersonError(BaateinError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"a person named '{name}' already exists for this user")
+        self.name = name
+
+
 class InvalidCredentialsError(BaateinError):
     def __init__(self) -> None:
         super().__init__("invalid email or password")

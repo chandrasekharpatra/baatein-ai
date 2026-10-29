@@ -7,17 +7,19 @@ from pathlib import Path
 
 import pytest
 
+from baatein.domain.models import Person
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import (
     SqliteFollowUpRepo,
+    SqlitePeopleRepo,
     SqliteSessionRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
     fts_query,
     to_db,
 )
-from tests.factories import make_followup, make_session, make_turn, make_user
+from tests.factories import T0, make_followup, make_session, make_turn, make_user
 
 
 @pytest.fixture
@@ -154,6 +156,23 @@ async def test_unexpected_integrity_errors_propagate(db: Database) -> None:
         )
     with pytest.raises(sqlite3.IntegrityError, match="rejected by test"):
         await SqliteTurnRepo(db).append(make_turn(session_id, 1))
+
+    people = SqlitePeopleRepo(db)
+    ravi = Person("p1", user_id, "Ravi", T0)
+    await people.add(ravi)
+    async with db.transaction() as conn:
+        await conn.execute(
+            "CREATE TRIGGER reject_people BEFORE INSERT ON people BEGIN"
+            " SELECT RAISE(ABORT, 'rejected by test'); END"
+        )
+        await conn.execute(
+            "CREATE TRIGGER reject_people_update BEFORE UPDATE ON people BEGIN"
+            " SELECT RAISE(ABORT, 'rejected by test'); END"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="rejected by test"):
+        await people.add(Person("p2", user_id, "Neha", T0))
+    with pytest.raises(sqlite3.IntegrityError, match="rejected by test"):
+        await people.update(replace(ravi, name="Ravi Kumar"))
 
 
 @pytest.mark.parametrize(

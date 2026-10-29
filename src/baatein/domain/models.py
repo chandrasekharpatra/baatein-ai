@@ -80,8 +80,39 @@ class FactCategory(StrEnum):
     OTHER = "other"
 
 
+class MemoryKind(StrEnum):
+    FACT = "fact"
+    STORY = "story"
+    PREFERENCE = "preference"
+    MOMENT = "moment"
+
+
+class Certainty(StrEnum):
+    SURE = "sure"
+    UNCERTAIN = "uncertain"
+
+
+class Sensitivity(StrEnum):
+    NORMAL = "normal"
+    PERSONAL = "personal"
+    HEALTH = "health"
+    GRIEF = "grief"
+    CRISIS = "crisis"
+
+
+@dataclass(frozen=True)
+class Person:
+    id: str
+    user_id: str
+    name: str
+    created_at: datetime
+    relation: str | None = None
+
+
 @dataclass(frozen=True)
 class Fact:
+    """A memory the user agreed to keep. `source_session_id` is the call where they agreed."""
+
     id: str
     user_id: str
     text: str
@@ -91,6 +122,12 @@ class Fact:
     source_session_id: str | None = None
     superseded_by: str | None = None
     retired_at: datetime | None = None
+    kind: MemoryKind = MemoryKind.FACT
+    quote: str | None = None
+    about_person_id: str | None = None
+    certainty: Certainty = Certainty.SURE
+    sensitivity: Sensitivity = Sensitivity.NORMAL
+    deleted_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.importance <= 5:
@@ -99,6 +136,10 @@ class Fact:
     @property
     def is_active(self) -> bool:
         return self.retired_at is None
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
 
 @dataclass(frozen=True)

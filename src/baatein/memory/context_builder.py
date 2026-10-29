@@ -1,8 +1,8 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 
-from baatein.domain.models import Role, ScoredFact
-from baatein.memory.service import MemoryContext, SearchResult
+from baatein.domain.models import Certainty, Fact, MemoryKind, Person, ScoredFact, Sensitivity
+from baatein.memory.service import MemoryContext
 
 MAX_SUMMARY_CHARS = 400
 
@@ -11,12 +11,39 @@ def _day(value: date) -> str:
     return f"{value:%a} {value.day} {value:%b %Y}"
 
 
+def _who(person: Person) -> str:
+    return f"{person.name} ({person.relation})" if person.relation else person.name
+
+
+def render_memory(fact: Fact, people: Mapping[str, Person] | None = None) -> str:
+    """One memory as a line Claude can refer back to by id."""
+    notes = []
+    if fact.kind is not MemoryKind.FACT:
+        notes.append(fact.kind.value)
+    person = (people or {}).get(fact.about_person_id or "")
+    if person:
+        notes.append(f"about {_who(person)}")
+    if fact.sensitivity is not Sensitivity.NORMAL:
+        notes.append(f"{fact.sensitivity.value}: only if the user brings it up")
+    if fact.certainty is Certainty.UNCERTAIN:
+        notes.append("the user wasn't sure")
+    suffix = f" ({'; '.join(notes)})" if notes else ""
+    return f"- [{fact.id}] {fact.text}{suffix}"
+
+
+def _by_id(people: Iterable[Person]) -> dict[str, Person]:
+    return {person.id: person for person in people}
+
+
 def render_context(context: MemoryContext) -> str:
     """Memory for the agent's instructions at call start."""
+    people = _by_id(context.people)
     lines = [f"Today is {_day(context.today)}."]
     if context.facts:
-        lines += ["", "What you know about the user:"]
-        lines += [f"- {fact.text}" for fact in context.facts]
+        lines += ["", "What the user has asked you to remember (ids in brackets):"]
+        lines += [render_memory(fact, people) for fact in context.facts]
+    if context.people:
+        lines += ["", "People in the user's life: " + ", ".join(_who(p) for p in context.people)]
     if context.summaries:
         lines += ["", "Your recent calls with them:"]
         for session in context.summaries:
@@ -31,32 +58,24 @@ def render_context(context: MemoryContext) -> str:
         for followup in context.followups:
             due = f" (due {_day(followup.due_at.date())})" if followup.due_at else ""
             lines.append(f"- [{followup.id}] {followup.text}{due}")
-    if not (context.facts or context.summaries or context.followups):
-        lines += ["", "You don't remember anything about this user yet."]
+    if not (context.facts or context.people or context.summaries or context.followups):
+        lines += ["", "You have nothing saved about this user yet."]
     return "\n".join(lines)
 
 
 def render_recall(facts: Sequence[ScoredFact]) -> str | None:
-    """Hidden per-turn context with facts relevant to what the user just said."""
+    """Hidden per-turn context with memories relevant to what the user just said."""
     if not facts:
         return None
-    lines = ["Things you remember that may be relevant to what the user just said:"]
-    lines += [f"- {scored.fact.text}" for scored in facts]
+    lines = ["Saved memories that may be relevant to what the user just said:"]
+    lines += [render_memory(scored.fact) for scored in facts]
     lines.append("Use them only if they fit; don't list them back.")
     return "\n".join(lines)
 
 
-def render_search(result: SearchResult) -> str:
+def render_search(facts: Sequence[ScoredFact], people: Iterable[Person] = ()) -> str:
     """Tool output for an explicit memory lookup."""
-    if not (result.facts or result.turns):
-        return "Nothing found in memory."
-    lines: list[str] = []
-    if result.facts:
-        lines.append("Facts:")
-        lines += [f"- {scored.fact.text}" for scored in result.facts]
-    if result.turns:
-        lines.append("From earlier calls:")
-        for turn in result.turns:
-            speaker = "User" if turn.role is Role.USER else "You"
-            lines.append(f"- {_day(turn.created_at.date())}, {speaker}: {turn.text}")
-    return "\n".join(lines)
+    if not facts:
+        return "Nothing saved about that. Say so honestly; don't guess."
+    by_id = _by_id(people)
+    return "\n".join(render_memory(scored.fact, by_id) for scored in facts)
