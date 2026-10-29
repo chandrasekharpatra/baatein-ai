@@ -6,11 +6,21 @@ from tests.factories import make_user
 
 
 async def test_add_then_get_round_trips(repos: Repos) -> None:
-    user = make_user(display_name="Asha", language="english")
+    user = make_user(display_name="Asha", language="english", timezone="Europe/London")
 
     await repos.users.add(user)
 
     assert await repos.users.get(user.id) == user
+
+
+async def test_timezone_defaults_to_india(repos: Repos) -> None:
+    user = make_user()
+
+    await repos.users.add(user)
+
+    stored = await repos.users.get(user.id)
+    assert stored is not None
+    assert stored.timezone == "Asia/Kolkata"
 
 
 async def test_get_missing_returns_none(repos: Repos) -> None:

@@ -8,11 +8,13 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 **Phase 5 progress:** slice 1 is done (2026-10-29): memories are saved only after the user agrees, can be corrected, and can be forgotten (tombstone). Verified live: Baatein asked "Kya main yeh yaad rakhun?", saved only after "Haan, yaad rakhna", and on "bhool jao" deleted the memory, redacted the call it came from and removed the person.
 
-**Not yet:** nothing turns a finished call into a summary, follow-ups are still the Phase 4 kind, and every open follow-up goes into every call (slices 2–6).
+Slice 2 is built (2026-10-29): follow-ups became storylines (threads) with events, the user can set and lift boundaries, decline suggestions and switch on privacy mode, and the call-start context offers at most one check-in. Details in `docs/PHASE5_SLICES.md`.
+
+**Not yet:** nothing turns a finished call into a summary (so the last call's summary is empty), persona and preferences, reminders, and scenario evals (slices 3–6).
 
 **Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
 1. Memory structure, consent-only saving, correct and forget ✅
-2. Threads, boundaries and the call-start context
+2. Threads, boundaries and the call-start context ✅
 3. Persona and preferences
 4. Reminders (delivered in conversation only)
 5. End-of-call summary and retry
@@ -28,6 +30,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 **Gotchas found so far**
 - Anthropic rejects a tool parameter that has an enum and a nullable type (`Enum value 'fact' does not match declared type ['string', 'null']`). The LiveKit plugin makes every defaulted parameter nullable in strict mode, so optional parameters with fixed choices are plain `str | None` and mapped with `agent/tools.py:choice`. `tests/unit/test_tools.py` checks the generated schemas.
+- Anthropic's strict tool schemas allow at most 16 nullable (optional) parameters across all tools (`Schemas contains too many parameters with union types`). Baatein sends non-strict schemas; see `voice/providers.py:anthropic_llm`.
 - `Agent.on_user_turn_completed` is not called in LiveKit's text-mode tests (`session.run(user_input=...)`). Logic that must count user turns reads `RunContext.session.history` in the tool instead.
 - Claude 5.5 rejects `temperature`; `BAATEIN_LLM__TEMPERATURE` is unset by default and only sent when set.
 - LiveKit's test judge hardcodes `temperature=0.0`; `tests/agent/test_assistant_behaviour.py` uses a `JudgeLLM` subclass that strips it.

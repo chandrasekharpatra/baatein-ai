@@ -8,11 +8,13 @@ from baatein.domain.errors import (
     NotFoundError,
 )
 from baatein.domain.models import (
+    Boundary,
+    DeclinedSuggestion,
     FinalizeStatus,
-    FollowUp,
-    FollowUpStatus,
     Person,
     Session,
+    Thread,
+    ThreadEvent,
     Turn,
     User,
 )
@@ -24,8 +26,11 @@ class InMemoryState:
     users: dict[str, User] = field(default_factory=dict)
     sessions: dict[str, Session] = field(default_factory=dict)
     turns: list[Turn] = field(default_factory=list)
-    followups: dict[str, FollowUp] = field(default_factory=dict)
     people: dict[str, Person] = field(default_factory=dict)
+    threads: dict[str, Thread] = field(default_factory=dict)
+    thread_events: list[ThreadEvent] = field(default_factory=list)
+    boundaries: dict[str, Boundary] = field(default_factory=dict)
+    suggestions: list[DeclinedSuggestion] = field(default_factory=list)
 
 
 class InMemoryUserRepo:
@@ -62,12 +67,21 @@ class InMemorySessionRepo:
         sessions = [s for s in self._state.sessions.values() if s.user_id == user_id]
         return sorted(sessions, key=lambda s: s.started_at, reverse=True)[:limit]
 
-    async def end(self, session_id: str, ended_at: datetime, reason: str | None) -> None:
+    async def end(
+        self,
+        session_id: str,
+        ended_at: datetime,
+        reason: str | None,
+        ended_abruptly: bool = False,
+        unfinished_topic: str | None = None,
+    ) -> None:
         self._update(
             session_id,
             ended_at=ended_at,
             end_reason=reason,
             finalize_status=FinalizeStatus.PENDING,
+            ended_abruptly=ended_abruptly,
+            unfinished_topic=unfinished_topic,
         )
 
     async def set_memory_synced_seq(self, session_id: str, seq: int) -> None:
@@ -94,7 +108,7 @@ class InMemorySessionRepo:
         return sorted(sessions, key=lambda s: (s.ended_at is not None, s.ended_at, s.id))[:limit]
 
     async def clear_summary(self, session_id: str) -> None:
-        self._update(session_id, summary=None)
+        self._update(session_id, summary=None, unfinished_topic=None)
 
     def _get(self, session_id: str) -> Session:
         try:
@@ -144,46 +158,6 @@ class InMemoryTurnRepo:
         return changed
 
 
-class InMemoryFollowUpRepo:
-    def __init__(self, state: InMemoryState) -> None:
-        self._state = state
-
-    async def add(self, followup: FollowUp) -> None:
-        if followup.user_id not in self._state.users:
-            raise NotFoundError("user or session", followup.user_id)
-        self._state.followups[followup.id] = followup
-
-    async def get(self, followup_id: str) -> FollowUp | None:
-        return self._state.followups.get(followup_id)
-
-    async def list_open(self, user_id: str, limit: int) -> list[FollowUp]:
-        followups = [
-            f
-            for f in self._state.followups.values()
-            if f.user_id == user_id and f.status is FollowUpStatus.OPEN
-        ]
-        followups.sort(
-            key=lambda f: (
-                f.due_at is None,
-                f.due_at.timestamp() if f.due_at else 0,
-                -f.priority,
-                f.created_at,
-            )
-        )
-        return followups[:limit]
-
-    async def resolve(
-        self, followup_id: str, status: FollowUpStatus, resolved_at: datetime
-    ) -> None:
-        if status is FollowUpStatus.OPEN:
-            raise ValueError("a follow-up can only be resolved as done or dropped")
-        if followup_id not in self._state.followups:
-            raise NotFoundError("follow-up", followup_id)
-        self._state.followups[followup_id] = replace(
-            self._state.followups[followup_id], status=status, resolved_at=resolved_at
-        )
-
-
 class InMemoryPeopleRepo:
     def __init__(self, state: InMemoryState) -> None:
         self._state = state
@@ -222,3 +196,89 @@ class InMemoryPeopleRepo:
 
     async def delete(self, person_id: str) -> None:
         self._state.people.pop(person_id, None)
+
+
+class InMemoryThreadRepo:
+    def __init__(self, state: InMemoryState) -> None:
+        self._state = state
+
+    async def add(self, thread: Thread) -> None:
+        if thread.user_id not in self._state.users:
+            raise NotFoundError("user, person or session", thread.user_id)
+        self._state.threads[thread.id] = thread
+
+    async def get(self, thread_id: str) -> Thread | None:
+        return self._state.threads.get(thread_id)
+
+    async def update(self, thread: Thread) -> None:
+        if thread.id not in self._state.threads:
+            raise NotFoundError("thread", thread.id)
+        self._state.threads[thread.id] = thread
+
+    async def list_active(self, user_id: str, limit: int) -> list[Thread]:
+        threads = [t for t in self._state.threads.values() if t.user_id == user_id and t.is_active]
+        return sorted(threads, key=lambda t: (t.created_at, t.id))[:limit]
+
+    async def add_event(self, event: ThreadEvent) -> None:
+        if event.thread_id not in self._state.threads:
+            raise NotFoundError("thread or session", event.thread_id)
+        self._state.thread_events.append(event)
+
+    async def events(self, thread_id: str, limit: int) -> list[ThreadEvent]:
+        events = [e for e in self._state.thread_events if e.thread_id == thread_id]
+        events.sort(key=lambda e: (e.created_at, e.id))
+        return events[-limit:] if limit else []
+
+    async def count_about(self, person_id: str) -> int:
+        return sum(1 for t in self._state.threads.values() if t.about_person_id == person_id)
+
+    async def delete(self, thread_id: str) -> list[str]:
+        thread = self._state.threads.pop(thread_id, None)
+        events = [e for e in self._state.thread_events if e.thread_id == thread_id]
+        self._state.thread_events = [e for e in self._state.thread_events if e not in events]
+        for boundary in [b for b in self._state.boundaries.values() if b.thread_id == thread_id]:
+            del self._state.boundaries[boundary.id]
+        sessions = {e.session_id for e in events} | {thread and thread.source_session_id}
+        return sorted(s for s in sessions if s)
+
+
+class InMemoryBoundaryRepo:
+    def __init__(self, state: InMemoryState) -> None:
+        self._state = state
+
+    async def add(self, boundary: Boundary) -> None:
+        if boundary.user_id not in self._state.users:
+            raise NotFoundError("user, session or thread", boundary.user_id)
+        self._state.boundaries[boundary.id] = boundary
+
+    async def get(self, boundary_id: str) -> Boundary | None:
+        return self._state.boundaries.get(boundary_id)
+
+    async def list_active(self, user_id: str, session_id: str, now: datetime) -> list[Boundary]:
+        boundaries = [
+            b
+            for b in self._state.boundaries.values()
+            if b.user_id == user_id and b.applies(session_id, now)
+        ]
+        return sorted(boundaries, key=lambda b: (b.created_at, b.id))
+
+    async def lift(self, boundary_id: str, at: datetime) -> None:
+        boundary = self._state.boundaries.get(boundary_id)
+        if boundary is None:
+            raise NotFoundError("boundary", boundary_id)
+        self._state.boundaries[boundary_id] = replace(boundary, lifted_at=boundary.lifted_at or at)
+
+
+class InMemorySuggestionRepo:
+    def __init__(self, state: InMemoryState) -> None:
+        self._state = state
+
+    async def add(self, suggestion: DeclinedSuggestion) -> None:
+        if suggestion.user_id not in self._state.users:
+            raise NotFoundError("user or session", suggestion.user_id)
+        self._state.suggestions.append(suggestion)
+
+    async def list_for_user(self, user_id: str, limit: int) -> list[DeclinedSuggestion]:
+        found = [s for s in self._state.suggestions if s.user_id == user_id]
+        found.sort(key=lambda s: (s.created_at, s.id), reverse=True)
+        return found[:limit]

@@ -24,7 +24,7 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 | Slice | In one line | Key scenarios |
 |---|---|---|
 | 1 ✅ | Save only with permission; correct and forget | #1, #12, #13, #14, #25, #33 |
-| 2 | Storylines (threads), boundaries, and a smarter call-start context | #1, #5, #8, #11, #15, #16, #19, #29, #31, #32 |
+| 2 ✅ | Storylines (threads), boundaries, and a smarter call-start context | #1, #5, #8, #11, #15, #16, #19, #29, #31, #32 |
 | 3 | Persona and how each user likes to talk | #21, #22, #23, #28, #30 |
 | 4 | Dated reminders, brought up in the next conversation | #34–45 |
 | 5 | Summary after each call, with retry | #10, #14, #31 |
@@ -81,7 +81,18 @@ A live call saves a memory only after "haan", and a second call forgets it, chec
 
 ---
 
-## Slice 2: storylines (threads), boundaries and the call-start context
+## Slice 2: storylines (threads), boundaries and the call-start context ✅ built
+
+**Status:** built on 2026-10-29, with offline and real-Claude tests. A live three-call run is still to do (manual test scripts were shared). As built:
+- Follow-ups are gone: migration `0004` copies them into `threads` (open → open, done → done, dropped → cancelled) and drops the table.
+- Tools: `track_thread`, `update_thread`, `forget_thread` (two-step confirmation, same as `forget`), `set_boundary`, `lift_boundary`, `note_declined_suggestion`, `privacy_mode`. Saving tools are refused while saving is paused; boundaries and declined suggestions are allowed, because they only hold Baatein back.
+- Call-start context: the user's local time, first call or when the last call was, the cut-off topic, boundaries, declined suggestions, memories, people, the other active storylines (listed, never raised by Baatein), and **one** check-in from `memory/ranker.py`. Choosing the check-in marks it as offered. A storyline isn't offered again for 3 days or after 3 unanswered offers, and the count resets when the user answers.
+- A cut-off call: the user spoke last with 4+ words and got no reply. Their last words become `unfinished_topic`, and the next call offers once to continue (instead of a storyline check-in). Forgetting something from that call clears it. The slice 5 analyzer should replace this rule of thumb.
+- Privacy mode also turns off per-turn recall for the rest of the call.
+- `forget_thread` deletes the storyline with its events and boundaries, redacts the calls where it was started or updated, and removes the person once no memory or storyline is about them.
+- **Claude now gets non-strict tool schemas** (`voice/providers.py:anthropic_llm`). Strict schemas allow at most 16 optional parameters across all tools, and these tools need 19. This uses the plugin's private `_strict_tool_schema` option; `test_default_providers.py` fails if it changes.
+- Not done (deliberately): per-turn recall doesn't search storylines (active ones are all in the context), and sensitive memories in recall are labelled, not filtered.
+
 
 ### Example (#1 over three calls)
 ```

@@ -7,19 +7,21 @@ from pathlib import Path
 
 import pytest
 
-from baatein.domain.models import Person
+from baatein.domain.models import DeclinedSuggestion, Person, ThreadEvent
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import (
-    SqliteFollowUpRepo,
+    SqliteBoundaryRepo,
     SqlitePeopleRepo,
     SqliteSessionRepo,
+    SqliteSuggestionRepo,
+    SqliteThreadRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
     fts_query,
     to_db,
 )
-from tests.factories import T0, make_followup, make_session, make_turn, make_user
+from tests.factories import T0, make_boundary, make_session, make_thread, make_turn, make_user
 
 
 @pytest.fixture
@@ -60,8 +62,8 @@ async def test_foreign_keys_are_enforced(db: Database) -> None:
     async def insert_orphan() -> None:
         async with db.transaction() as conn:
             await conn.execute(
-                "INSERT INTO followups (id, user_id, text, created_at)"
-                " VALUES ('f', 'nope', 't', 'x')"
+                "INSERT INTO threads (id, user_id, title, created_at)"
+                " VALUES ('t', 'nope', 't', 'x')"
             )
 
     with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
@@ -91,19 +93,30 @@ async def test_concurrent_writes_are_serialized(db: Database) -> None:
 async def test_deleting_user_cascades_and_cleans_search_index(db: Database) -> None:
     user_id, session_id = await seeded_session(db)
     await SqliteTurnRepo(db).append(make_turn(session_id, 1, "secret plans"))
-    await SqliteFollowUpRepo(db).add(make_followup(user_id))
+    thread = make_thread(user_id)
+    await SqliteThreadRepo(db).add(thread)
+    await SqliteThreadRepo(db).add_event(ThreadEvent("e", thread.id, "Called", T0))
+    await SqliteBoundaryRepo(db).add(make_boundary(user_id, thread_id=thread.id))
+    await SqliteSuggestionRepo(db).add(DeclinedSuggestion("s", user_id, "walk", T0))
 
     async with db.transaction() as conn:
         await conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         counts = [
             (await (await conn.execute(f"SELECT count(*) FROM {table}")).fetchone())[0]  # type: ignore[index]
-            for table in ("sessions", "turns", "followups")
+            for table in (
+                "sessions",
+                "turns",
+                "threads",
+                "thread_events",
+                "boundaries",
+                "declined_suggestions",
+            )
         ]
         fts = await (
             await conn.execute("SELECT count(*) FROM turns_fts WHERE turns_fts MATCH 'secret'")
         ).fetchone()
 
-    assert counts == [0, 0, 0]
+    assert counts == [0] * 6
     assert fts is not None
     assert fts[0] == 0
 
@@ -138,8 +151,15 @@ async def test_unexpected_integrity_errors_propagate(db: Database) -> None:
     user_id, session_id = await seeded_session(db)
     user = await SqliteUserRepo(db).get(user_id)
     session = await SqliteSessionRepo(db).get(session_id)
-    followup = make_followup(user_id)
-    await SqliteFollowUpRepo(db).add(followup)
+    thread = make_thread(user_id)
+    threads = SqliteThreadRepo(db)
+    await threads.add(thread)
+    event = ThreadEvent("e", thread.id, "Called", T0)
+    await threads.add_event(event)
+    boundary = make_boundary(user_id)
+    await SqliteBoundaryRepo(db).add(boundary)
+    suggestion = DeclinedSuggestion("s", user_id, "walk", T0)
+    await SqliteSuggestionRepo(db).add(suggestion)
     assert user is not None
     assert session is not None
 
@@ -148,7 +168,13 @@ async def test_unexpected_integrity_errors_propagate(db: Database) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         await SqliteSessionRepo(db).add(session)
     with pytest.raises(sqlite3.IntegrityError):
-        await SqliteFollowUpRepo(db).add(followup)
+        await threads.add(thread)
+    with pytest.raises(sqlite3.IntegrityError):
+        await threads.add_event(event)
+    with pytest.raises(sqlite3.IntegrityError):
+        await SqliteBoundaryRepo(db).add(boundary)
+    with pytest.raises(sqlite3.IntegrityError):
+        await SqliteSuggestionRepo(db).add(suggestion)
     async with db.transaction() as conn:
         await conn.execute(
             "CREATE TRIGGER reject_turns BEFORE INSERT ON turns BEGIN"

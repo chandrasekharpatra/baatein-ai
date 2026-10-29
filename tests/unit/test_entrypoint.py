@@ -20,7 +20,7 @@ from baatein.ports.repos import UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import LanguageProfile, ProviderSpec
 from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
-from tests.factories import make_followup, make_user
+from tests.factories import make_thread, make_user
 from tests.fakes.repos import InMemoryState, InMemoryUserRepo
 from tests.fakes.world import build_world
 
@@ -185,8 +185,8 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     injector.binder.bind(UserRepo, to=InstanceProvider(InMemoryUserRepo(state)))  # type: ignore[type-abstract]
     world = build_world()
     world.state.users[user.id] = user
-    followup = make_followup(user.id, text="Ask how the interview went")
-    world.state.followups[followup.id] = followup
+    thread = make_thread(user.id, "Ask how the interview went")
+    world.state.threads[thread.id] = thread
     injector.binder.bind(MemoryService, to=world.service)
     database = FakeDatabase()
     injector.binder.bind(Database, to=database)  # type: ignore[arg-type]
@@ -204,7 +204,8 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     assert factory.requested == ["english"]
     agent = session.calls[0][1]["agent"]
     assert "You are talking with Asha." in agent.instructions
-    assert f"[{followup.id}] Ask how the interview went" in agent.instructions
+    assert f"[{thread.id}] Ask how the interview went" in agent.instructions
+    assert "Today's one check-in." in agent.instructions
     [call] = world.state.sessions.values()
     assert (call.user_id, call.room_name) == (user.id, "baatein-room")
 

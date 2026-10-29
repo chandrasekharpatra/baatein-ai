@@ -28,8 +28,17 @@ def default_tts_registry() -> TTSRegistry:
     return TTSRegistry({"sarvam": sarvam.TTS, "cartesia": cartesia.TTS})
 
 
+def anthropic_llm(**options: Any) -> anthropic.LLM:
+    """Claude with plain tool schemas.
+
+    Strict schemas allow at most 16 optional parameters across all tools, and the memory tools
+    need more. The tools validate their own arguments (see `agent.tools.choice`).
+    """
+    return anthropic.LLM(_strict_tool_schema=False, **options)
+
+
 def default_llm_registry() -> LLMRegistry:
-    return LLMRegistry({"anthropic": anthropic.LLM})
+    return LLMRegistry({"anthropic": anthropic_llm})
 
 
 @dataclass(frozen=True)

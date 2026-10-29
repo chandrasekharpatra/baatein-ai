@@ -37,9 +37,11 @@ class EmbeddingSettings(BaseModel):
 
 class MemorySettings(BaseModel):
     min_similarity: float = 0.3
-    context_summaries: int = 3
-    context_followups: int = 5
     context_facts: int = 10
+    context_threads: int = 10
+    context_declined: int = 10
+    check_in_gap_days: int = 3
+    check_in_max_offers: int = 3
     recall_limit: int = 5
     recall_timeout_seconds: float = 0.3
 

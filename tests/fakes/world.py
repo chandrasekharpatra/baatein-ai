@@ -8,10 +8,12 @@ from tests.fakes.clock import FrozenClock
 from tests.fakes.embedder import FakeEmbedder
 from tests.fakes.memory import InMemoryMemoryStore
 from tests.fakes.repos import (
-    InMemoryFollowUpRepo,
+    InMemoryBoundaryRepo,
     InMemoryPeopleRepo,
     InMemorySessionRepo,
     InMemoryState,
+    InMemorySuggestionRepo,
+    InMemoryThreadRepo,
     InMemoryTurnRepo,
 )
 
@@ -34,8 +36,10 @@ def build_world(settings: MemorySettings | None = None) -> World:
     deps = MemoryDeps(
         sessions=InMemorySessionRepo(state),
         turns=InMemoryTurnRepo(state),
-        followups=InMemoryFollowUpRepo(state),
         people=InMemoryPeopleRepo(state),
+        threads=InMemoryThreadRepo(state),
+        boundaries=InMemoryBoundaryRepo(state),
+        suggestions=InMemorySuggestionRepo(state),
         store=store,
         clock=clock,
         settings=settings or MemorySettings(),

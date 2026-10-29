@@ -27,4 +27,7 @@ def test_default_profiles_build_real_plugins(code: str) -> None:
 def test_default_llm_spec_builds_real_plugin() -> None:
     spec = Settings(_env_file=None).llm.spec()  # type: ignore[call-arg]
 
-    assert isinstance(default_llm_registry().create(spec), llm.LLM)
+    claude = default_llm_registry().create(spec)
+
+    assert isinstance(claude, llm.LLM)
+    assert claude._opts.strict_tool_schema is False  # type: ignore[attr-defined]

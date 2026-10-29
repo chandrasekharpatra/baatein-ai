@@ -15,12 +15,23 @@ from baatein.ports.auth import CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
+from baatein.ports.repos import (
+    BoundaryRepo,
+    PeopleRepo,
+    SessionRepo,
+    SuggestionRepo,
+    ThreadRepo,
+    TurnRepo,
+    UserRepo,
+)
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
-    SqliteFollowUpRepo,
+    SqliteBoundaryRepo,
+    SqlitePeopleRepo,
     SqliteSessionRepo,
+    SqliteSuggestionRepo,
+    SqliteThreadRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
 )
@@ -62,7 +73,10 @@ def test_extra_modules_override_defaults() -> None:
         (UserRepo, SqliteUserRepo),
         (SessionRepo, SqliteSessionRepo),
         (TurnRepo, SqliteTurnRepo),
-        (FollowUpRepo, SqliteFollowUpRepo),
+        (PeopleRepo, SqlitePeopleRepo),
+        (ThreadRepo, SqliteThreadRepo),
+        (BoundaryRepo, SqliteBoundaryRepo),
+        (SuggestionRepo, SqliteSuggestionRepo),
         (Clock, SystemClock),
     ],
 )

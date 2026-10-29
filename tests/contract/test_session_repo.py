@@ -13,7 +13,9 @@ async def add_user(repos: Repos) -> str:
 
 
 async def test_add_then_get_round_trips(repos: Repos) -> None:
-    session = make_session(await add_user(repos), room_name="room-1")
+    session = make_session(
+        await add_user(repos), room_name="room-1", ended_abruptly=True, unfinished_topic="mela"
+    )
 
     await repos.sessions.add(session)
 
@@ -48,6 +50,20 @@ async def test_end_marks_pending_finalization(repos: Repos) -> None:
     assert ended.ended_at == at(5)
     assert ended.end_reason == "participant_disconnected"
     assert ended.finalize_status is FinalizeStatus.PENDING
+    assert (ended.ended_abruptly, ended.unfinished_topic) == (False, None)
+
+
+async def test_end_records_a_call_cut_off_mid_story(repos: Repos) -> None:
+    session = make_session(await add_user(repos))
+    await repos.sessions.add(session)
+
+    await repos.sessions.end(
+        session.id, at(5), None, ended_abruptly=True, unfinished_topic="Gaon ka mela"
+    )
+
+    ended = await repos.sessions.get(session.id)
+    assert ended is not None
+    assert (ended.ended_abruptly, ended.unfinished_topic) == (True, "Gaon ka mela")
 
 
 async def test_finalize_lifecycle(repos: Repos) -> None:
@@ -127,13 +143,13 @@ async def test_updates_on_missing_session_raise(repos: Repos, action) -> None:  
 async def test_clear_summary(repos: Repos) -> None:
     user = make_user()
     await repos.users.add(user)
-    session = make_session(user.id, summary="Talked about Ramesh")
+    session = make_session(user.id, summary="Talked about Ramesh", unfinished_topic="Ramesh")
     await repos.sessions.add(session)
 
     await repos.sessions.clear_summary(session.id)
 
     stored = await repos.sessions.get(session.id)
     assert stored is not None
-    assert stored.summary is None
+    assert (stored.summary, stored.unfinished_topic) == (None, None)
     with pytest.raises(NotFoundError):
         await repos.sessions.clear_summary("missing")

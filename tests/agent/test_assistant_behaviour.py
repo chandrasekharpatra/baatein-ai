@@ -4,15 +4,16 @@ from typing import Any
 import pytest
 from livekit.agents import NOT_GIVEN, AgentSession, NotGivenOr
 from livekit.agents.llm import LLMStream
+from livekit.agents.voice.run_result import ChatMessageEvent, RunResult
 from livekit.plugins import anthropic
 
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
-from baatein.domain.models import FollowUpStatus
+from baatein.domain.models import ThreadStatus
 from baatein.memory.context_builder import render_context
 from baatein.memory.service import CallMemory
 from baatein.voice.languages import HINGLISH
-from tests.factories import make_fact, make_followup
+from tests.factories import at, make_boundary, make_fact, make_session, make_thread
 from tests.fakes.world import World, build_world
 
 pytestmark = [
@@ -22,6 +23,10 @@ pytestmark = [
 
 
 class JudgeLLM(anthropic.LLM):
+    def __init__(self, **kwargs: Any) -> None:
+        # Same tool schemas as the agent: see voice.providers.anthropic_llm.
+        super().__init__(_strict_tool_schema=False, **kwargs)
+
     def chat(
         self, *, extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN, **kwargs: Any
     ) -> LLMStream:
@@ -49,6 +54,27 @@ async def test_replies_in_short_hinglish() -> None:
             )
         )
         result.expect.no_more_events()
+
+
+def with_ramesh_storyline(world: World) -> str:
+    """A storyline from a call two days ago (#1)."""
+    last_call = make_session(world.user.id, started_at=at(-2 * 24 * 60))
+    world.state.sessions[last_call.id] = last_call
+    thread = make_thread(
+        world.user.id,
+        "Reconnect with college friend Ramesh by phone",
+        source_session_id=last_call.id,
+    )
+    world.state.threads[thread.id] = thread
+    return thread.id
+
+
+def assistant_replies(result: RunResult[None]) -> list[str]:
+    return [
+        event.item.text_content or ""
+        for event in result.events
+        if isinstance(event, ChatMessageEvent) and event.item.role == "assistant"
+    ]
 
 
 async def start_with_memory(
@@ -143,7 +169,7 @@ async def test_forgets_on_request_and_does_not_use_it_again() -> None:
         )
 
 
-async def test_offers_followup_and_saves_it_after_yes() -> None:
+async def test_offers_to_check_in_and_tracks_it_after_yes() -> None:
     world = build_world()
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
@@ -153,27 +179,87 @@ async def test_offers_followup_and_saves_it_after_yes() -> None:
         )
         await session.run(user_input="Haan, next time zaroor poochna kaisa gaya.")
 
-        [followup] = world.state.followups.values()
-        assert "interview" in followup.text.lower()
+        [thread] = world.state.threads.values()
+        assert "interview" in thread.title.lower()
 
 
-async def test_follows_up_on_open_followup_and_resolves_it() -> None:
+async def test_checks_in_once_and_records_how_the_story_moved() -> None:
+    """Scenario #1: the next call asks about Ramesh, and "maine phone kar diya" is logged."""
     world = build_world()
-    followup = make_followup(world.user.id, text="Ask how the Google interview went")
-    world.state.followups[followup.id] = followup
-    memory = await world.service.open_call(world.user)
-    context = render_context(await memory.context())
-    model = Settings().llm.model
-    async with JudgeLLM(model=model) as llm, AgentSession(llm=llm) as session:
-        await session.start(
-            Assistant(HINGLISH, user_name="Asha", memory=memory, memory_context=context)
+    thread_id = with_ramesh_storyline(world)
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Mohan")
+
+        replies = assistant_replies(await session.run(user_input="Namaste Baatein!"))
+        if not any("ramesh" in reply.lower() for reply in replies):
+            replies += assistant_replies(await session.run(user_input="Main theek hoon."))
+        assert sum("ramesh" in reply.lower() for reply in replies) == 1, replies
+
+        await session.run(user_input="Haan! Maine unko phone kar diya, bahut achha laga.")
+
+        assert world.state.thread_events, "update_thread was not called"
+        assert world.state.threads[thread_id].status in (
+            ThreadStatus.DONE,
+            ThreadStatus.IN_PROGRESS,
         )
 
-        greeting = await session.run(user_input="Hi Baatein!")
-        await greeting.expect.contains_message(role="assistant").judge(
-            llm, intent="Greets Asha and asks how her Google interview went."
+
+async def test_accepts_no_to_a_check_in() -> None:
+    world = build_world()
+    with_ramesh_storyline(world)
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Mohan")
+
+        await session.run(user_input="Namaste Baatein!")
+        result = await session.run(user_input="Nahi, abhi uske baare mein baat nahi karni.")
+
+        await result.expect.contains_message(role="assistant").judge(
+            llm,
+            intent="Accepts that without pressure or guilt and moves on; does not ask about "
+            "Ramesh again.",
         )
 
-        await session.run(user_input="Interview accha gaya, next round ke liye select ho gayi!")
 
-        assert world.state.followups[followup.id].status is FollowUpStatus.DONE
+async def test_respects_a_boundary_and_lifts_it_when_reopened() -> None:
+    """Scenario #11: "aaj painting yaad nahi dilana", later "ab poochh sakte ho"."""
+    world = build_world()
+    await world.store.add(make_fact(world.user.id, "Is painting a landscape of the village"))
+    thread = make_thread(world.user.id, "Finish the village painting")
+    boundary = make_boundary(world.user.id, "painting")
+    world.state.threads[thread.id] = thread
+    world.state.boundaries[boundary.id] = boundary
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        result = await session.run(user_input="Hi Baatein, aaj kuch halki-phulki baat karte hain.")
+        await result.expect.contains_message(role="assistant").judge(
+            llm, intent="Replies warmly without mentioning painting or the village landscape."
+        )
+
+        await session.run(user_input="Ab painting ke baare mein poochh sakte ho.")
+
+        assert world.state.boundaries[boundary.id].lifted_at is not None
+
+
+async def test_sets_a_boundary_when_asked() -> None:
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        await session.run(user_input="Almari saaf karne ke baare mein mujhse mat poochhna.")
+
+        [boundary] = world.state.boundaries.values()
+        assert "almari" in boundary.topic.lower() or "cupboard" in boundary.topic.lower()
+
+
+async def test_forgets_a_storyline_only_after_confirmation() -> None:
+    world = build_world()
+    thread_id = with_ramesh_storyline(world)
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Mohan")
+
+        await session.run(user_input="Ramesh wali baat poori tarah bhool jao.")
+        assert thread_id in world.state.threads
+
+        await session.run(user_input="Haan, mita do.")
+        assert thread_id not in world.state.threads

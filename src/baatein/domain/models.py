@@ -15,12 +15,6 @@ class FinalizeStatus(StrEnum):
     FAILED = "failed"
 
 
-class FollowUpStatus(StrEnum):
-    OPEN = "open"
-    DONE = "done"
-    DROPPED = "dropped"
-
-
 @dataclass(frozen=True)
 class User:
     id: str
@@ -29,6 +23,7 @@ class User:
     created_at: datetime
     display_name: str | None = None
     language: str = "hinglish"
+    timezone: str = "Asia/Kolkata"
 
 
 @dataclass(frozen=True)
@@ -43,6 +38,8 @@ class Session:
     finalize_status: FinalizeStatus = FinalizeStatus.ACTIVE
     finalize_attempts: int = 0
     memory_synced_seq: int = 0
+    ended_abruptly: bool = False
+    unfinished_topic: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,19 +52,6 @@ class Turn:
     language: str | None = None
     interrupted: bool = False
     id: int | None = None
-
-
-@dataclass(frozen=True)
-class FollowUp:
-    id: str
-    user_id: str
-    text: str
-    created_at: datetime
-    due_at: datetime | None = None
-    status: FollowUpStatus = FollowUpStatus.OPEN
-    priority: int = 0
-    source_session_id: str | None = None
-    resolved_at: datetime | None = None
 
 
 class FactCategory(StrEnum):
@@ -146,3 +130,102 @@ class Fact:
 class ScoredFact:
     fact: Fact
     score: float
+
+
+class ThreadKind(StrEnum):
+    RELATIONSHIP = "relationship"
+    ASPIRATION = "aspiration"
+    INTENTION = "intention"
+    WORRY = "worry"
+    PLAN = "plan"
+    STORY = "story"
+
+
+class ThreadStatus(StrEnum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    NOT_DONE = "not_done"
+    CANCELLED = "cancelled"
+    SNOOZED = "snoozed"
+
+
+ACTIVE_THREAD_STATUSES = frozenset(
+    {ThreadStatus.OPEN, ThreadStatus.IN_PROGRESS, ThreadStatus.SNOOZED}
+)
+
+
+@dataclass(frozen=True)
+class Thread:
+    """A storyline the user agreed Baatein can check in on, e.g. "Reconnect with Ramesh"."""
+
+    id: str
+    user_id: str
+    title: str
+    created_at: datetime
+    kind: ThreadKind = ThreadKind.PLAN
+    status: ThreadStatus = ThreadStatus.OPEN
+    next_step: str | None = None
+    check_in_after: datetime | None = None
+    last_offered_at: datetime | None = None
+    times_offered: int = 0
+    sensitivity: Sensitivity = Sensitivity.NORMAL
+    about_person_id: str | None = None
+    source_session_id: str | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in ACTIVE_THREAD_STATUSES
+
+
+@dataclass(frozen=True)
+class ThreadEvent:
+    """Something that happened in a storyline, e.g. "Called Ramesh". `status` is the new one."""
+
+    id: str
+    thread_id: str
+    text: str
+    created_at: datetime
+    status: ThreadStatus | None = None
+    session_id: str | None = None
+
+
+class BoundaryScope(StrEnum):
+    THIS_CALL = "this_call"
+    UNTIL_REOPENED = "until_reopened"
+    UNTIL_DATE = "until_date"
+
+
+@dataclass(frozen=True)
+class Boundary:
+    """A topic the user asked Baatein not to bring up. The memories about it stay."""
+
+    id: str
+    user_id: str
+    topic: str
+    created_at: datetime
+    scope: BoundaryScope = BoundaryScope.UNTIL_REOPENED
+    session_id: str | None = None
+    until: datetime | None = None
+    thread_id: str | None = None
+    lifted_at: datetime | None = None
+
+    def applies(self, session_id: str, now: datetime) -> bool:
+        if self.lifted_at is not None:
+            return False
+        if self.scope is BoundaryScope.THIS_CALL:
+            return self.session_id == session_id
+        if self.scope is BoundaryScope.UNTIL_DATE:
+            return self.until is not None and now < self.until
+        return True
+
+
+@dataclass(frozen=True)
+class DeclinedSuggestion:
+    """A suggestion the user didn't like (#29 "walk ki baat se naraz tha"); never repeated."""
+
+    id: str
+    user_id: str
+    text: str
+    created_at: datetime
+    session_id: str | None = None

@@ -1,10 +1,16 @@
-from datetime import UTC, datetime
+from datetime import datetime, tzinfo
 from enum import StrEnum
-from typing import Literal
 
 from livekit.agents import RunContext, function_tool, llm
 
-from baatein.domain.models import Certainty, FollowUpStatus, MemoryKind, Sensitivity
+from baatein.domain.models import (
+    BoundaryScope,
+    Certainty,
+    MemoryKind,
+    Sensitivity,
+    ThreadKind,
+    ThreadStatus,
+)
 from baatein.memory.context_builder import render_search
 from baatein.memory.service import CallMemory, ForgetOutcome
 
@@ -17,17 +23,23 @@ FORGET_REPLIES = {
     ),
     ForgetOutcome.NOT_FOUND: "No saved memory with that id.",
 }
+FORGET_THREAD_REPLIES = FORGET_REPLIES | {
+    ForgetOutcome.NEEDS_CONFIRMATION: FORGET_REPLIES[ForgetOutcome.NEEDS_CONFIRMATION].replace(
+        "call forget again", "call forget_thread again"
+    ),
+    ForgetOutcome.NOT_FOUND: "No storyline with that id.",
+}
 
 
-def parse_due_date(value: str | None) -> datetime | None:
-    """`YYYY-MM-DD` (or a full ISO datetime) → aware UTC datetime; None if missing or invalid."""
+def parse_date(value: str | None, tz: tzinfo) -> datetime | None:
+    """`YYYY-MM-DD` (or an ISO datetime) in the user's timezone; None if missing or invalid."""
     if not value:
         return None
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=tz)
 
 
 def user_messages(context: RunContext[None]) -> int:
@@ -39,10 +51,11 @@ def user_messages(context: RunContext[None]) -> int:
     )
 
 
-def choice[E: StrEnum](enum: type[E], value: str | None, default: E) -> E:
+def choice[E: StrEnum, D](enum: type[E], value: str | None, default: D) -> E | D:
     """The enum member named by `value`, or `default` if it is missing or unknown.
 
-    Optional tool parameters are plain strings: Anthropic rejects an enum on a nullable type.
+    Optional choices are plain strings: Anthropic's strict schemas reject an enum on a nullable
+    type, and Claude may still send an unknown value.
     """
     try:
         return enum(value) if value else default
@@ -142,30 +155,139 @@ def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
         return "No saved person with that name." if person is None else "Renamed."
 
     @function_tool
-    async def add_followup(text: str, due_date: str | None = None) -> str:
-        """Plan to ask the user about something in a later call, such as an upcoming
-        interview, trip or appointment. Only after the user agreed you can check in on it.
+    async def track_thread(
+        title: str,
+        next_step: str | None = None,
+        check_in_after: str | None = None,
+        kind: str | None = None,
+        about: str | None = None,
+        relation: str | None = None,
+        sensitivity: str | None = None,
+    ) -> str:
+        """Start following a storyline in the user's life (a plan, a wish, a worry, a person
+        they want to reconnect with), so you can gently ask about it in a later call. Only after
+        the user agreed you can check in on it.
 
         Args:
-            text: What to ask about, in English, e.g. "Ask how the Google interview went".
-            due_date: When to ask, as YYYY-MM-DD, if the user mentioned a date.
+            title: The storyline in a few English words, e.g. "Reconnect with Ramesh".
+            next_step: What the user plans to do next, e.g. "Call him on Sunday".
+            check_in_after: The first day to ask about it, as YYYY-MM-DD, e.g. the day after
+                a planned Sunday call. Leave out to ask in any later call.
+            kind: One of "plan" (default), "relationship", "aspiration", "intention",
+                "worry", "story".
+            about: Name of the person it is mainly about, e.g. "Ramesh".
+            relation: That person's relation to the user, e.g. "college friend".
+            sensitivity: One of "normal" (default), "personal", "health", "grief", "crisis".
+        """
+        thread = await memory.track_thread(
+            title,
+            kind=choice(ThreadKind, kind, ThreadKind.PLAN),
+            next_step=next_step,
+            check_in_after=parse_date(check_in_after, memory.timezone),
+            about=about,
+            relation=relation,
+            sensitivity=choice(Sensitivity, sensitivity, Sensitivity.NORMAL),
+        )
+        return PAUSED if thread is None else f"Tracking as [{thread.id}]."
+
+    @function_tool
+    async def update_thread(
+        thread_id: str,
+        event: str | None = None,
+        status: str | None = None,
+        next_step: str | None = None,
+        check_in_after: str | None = None,
+    ) -> str:
+        """Record what happened in one of the user's storylines, e.g. "Maine unko phone kar
+        diya!". Not doing something, or changing their mind, is fine; never make them feel
+        guilty.
+
+        Args:
+            thread_id: The id in brackets next to the storyline.
+            event: What happened, in one short English sentence, e.g. "Called Ramesh".
+            status: One of "in_progress", "done", "not_done", "cancelled" (they no longer want
+                it), "snoozed" (not now; set check_in_after), or "open".
+            next_step: What they plan to do next, if anything.
+            check_in_after: The first day to ask again, as YYYY-MM-DD.
         """
         if memory.saving_paused:
             return PAUSED
-        await memory.add_followup(text, parse_due_date(due_date))
-        return "Saved."
+        thread = await memory.update_thread(
+            thread_id,
+            event=event,
+            status=choice(ThreadStatus, status, None),
+            next_step=next_step,
+            check_in_after=parse_date(check_in_after, memory.timezone),
+        )
+        return "No storyline with that id." if thread is None else "Updated."
 
     @function_tool
-    async def resolve_followup(followup_id: str, outcome: Literal["done", "dropped"]) -> str:
-        """Mark a follow-up from your context as handled once the user has answered it
-        ("done"), or as no longer relevant ("dropped").
+    async def forget_thread(context: RunContext[None], thread_id: str) -> str:
+        """Delete a storyline completely when the user asks you to forget it, e.g. "Ramesh wali
+        baat bhool jao". The first call only asks for confirmation; call it again with the same
+        id after the user confirms. If they only want you to stop asking, use set_boundary.
 
         Args:
-            followup_id: The id shown in brackets next to the follow-up.
-            outcome: "done" or "dropped".
+            thread_id: The id in brackets next to the storyline.
         """
-        resolved = await memory.resolve_followup(followup_id, FollowUpStatus(outcome))
-        return "Updated." if resolved else "No open follow-up with that id."
+        return FORGET_THREAD_REPLIES[await memory.forget_thread(thread_id, user_messages(context))]
+
+    @function_tool
+    async def set_boundary(
+        topic: str,
+        scope: str | None = None,
+        until: str | None = None,
+        thread_id: str | None = None,
+    ) -> str:
+        """Stop bringing a topic up because the user asked, e.g. "aaj painting yaad nahi
+        dilana" or "almari ke baare mein mat poochhna". Nothing is deleted.
+
+        Args:
+            topic: The topic in a few English words, e.g. "painting".
+            scope: "this_call" for today only, "until_reopened" (default) until the user brings
+                it up again, or "until_date" with until.
+            until: The day it may come up again, as YYYY-MM-DD, for "until_date".
+            thread_id: The storyline's id in brackets, if the topic is one of them.
+        """
+        await memory.set_boundary(
+            topic,
+            choice(BoundaryScope, scope, BoundaryScope.UNTIL_REOPENED),
+            parse_date(until, memory.timezone),
+            thread_id,
+        )
+        return "Done. Don't bring it up."
+
+    @function_tool
+    async def lift_boundary(boundary_id: str) -> str:
+        """The user reopened a topic they had asked you not to bring up, e.g. "ab painting ke
+        baare mein poochh sakte ho".
+
+        Args:
+            boundary_id: The id in brackets next to the boundary.
+        """
+        lifted = await memory.lift_boundary(boundary_id)
+        return "Lifted." if lifted else "No active boundary with that id."
+
+    @function_tool
+    async def note_declined_suggestion(suggestion: str) -> str:
+        """The user didn't like a suggestion you made, e.g. "tumne walk ki baat ki thi, main
+        naraz tha". Apologise simply; it won't be suggested again.
+
+        Args:
+            suggestion: The suggestion in a few English words, e.g. "go for a walk".
+        """
+        await memory.note_declined(suggestion)
+        return "Noted. Never suggest it again."
+
+    @function_tool
+    async def privacy_mode() -> str:
+        """Others can hear the user, e.g. "kamre mein mehmaan hain". For the rest of this call,
+        don't say anything personal aloud."""
+        memory.enable_privacy_mode()
+        return (
+            "Privacy mode is on for this call: don't mention names, family, health, money or "
+            "anything you remember about them. Keep it light and general."
+        )
 
     return [
         recall,
@@ -174,6 +296,11 @@ def memory_tools(memory: CallMemory) -> list[llm.Tool | llm.Toolset]:
         forget,
         pause_saving,
         rename_person,
-        add_followup,
-        resolve_followup,
+        track_thread,
+        update_thread,
+        forget_thread,
+        set_boundary,
+        lift_boundary,
+        note_declined_suggestion,
+        privacy_mode,
     ]

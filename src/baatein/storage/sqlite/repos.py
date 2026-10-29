@@ -10,12 +10,18 @@ from baatein.domain.errors import (
     NotFoundError,
 )
 from baatein.domain.models import (
+    Boundary,
+    BoundaryScope,
+    DeclinedSuggestion,
     FinalizeStatus,
-    FollowUp,
-    FollowUpStatus,
     Person,
     Role,
+    Sensitivity,
     Session,
+    Thread,
+    ThreadEvent,
+    ThreadKind,
+    ThreadStatus,
     Turn,
     User,
 )
@@ -65,13 +71,14 @@ class SqliteUserRepo:
             async with self._db.transaction() as conn:
                 await conn.execute(
                     "INSERT INTO users (id, email, password_hash, display_name, language,"
-                    " created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    " timezone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         user.id,
                         user.email,
                         user.password_hash,
                         user.display_name,
                         user.language,
+                        user.timezone,
                         to_db(user.created_at),
                     ),
                 )
@@ -101,8 +108,9 @@ class SqliteSessionRepo:
             async with self._db.transaction() as conn:
                 await conn.execute(
                     "INSERT INTO sessions (id, user_id, room_name, started_at, ended_at,"
-                    " end_reason, summary, finalize_status, finalize_attempts, memory_synced_seq)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " end_reason, summary, finalize_status, finalize_attempts, memory_synced_seq,"
+                    " ended_abruptly, unfinished_topic)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session.id,
                         session.user_id,
@@ -114,6 +122,8 @@ class SqliteSessionRepo:
                         session.finalize_status.value,
                         session.finalize_attempts,
                         session.memory_synced_seq,
+                        int(session.ended_abruptly),
+                        session.unfinished_topic,
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -131,12 +141,19 @@ class SqliteSessionRepo:
             (user_id, limit),
         )
 
-    async def end(self, session_id: str, ended_at: datetime, reason: str | None) -> None:
+    async def end(
+        self,
+        session_id: str,
+        ended_at: datetime,
+        reason: str | None,
+        ended_abruptly: bool = False,
+        unfinished_topic: str | None = None,
+    ) -> None:
         await self._update(
             session_id,
-            "UPDATE sessions SET ended_at = ?, end_reason = ?, finalize_status = 'pending'"
-            " WHERE id = ?",
-            (to_db(ended_at), reason, session_id),
+            "UPDATE sessions SET ended_at = ?, end_reason = ?, finalize_status = 'pending',"
+            " ended_abruptly = ?, unfinished_topic = ? WHERE id = ?",
+            (to_db(ended_at), reason, int(ended_abruptly), unfinished_topic, session_id),
         )
 
     async def set_memory_synced_seq(self, session_id: str, seq: int) -> None:
@@ -170,7 +187,9 @@ class SqliteSessionRepo:
 
     async def clear_summary(self, session_id: str) -> None:
         await self._update(
-            session_id, "UPDATE sessions SET summary = NULL WHERE id = ?", (session_id,)
+            session_id,
+            "UPDATE sessions SET summary = NULL, unfinished_topic = NULL WHERE id = ?",
+            (session_id,),
         )
 
     async def _update(self, session_id: str, sql: str, params: tuple[object, ...]) -> None:
@@ -254,63 +273,6 @@ class SqliteTurnRepo:
         return [_turn(row) for row in rows]
 
 
-class SqliteFollowUpRepo:
-    def __init__(self, db: Database) -> None:
-        self._db = db
-
-    async def add(self, followup: FollowUp) -> None:
-        try:
-            async with self._db.transaction() as conn:
-                await conn.execute(
-                    "INSERT INTO followups (id, user_id, text, due_at, status, priority,"
-                    " source_session_id, created_at, resolved_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        followup.id,
-                        followup.user_id,
-                        followup.text,
-                        to_db(followup.due_at),
-                        followup.status.value,
-                        followup.priority,
-                        followup.source_session_id,
-                        to_db(followup.created_at),
-                        to_db(followup.resolved_at),
-                    ),
-                )
-        except sqlite3.IntegrityError as exc:
-            if is_fk_violation(exc):
-                raise NotFoundError("user or session", followup.user_id) from exc
-            raise
-
-    async def get(self, followup_id: str) -> FollowUp | None:
-        followups = await self._many("SELECT * FROM followups WHERE id = ?", (followup_id,))
-        return followups[0] if followups else None
-
-    async def list_open(self, user_id: str, limit: int) -> list[FollowUp]:
-        return await self._many(
-            "SELECT * FROM followups WHERE user_id = ? AND status = 'open'"
-            " ORDER BY due_at IS NULL, due_at, priority DESC, created_at LIMIT ?",
-            (user_id, limit),
-        )
-
-    async def resolve(
-        self, followup_id: str, status: FollowUpStatus, resolved_at: datetime
-    ) -> None:
-        if status is FollowUpStatus.OPEN:
-            raise ValueError("a follow-up can only be resolved as done or dropped")
-        async with self._db.transaction() as conn:
-            cursor = await conn.execute(
-                "UPDATE followups SET status = ?, resolved_at = ? WHERE id = ?",
-                (status.value, to_db(resolved_at), followup_id),
-            )
-            ensure_changed(cursor, "follow-up", followup_id)
-
-    async def _many(self, sql: str, params: tuple[object, ...]) -> list[FollowUp]:
-        async with self._db.read() as conn, conn.execute(sql, params) as cursor:
-            rows = await cursor.fetchall()
-        return [_followup(row) for row in rows]
-
-
 class SqlitePeopleRepo:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -376,6 +338,275 @@ class SqlitePeopleRepo:
         return [_person(row) for row in rows]
 
 
+class SqliteThreadRepo:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, thread: Thread) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO threads (id, user_id, kind, title, status, next_step,"
+                    " check_in_after, last_offered_at, times_offered, sensitivity,"
+                    " about_person_id, source_session_id, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        thread.id,
+                        thread.user_id,
+                        thread.kind.value,
+                        thread.title,
+                        thread.status.value,
+                        thread.next_step,
+                        to_db(thread.check_in_after),
+                        to_db(thread.last_offered_at),
+                        thread.times_offered,
+                        thread.sensitivity.value,
+                        thread.about_person_id,
+                        thread.source_session_id,
+                        to_db(thread.created_at),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("user, person or session", thread.user_id) from exc
+            raise
+
+    async def get(self, thread_id: str) -> Thread | None:
+        threads = await self._many("SELECT * FROM threads WHERE id = ?", (thread_id,))
+        return threads[0] if threads else None
+
+    async def update(self, thread: Thread) -> None:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE threads SET kind = ?, title = ?, status = ?, next_step = ?,"
+                " check_in_after = ?, last_offered_at = ?, times_offered = ?, sensitivity = ?,"
+                " about_person_id = ? WHERE id = ?",
+                (
+                    thread.kind.value,
+                    thread.title,
+                    thread.status.value,
+                    thread.next_step,
+                    to_db(thread.check_in_after),
+                    to_db(thread.last_offered_at),
+                    thread.times_offered,
+                    thread.sensitivity.value,
+                    thread.about_person_id,
+                    thread.id,
+                ),
+            )
+            ensure_changed(cursor, "thread", thread.id)
+
+    async def list_active(self, user_id: str, limit: int) -> list[Thread]:
+        return await self._many(
+            "SELECT * FROM threads WHERE user_id = ?"
+            " AND status IN ('open', 'in_progress', 'snoozed')"
+            " ORDER BY created_at, id LIMIT ?",
+            (user_id, limit),
+        )
+
+    async def add_event(self, event: ThreadEvent) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO thread_events (id, thread_id, text, status, session_id,"
+                    " created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        event.id,
+                        event.thread_id,
+                        event.text,
+                        event.status.value if event.status else None,
+                        event.session_id,
+                        to_db(event.created_at),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("thread or session", event.thread_id) from exc
+            raise
+
+    async def events(self, thread_id: str, limit: int) -> list[ThreadEvent]:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT * FROM (SELECT * FROM thread_events WHERE thread_id = ?"
+                " ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at, id",
+                (thread_id, limit),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        return [_thread_event(row) for row in rows]
+
+    async def count_about(self, person_id: str) -> int:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT count(*) FROM threads WHERE about_person_id = ?", (person_id,)
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def delete(self, thread_id: str) -> list[str]:
+        async with self._db.transaction() as conn:
+            async with conn.execute(
+                "SELECT source_session_id FROM threads WHERE id = ?"
+                " UNION SELECT session_id FROM thread_events WHERE thread_id = ?",
+                (thread_id, thread_id),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            await conn.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
+        return sorted(row[0] for row in rows if row[0])
+
+    async def _many(self, sql: str, params: tuple[object, ...]) -> list[Thread]:
+        async with self._db.read() as conn, conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [_thread(row) for row in rows]
+
+
+class SqliteBoundaryRepo:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, boundary: Boundary) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO boundaries (id, user_id, topic, scope, session_id, until,"
+                    " thread_id, created_at, lifted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        boundary.id,
+                        boundary.user_id,
+                        boundary.topic,
+                        boundary.scope.value,
+                        boundary.session_id,
+                        to_db(boundary.until),
+                        boundary.thread_id,
+                        to_db(boundary.created_at),
+                        to_db(boundary.lifted_at),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("user, session or thread", boundary.user_id) from exc
+            raise
+
+    async def get(self, boundary_id: str) -> Boundary | None:
+        boundaries = await self._many("SELECT * FROM boundaries WHERE id = ?", (boundary_id,))
+        return boundaries[0] if boundaries else None
+
+    async def list_active(self, user_id: str, session_id: str, now: datetime) -> list[Boundary]:
+        return await self._many(
+            "SELECT * FROM boundaries WHERE user_id = ? AND lifted_at IS NULL AND ("
+            " scope = 'until_reopened'"
+            " OR (scope = 'this_call' AND session_id = ?)"
+            " OR (scope = 'until_date' AND until > ?)"
+            ") ORDER BY created_at, id",
+            (user_id, session_id, to_db(now)),
+        )
+
+    async def lift(self, boundary_id: str, at: datetime) -> None:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE boundaries SET lifted_at = COALESCE(lifted_at, ?) WHERE id = ?",
+                (to_db(at), boundary_id),
+            )
+            ensure_changed(cursor, "boundary", boundary_id)
+
+    async def _many(self, sql: str, params: tuple[object, ...]) -> list[Boundary]:
+        async with self._db.read() as conn, conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [_boundary(row) for row in rows]
+
+
+class SqliteSuggestionRepo:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, suggestion: DeclinedSuggestion) -> None:
+        try:
+            async with self._db.transaction() as conn:
+                await conn.execute(
+                    "INSERT INTO declined_suggestions (id, user_id, text, session_id, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        suggestion.id,
+                        suggestion.user_id,
+                        suggestion.text,
+                        suggestion.session_id,
+                        to_db(suggestion.created_at),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if is_fk_violation(exc):
+                raise NotFoundError("user or session", suggestion.user_id) from exc
+            raise
+
+    async def list_for_user(self, user_id: str, limit: int) -> list[DeclinedSuggestion]:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT * FROM declined_suggestions WHERE user_id = ?"
+                " ORDER BY created_at DESC, id DESC LIMIT ?",
+                (user_id, limit),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        return [_suggestion(row) for row in rows]
+
+
+def _thread(row: aiosqlite.Row) -> Thread:
+    return Thread(
+        id=row["id"],
+        user_id=row["user_id"],
+        title=row["title"],
+        created_at=required(row["created_at"]),
+        kind=ThreadKind(row["kind"]),
+        status=ThreadStatus(row["status"]),
+        next_step=row["next_step"],
+        check_in_after=from_db(row["check_in_after"]),
+        last_offered_at=from_db(row["last_offered_at"]),
+        times_offered=row["times_offered"],
+        sensitivity=Sensitivity(row["sensitivity"]),
+        about_person_id=row["about_person_id"],
+        source_session_id=row["source_session_id"],
+    )
+
+
+def _thread_event(row: aiosqlite.Row) -> ThreadEvent:
+    return ThreadEvent(
+        id=row["id"],
+        thread_id=row["thread_id"],
+        text=row["text"],
+        created_at=required(row["created_at"]),
+        status=ThreadStatus(row["status"]) if row["status"] else None,
+        session_id=row["session_id"],
+    )
+
+
+def _boundary(row: aiosqlite.Row) -> Boundary:
+    return Boundary(
+        id=row["id"],
+        user_id=row["user_id"],
+        topic=row["topic"],
+        created_at=required(row["created_at"]),
+        scope=BoundaryScope(row["scope"]),
+        session_id=row["session_id"],
+        until=from_db(row["until"]),
+        thread_id=row["thread_id"],
+        lifted_at=from_db(row["lifted_at"]),
+    )
+
+
+def _suggestion(row: aiosqlite.Row) -> DeclinedSuggestion:
+    return DeclinedSuggestion(
+        id=row["id"],
+        user_id=row["user_id"],
+        text=row["text"],
+        created_at=required(row["created_at"]),
+        session_id=row["session_id"],
+    )
+
+
 def _person(row: aiosqlite.Row) -> Person:
     return Person(
         id=row["id"],
@@ -394,6 +625,7 @@ def _user(row: aiosqlite.Row) -> User:
         created_at=required(row["created_at"]),
         display_name=row["display_name"],
         language=row["language"],
+        timezone=row["timezone"],
     )
 
 
@@ -409,6 +641,8 @@ def _session(row: aiosqlite.Row) -> Session:
         finalize_status=FinalizeStatus(row["finalize_status"]),
         finalize_attempts=row["finalize_attempts"],
         memory_synced_seq=row["memory_synced_seq"],
+        ended_abruptly=bool(row["ended_abruptly"]),
+        unfinished_topic=row["unfinished_topic"],
     )
 
 
@@ -422,18 +656,4 @@ def _turn(row: aiosqlite.Row) -> Turn:
         created_at=required(row["created_at"]),
         language=row["language"],
         interrupted=bool(row["interrupted"]),
-    )
-
-
-def _followup(row: aiosqlite.Row) -> FollowUp:
-    return FollowUp(
-        id=row["id"],
-        user_id=row["user_id"],
-        text=row["text"],
-        created_at=required(row["created_at"]),
-        due_at=from_db(row["due_at"]),
-        status=FollowUpStatus(row["status"]),
-        priority=row["priority"],
-        source_session_id=row["source_session_id"],
-        resolved_at=from_db(row["resolved_at"]),
     )

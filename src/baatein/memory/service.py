@@ -1,44 +1,78 @@
 import asyncio
 import logging
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from enum import StrEnum
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from baatein.config import MemorySettings
 from baatein.domain.ids import new_id
 from baatein.domain.models import (
+    Boundary,
+    BoundaryScope,
     Certainty,
+    DeclinedSuggestion,
     Fact,
-    FollowUp,
-    FollowUpStatus,
     MemoryKind,
     Person,
     Role,
     ScoredFact,
     Sensitivity,
     Session,
+    Thread,
+    ThreadEvent,
+    ThreadKind,
+    ThreadStatus,
     Turn,
     User,
 )
+from baatein.memory.ranker import CheckInRules, pick_check_in
 from baatein.memory.redact import redact
 from baatein.ports.clock import Clock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import FollowUpRepo, PeopleRepo, SessionRepo, TurnRepo
+from baatein.ports.repos import (
+    BoundaryRepo,
+    PeopleRepo,
+    SessionRepo,
+    SuggestionRepo,
+    ThreadRepo,
+    TurnRepo,
+)
+from baatein.text import words
 
 logger = logging.getLogger(__name__)
 
 FORGOTTEN_TURN = "[forgotten at the user's request]"
 CONTEXT_PEOPLE = 20
+CHECK_IN_EVENTS = 3
+DEFAULT_TIMEZONE = "Asia/Kolkata"
+# A call whose last turn is the user saying this much, with no reply, was cut off mid-story.
+ABRUPT_MIN_WORDS = 4
+MAX_TOPIC_CHARS = 200
+
+
+def zone(name: str) -> ZoneInfo:
+    """The user's timezone, or India's if the stored name is unknown."""
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("unknown timezone %r, using %s", name, DEFAULT_TIMEZONE)
+        return ZoneInfo(DEFAULT_TIMEZONE)
 
 
 @dataclass(frozen=True)
 class MemoryContext:
-    today: date
-    summaries: list[Session]
-    followups: list[FollowUp]
+    now: datetime
+    """In the user's timezone."""
+    last_call: Session | None
     facts: list[Fact]
     people: list[Person]
+    threads: list[Thread]
+    check_in: Thread | None
+    check_in_events: list[ThreadEvent]
+    boundaries: list[Boundary]
+    declined: list[DeclinedSuggestion]
 
 
 class ForgetOutcome(StrEnum):
@@ -51,8 +85,10 @@ class ForgetOutcome(StrEnum):
 class MemoryDeps:
     sessions: SessionRepo
     turns: TurnRepo
-    followups: FollowUpRepo
     people: PeopleRepo
+    threads: ThreadRepo
+    boundaries: BoundaryRepo
+    suggestions: SuggestionRepo
     store: MemoryStore
     clock: Clock
     settings: MemorySettings
@@ -79,20 +115,30 @@ class MemoryService:
             id=new_id(), user_id=user.id, started_at=self._deps.clock.now(), room_name=room_name
         )
         await self._deps.sessions.add(session)
-        return CallMemory(self._deps, session, language)
+        return CallMemory(self._deps, session, language, zone(user.timezone))
 
 
 class CallMemory:
-    """Memory for one call: its session row, transcript writes, recall and follow-ups."""
+    """Memory for one call: its session row, transcript writes, recall, storylines and
+    boundaries."""
 
-    def __init__(self, deps: MemoryDeps, session: Session, language: str | None = None) -> None:
+    def __init__(
+        self,
+        deps: MemoryDeps,
+        session: Session,
+        language: str | None = None,
+        timezone: ZoneInfo | None = None,
+    ) -> None:
         self._deps = deps
         self.session = session
         self._language = language
+        self.timezone = timezone or ZoneInfo(DEFAULT_TIMEZONE)
         self._seq = 0
         self._pending: asyncio.Future[None] | None = None
         self._closed = False
+        self._last_turn: Turn | None = None
         self.saving_paused = False
+        self.private = False
         self._forget_requests: dict[str, int] = {}
 
     @property
@@ -100,21 +146,41 @@ class CallMemory:
         return self.session.user_id
 
     async def context(self) -> MemoryContext:
-        """What to tell the agent at call start: recent summaries, open follow-ups, top facts."""
-        limits = self._deps.settings
-        recent, followups, facts, people = await asyncio.gather(
-            self._deps.sessions.recent_for_user(self.user_id, limits.context_summaries + 1),
-            self._deps.followups.list_open(self.user_id, limits.context_followups),
-            self._deps.store.active(self.user_id, limits.context_facts),
-            self._deps.people.list_for_user(self.user_id, CONTEXT_PEOPLE),
+        """What to tell the agent at call start. Marks the chosen check-in as offered."""
+        deps, limits = self._deps, self._deps.settings
+        now = deps.clock.now()
+        recent, facts, people, threads, boundaries, declined = await asyncio.gather(
+            deps.sessions.recent_for_user(self.user_id, 2),
+            deps.store.active(self.user_id, limits.context_facts),
+            deps.people.list_for_user(self.user_id, CONTEXT_PEOPLE),
+            deps.threads.list_active(self.user_id, limits.context_threads),
+            deps.boundaries.list_active(self.user_id, self.session.id, now),
+            deps.suggestions.list_for_user(self.user_id, limits.context_declined),
         )
-        summaries = [s for s in recent if s.summary and s.id != self.session.id]
+        last_call = next((s for s in recent if s.id != self.session.id), None)
+        check_in, events = None, []
+        # A story cut off last time is this call's one check-in; storylines wait.
+        if last_call is None or not (last_call.ended_abruptly and last_call.unfinished_topic):
+            rules = CheckInRules(
+                timedelta(days=limits.check_in_gap_days), limits.check_in_max_offers
+            )
+            check_in = pick_check_in(threads, boundaries, now, rules)
+        if check_in is not None:
+            check_in = replace(
+                check_in, last_offered_at=now, times_offered=check_in.times_offered + 1
+            )
+            await deps.threads.update(check_in)
+            events = await deps.threads.events(check_in.id, CHECK_IN_EVENTS)
         return MemoryContext(
-            today=self._deps.clock.now().date(),
-            summaries=summaries[: limits.context_summaries],
-            followups=followups,
+            now=now.astimezone(self.timezone),
+            last_call=last_call,
             facts=facts,
             people=people,
+            threads=threads,
+            check_in=check_in,
+            check_in_events=events,
+            boundaries=boundaries,
+            declined=declined,
         )
 
     def record(self, role: Role, text: str, interrupted: bool = False) -> None:
@@ -132,6 +198,7 @@ class CallMemory:
             language=self._language,
             interrupted=interrupted,
         )
+        self._last_turn = turn
         self._pending = asyncio.ensure_future(self._append_after(self._pending, turn))
 
     async def _append_after(self, previous: asyncio.Future[None] | None, turn: Turn) -> None:
@@ -228,22 +295,47 @@ class CallMemory:
         fact = await self._deps.store.get(fact_id)
         if fact is None or fact.user_id != self.user_id or fact.is_deleted:
             return ForgetOutcome.NOT_FOUND
-        if self._forget_requests.get(fact_id) != user_turn - 1:
-            self._forget_requests[fact_id] = user_turn
+        if not self._confirmed(fact_id, user_turn):
             return ForgetOutcome.NEEDS_CONFIRMATION
-        del self._forget_requests[fact_id]
-        await self._erase(fact)
+        await self.flush()
+        await self._redact_calls(await self._deps.store.forget(fact_id, self._deps.clock.now()))
+        await self._drop_person_if_unused(fact.about_person_id)
         return ForgetOutcome.DELETED
 
-    async def _erase(self, fact: Fact) -> None:
-        """Tombstone a memory and its earlier versions, and redact the calls they came from."""
-        fact_id = fact.id
+    async def forget_thread(self, thread_id: str, user_turn: int) -> ForgetOutcome:
+        """Delete a storyline, its events and its boundaries, confirmed like `forget`."""
+        thread = await self._own_thread(thread_id)
+        if thread is None:
+            return ForgetOutcome.NOT_FOUND
+        if not self._confirmed(thread_id, user_turn):
+            return ForgetOutcome.NEEDS_CONFIRMATION
         await self.flush()
-        for session_id in await self._deps.store.forget(fact_id, self._deps.clock.now()):
+        await self._redact_calls(await self._deps.threads.delete(thread_id))
+        await self._drop_person_if_unused(thread.about_person_id)
+        return ForgetOutcome.DELETED
+
+    def _confirmed(self, item_id: str, user_turn: int) -> bool:
+        """True on the user's message right after the request; otherwise records the request."""
+        if self._forget_requests.get(item_id) == user_turn - 1:
+            del self._forget_requests[item_id]
+            return True
+        self._forget_requests[item_id] = user_turn
+        return False
+
+    async def _redact_calls(self, session_ids: list[str]) -> None:
+        """Wipe the transcripts and summaries of calls where something forgotten was said."""
+        for session_id in session_ids:
             await self._deps.turns.redact_session(session_id, FORGOTTEN_TURN)
             await self._deps.sessions.clear_summary(session_id)
-        person_id = fact.about_person_id
-        if person_id and await self._deps.store.count_about(person_id) == 0:
+            if session_id == self.session.id:
+                self._last_turn = None
+
+    async def _drop_person_if_unused(self, person_id: str | None) -> None:
+        if (
+            person_id
+            and await self._deps.store.count_about(person_id) == 0
+            and await self._deps.threads.count_about(person_id) == 0
+        ):
             await self._deps.people.delete(person_id)
 
     async def people(self) -> list[Person]:
@@ -285,35 +377,147 @@ class CallMemory:
             return None
         return fact
 
-    async def add_followup(self, text: str, due_at: datetime | None = None) -> FollowUp:
-        followup = FollowUp(
+    async def _own_thread(self, thread_id: str) -> Thread | None:
+        thread = await self._deps.threads.get(thread_id)
+        return thread if thread is not None and thread.user_id == self.user_id else None
+
+    async def track_thread(
+        self,
+        title: str,
+        *,
+        kind: ThreadKind = ThreadKind.PLAN,
+        next_step: str | None = None,
+        check_in_after: datetime | None = None,
+        about: str | None = None,
+        relation: str | None = None,
+        sensitivity: Sensitivity = Sensitivity.NORMAL,
+    ) -> Thread | None:
+        """Start a storyline the user agreed to be asked about. None while saving is paused."""
+        if self.saving_paused:
+            return None
+        person = await self.person(about, relation) if about else None
+        thread = Thread(
             id=new_id(),
             user_id=self.user_id,
-            text=text,
+            title=redact(title),
             created_at=self._deps.clock.now(),
-            due_at=due_at,
+            kind=kind,
+            next_step=redact(next_step) if next_step else None,
+            check_in_after=check_in_after,
+            sensitivity=sensitivity,
+            about_person_id=person.id if person else None,
             source_session_id=self.session.id,
         )
-        await self._deps.followups.add(followup)
-        return followup
+        await self._deps.threads.add(thread)
+        return thread
 
-    async def resolve_followup(self, followup_id: str, status: FollowUpStatus) -> FollowUp | None:
-        """Close one of this user's open follow-ups. Returns None if there is no such follow-up."""
-        followups = self._deps.followups
-        followup = await followups.get(followup_id)
-        if (
-            followup is None
-            or followup.user_id != self.user_id
-            or followup.status is not FollowUpStatus.OPEN
-        ):
+    async def update_thread(
+        self,
+        thread_id: str,
+        *,
+        event: str | None = None,
+        status: ThreadStatus | None = None,
+        next_step: str | None = None,
+        check_in_after: datetime | None = None,
+    ) -> Thread | None:
+        """Record what happened in one of the user's storylines ("Maine unko phone kar diya").
+
+        Returns None while saving is paused or if there is no such thread. The user answered,
+        so the count of unanswered check-ins starts again.
+        """
+        if self.saving_paused:
             return None
-        await followups.resolve(followup_id, status, self._deps.clock.now())
-        return await followups.get(followup_id)
+        thread = await self._own_thread(thread_id)
+        if thread is None:
+            return None
+        now = self._deps.clock.now()
+        updated = replace(
+            thread,
+            status=status or thread.status,
+            next_step=redact(next_step) if next_step else thread.next_step,
+            check_in_after=check_in_after or thread.check_in_after,
+            times_offered=0,
+        )
+        await self._deps.threads.update(updated)
+        if event or status:
+            text = redact(event) if event else f"Marked {status}".replace("_", " ")
+            await self._deps.threads.add_event(
+                ThreadEvent(new_id(), thread.id, text, now, status, self.session.id)
+            )
+        return updated
+
+    async def set_boundary(
+        self,
+        topic: str,
+        scope: BoundaryScope = BoundaryScope.UNTIL_REOPENED,
+        until: datetime | None = None,
+        thread_id: str | None = None,
+    ) -> Boundary:
+        """Stop bringing a topic up ("aaj painting yaad nahi dilana"). Nothing is deleted.
+
+        Allowed while saving is paused: it only holds Baatein back.
+        """
+        if scope is BoundaryScope.UNTIL_DATE and until is None:
+            scope = BoundaryScope.UNTIL_REOPENED
+        if thread_id and await self._own_thread(thread_id) is None:
+            thread_id = None
+        boundary = Boundary(
+            id=new_id(),
+            user_id=self.user_id,
+            topic=redact(topic.strip()),
+            created_at=self._deps.clock.now(),
+            scope=scope,
+            session_id=self.session.id,
+            until=until if scope is BoundaryScope.UNTIL_DATE else None,
+            thread_id=thread_id,
+        )
+        await self._deps.boundaries.add(boundary)
+        return boundary
+
+    async def lift_boundary(self, boundary_id: str) -> bool:
+        """The user reopened a topic ("ab painting ke baare mein poochh sakte ho")."""
+        boundary = await self._deps.boundaries.get(boundary_id)
+        if boundary is None or boundary.user_id != self.user_id or boundary.lifted_at:
+            return False
+        await self._deps.boundaries.lift(boundary_id, self._deps.clock.now())
+        return True
+
+    async def note_declined(self, text: str) -> DeclinedSuggestion:
+        """Remember a suggestion the user didn't like, so it isn't made again."""
+        suggestion = DeclinedSuggestion(
+            id=new_id(),
+            user_id=self.user_id,
+            text=redact(text),
+            created_at=self._deps.clock.now(),
+            session_id=self.session.id,
+        )
+        await self._deps.suggestions.add(suggestion)
+        return suggestion
+
+    def enable_privacy_mode(self) -> None:
+        """Others can hear the user ("kamre mein mehmaan hain"): no personal details aloud."""
+        self.private = True
 
     async def close(self, reason: str | None = None) -> None:
-        """Wait for pending turn writes, then end the session (ready for finalization)."""
+        """Wait for pending turn writes, then end the session (ready for finalization).
+
+        If the user was mid-sentence with no reply, the call was cut off: their last words
+        become the unfinished topic, offered once next time (#31).
+        """
         if self._closed:
             return
         self._closed = True
         await self.flush()
-        await self._deps.sessions.end(self.session.id, self._deps.clock.now(), reason)
+        last = self._last_turn
+        abrupt = (
+            last is not None
+            and last.role is Role.USER
+            and len(words(last.text)) >= ABRUPT_MIN_WORDS
+        )
+        await self._deps.sessions.end(
+            self.session.id,
+            self._deps.clock.now(),
+            reason,
+            ended_abruptly=abrupt,
+            unfinished_topic=last.text[:MAX_TOPIC_CHARS] if abrupt and last else None,
+        )

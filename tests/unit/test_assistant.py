@@ -32,6 +32,8 @@ def test_instructions_include_memory_context_and_guidance() -> None:
     assert "Today is Thu 1 Jan 2026." in text
     assert "Kya main yeh yaad rakhun?" in text
     assert "pause_saving" in text
+    assert "set_boundary" in text
+    assert "bring it up once" in text
     assert "pause_saving" not in build_instructions(PROFILE)
 
 
@@ -53,8 +55,13 @@ async def test_assistant_with_memory_exposes_memory_tools() -> None:
         "forget",
         "pause_saving",
         "rename_person",
-        "add_followup",
-        "resolve_followup",
+        "track_thread",
+        "update_thread",
+        "forget_thread",
+        "set_boundary",
+        "lift_boundary",
+        "note_declined_suggestion",
+        "privacy_mode",
     }
 
 
@@ -88,6 +95,20 @@ async def test_user_turn_adds_nothing_without_memory_matches_or_text() -> None:
     )
     await Assistant(PROFILE).on_user_turn_completed(
         turn_ctx, llm.ChatMessage(role="user", content=["hello"])
+    )
+
+    assert turn_ctx.items == []
+
+
+async def test_user_turn_recalls_nothing_in_privacy_mode() -> None:
+    world = build_world()
+    await world.store.add(make_fact(world.user.id, "Has an interview at Google on Friday"))
+    memory = await world.service.open_call(world.user)
+    memory.enable_privacy_mode()
+    turn_ctx = llm.ChatContext()
+
+    await Assistant(PROFILE, memory=memory).on_user_turn_completed(
+        turn_ctx, llm.ChatMessage(role="user", content=["Google interview"])
     )
 
     assert turn_ctx.items == []

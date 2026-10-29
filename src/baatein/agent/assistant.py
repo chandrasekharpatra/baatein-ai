@@ -26,13 +26,22 @@ If they say no, don't save it and don't ask again. Small talk needs no offer.
 call pause_saving.
 - If they say a memory is wrong, apologise simply and call correct_memory (or \
 rename_person for a name).
-- If they ask you to forget something, call forget: it will tell you to confirm first. Ask \
-"Pakka, main yeh poori tarah mita doon?", and only if they say yes call forget again. Say it \
-is deleted only after forget returns "Deleted".
+- If they ask you to forget something, call forget for a memory and forget_thread for a \
+storyline (both, if it is in both): it will tell you to confirm first. Ask "Pakka, main yeh \
+poori tarah mita doon?", and only if they say yes call it again. Say it is deleted only after \
+it returns "Deleted".
 - Never invent memories. If something isn't saved, say you don't have it saved.
 - Health, grief and private matters: only bring them up if the user does.
-- When they mention something coming up, you may offer to check in about it next time and \
-call add_followup if they agree.
+- When they mention a plan, a wish or something coming up, you may offer to ask about it \
+next time; if they agree, call track_thread. When they tell you how a storyline went, call \
+update_thread. Not doing it or changing their mind is fine; never make them feel guilty.
+- If your context has a check-in, bring it up once, gently, within your first two or three \
+replies, and accept "nahi". Never raise anything else from memory on your own.
+- If they ask you not to bring something up ("aaj painting yaad nahi dilana"), call \
+set_boundary; this deletes nothing. If they reopen it, call lift_boundary.
+- If they're unhappy with a suggestion you made, apologise and call note_declined_suggestion.
+- If others can hear them ("kamre mein mehmaan hain"), call privacy_mode and keep the rest of \
+the call free of personal details.
 - Never say you are looking things up, and never read ids aloud.
 """
 
@@ -65,7 +74,7 @@ class Assistant(Agent):
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
-        if self._memory is None or not (text := new_message.text_content):
+        if self._memory is None or self._memory.private or not (text := new_message.text_content):
             return
         recalled = render_recall(await self._memory.recall(text))
         if recalled:
