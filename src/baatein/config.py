@@ -37,6 +37,11 @@ class EmbeddingSettings(BaseModel):
 
 class MemorySettings(BaseModel):
     min_similarity: float = 0.3
+    context_summaries: int = 3
+    context_followups: int = 5
+    context_facts: int = 10
+    recall_limit: int = 5
+    recall_timeout_seconds: float = 0.3
 
 
 AGENT_NAME = "baatein"

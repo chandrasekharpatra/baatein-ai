@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import urllib.error
 import urllib.request
 import uuid
 from typing import Any
@@ -33,19 +34,32 @@ async def synthesize(text: str) -> list[rtc.AudioFrame]:
         return [event.frame async for event in tts.synthesize(text)]
 
 
-async def probe(api: str, say: str | None, wait: float) -> None:
+PASSWORD = "probe-password"
+
+
+def access_token(api: str, email: str | None) -> str:
+    """Log in as `email` (signing it up on first use), or sign up a throwaway user."""
+    if email:
+        try:
+            return str(
+                post(api, "/auth/login", {"email": email, "password": PASSWORD})["access_token"]
+            )
+        except urllib.error.HTTPError as error:
+            if error.code != 401:
+                raise
+    body = {
+        "email": email or f"probe-{uuid.uuid4().hex[:8]}@example.com",
+        "password": PASSWORD,
+        "display_name": "Probe",
+    }
+    return str(post(api, "/auth/signup", body)["access_token"])
+
+
+async def probe(api: str, say: str | None, wait: float, email: str | None) -> None:
     frames = await synthesize(say) if say else []
 
-    session = post(
-        api,
-        "/auth/signup",
-        {
-            "email": f"probe-{uuid.uuid4().hex[:8]}@example.com",
-            "password": "probe-password",
-            "display_name": "Probe",
-        },
-    )
-    grant = post(api, "/livekit/token", {}, session["access_token"])
+    token = access_token(api, email)
+    grant = post(api, "/livekit/token", {}, token)
     print(f"room: {grant['room_name']}")
 
     room = rtc.Room()
@@ -100,8 +114,9 @@ def main() -> None:
     parser.add_argument("--say", default="Haan main theek hoon. Aaj office mein bahut kaam tha.")
     parser.add_argument("--no-speech", action="store_true", help="only listen for the greeting")
     parser.add_argument("--wait", type=float, default=8.0, help="seconds to wait per phase")
+    parser.add_argument("--email", help="call as this user (signed up on first use) to test memory")
     args = parser.parse_args()
-    asyncio.run(probe(args.api, None if args.no_speech else args.say, args.wait))
+    asyncio.run(probe(args.api, None if args.no_speech else args.say, args.wait, args.email))
 
 
 if __name__ == "__main__":

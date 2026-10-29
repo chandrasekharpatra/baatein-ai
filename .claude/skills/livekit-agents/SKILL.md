@@ -18,7 +18,8 @@ LiveKit's API changes between minor versions. Before writing LiveKit code:
 | Concern | File |
 |---|---|
 | Worker, prewarm, per-call entrypoint | `src/baatein/agent/entrypoint.py` |
-| Agent instructions | `src/baatein/agent/assistant.py` |
+| Agent instructions, per-turn recall (`on_user_turn_completed`) | `src/baatein/agent/assistant.py` |
+| Memory tools (`recall_memory`, `add_followup`, `resolve_followup`) | `src/baatein/agent/tools.py` |
 | STT/TTS/LLM registries + `VoicePipelineFactory` | `src/baatein/voice/providers.py` |
 | Language profiles (which STT/TTS per language) | `src/baatein/voice/languages.py` |
 | Room tokens with agent dispatch | `src/baatein/auth/livekit.py` |
@@ -32,6 +33,8 @@ To add a provider: register its plugin class in the right registry in `voice/pro
 - **Turn detection**: `turn_detection` is left unset so the session picks automatically. `livekit.plugins.turn_detector` is deprecated in favour of `livekit.agents.inference.TurnDetector`.
 - **Transcripts**: agents publish text streams on topic `lk.transcription`. The attributes `lk.segment_id` and `lk.transcription_final` identify the segment and mark it final. The browser needs `livekit-client` ≥ 2.9 for `registerTextStreamHandler`; this repo pins 2.22.3.
 - **Sarvam**: `STT(model="saaras:v4", mode="codemix", language="hi-IN")` returns Hindi words in Devanagari. Other modes: `transcribe`, `translate`, `verbatim`, `translit`. TTS speakers depend on the model: `bulbul:v3` accepts `shubh`, `ritu`, `rahul`, `pooja`, …, not v2 voices like `anushka`. The plugin validates this when it's constructed.
+- **Shutdown callbacks run in parallel** (`asyncio.gather` in `job_proc_lazy_main.py`). Put ordered cleanup (end session, then close the DB) in one callback. An unclosed `aiosqlite` connection keeps a non-daemon thread alive and the job process gets killed after 10 s.
+- **Mid-conversation system messages**: a `system` message added to `turn_ctx` in `on_user_turn_completed` is sent to Anthropic inline at its position (`convert_mid_conversation_instructions`), not merged into the system prompt. `turn_ctx` is a copy used for that reply only.
 - **Anthropic**: the plugin sends `temperature`/`top_k` only if they're given. Claude 5.5 models reject `temperature`, so `BAATEIN_LLM__TEMPERATURE` is unset by default.
 
 ## Gotchas already hit
@@ -52,7 +55,7 @@ Isolate the failing leg before changing code:
    uv run python .claude/skills/livekit-agents/scripts/probe_call.py --say "Kal mera interview hai"
    ```
 
-   It signs up a throwaway user, gets a token from the API, joins the room headlessly, speaks the sentence via Sarvam TTS, and prints both sides' final transcripts.
+   It signs up a throwaway user, gets a token from the API, joins the room headlessly, speaks the sentence via Sarvam TTS, and prints both sides' final transcripts. Pass `--email x@example.com` to reuse one user across calls (signed up on first use) when testing memory; the saved turns and follow-ups are in `data/baatein.db`.
    - **No agent joins:** dispatch problem. Check that the agent names match and that the worker logs "registered worker".
    - **Agent greets but no user transcript:** STT problem.
    - **User transcript but no reply:** LLM/TTS problem. Check the worker terminal.

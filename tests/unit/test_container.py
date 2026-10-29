@@ -10,6 +10,7 @@ from baatein.config import Settings
 from baatein.container import build_root
 from baatein.domain.errors import ConfigurationError
 from baatein.memory.embeddings.fastembed import FastEmbedEmbedder
+from baatein.memory.service import MemoryService
 from baatein.ports.auth import CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
@@ -87,6 +88,13 @@ def test_memory_store_is_sqlite_store_with_configured_embedder() -> None:
     assert store is injector.get(SqliteMemoryStore)
     assert isinstance(injector.get(Embedder), FastEmbedEmbedder)
     assert store.vec_table.endswith("_384")  # type: ignore[attr-defined]
+
+
+def test_memory_service_is_a_singleton() -> None:
+    injector = build_root(settings=Settings(_env_file=None))  # type: ignore[call-arg]
+
+    assert isinstance(injector.get(MemoryService), MemoryService)
+    assert injector.get(MemoryService) is injector.get(MemoryService)
 
 
 def test_auth_requires_jwt_secret() -> None:

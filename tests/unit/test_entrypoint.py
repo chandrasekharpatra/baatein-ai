@@ -1,22 +1,28 @@
 import json
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from injector import Injector, InstanceProvider
-from livekit.agents import AgentSession, vad
+from livekit.agents import AgentSession, llm, vad
 
 from baatein.agent import entrypoint
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.domain.errors import NotFoundError
+from baatein.domain.models import Role
+from baatein.memory.service import MemoryService
 from baatein.ports.repos import UserRepo
+from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import LanguageProfile, ProviderSpec
 from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
-from tests.factories import make_user
+from tests.factories import make_followup, make_user
 from tests.fakes.repos import InMemoryState, InMemoryUserRepo
+from tests.fakes.world import build_world
 
 PROFILE = LanguageProfile("hinglish", ProviderSpec("s"), ProviderSpec("t"), "Hinglish")
 
@@ -30,12 +36,28 @@ def dummy_keys(monkeypatch: pytest.MonkeyPatch) -> None:
 class FakeSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.handlers: dict[str, Callable[[Any], None]] = {}
+
+    def on(self, event: str) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
+        def register(handler: Callable[[Any], None]) -> Callable[[Any], None]:
+            self.handlers[event] = handler
+            return handler
+
+        return register
 
     async def start(self, **kwargs: Any) -> None:
         self.calls.append(("start", kwargs))
 
     async def generate_reply(self, **kwargs: Any) -> None:
         self.calls.append(("generate_reply", kwargs))
+
+
+class FakeDatabase:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 class FakeFactory:
@@ -86,11 +108,15 @@ async def test_entrypoint_starts_assistant_for_default_language(
     injector = Injector()
     injector.binder.bind(Settings, to=Settings(_env_file=None))  # type: ignore[call-arg]
     injector.binder.bind(VoicePipelineFactory, to=factory)  # type: ignore[arg-type]
+    database = FakeDatabase()
+    injector.binder.bind(Database, to=database)  # type: ignore[arg-type]
+    shutdown: list[Callable[[str], Awaitable[None]]] = []
     vad_model, room = object(), object()
     ctx = SimpleNamespace(
         proc=SimpleNamespace(userdata={"injector": injector, "vad": vad_model}),
         room=room,
         job=SimpleNamespace(metadata=""),
+        add_shutdown_callback=shutdown.append,
     )
 
     await entrypoint.entrypoint(ctx)  # type: ignore[arg-type]
@@ -103,6 +129,9 @@ async def test_entrypoint_starts_assistant_for_default_language(
     assert isinstance(start_kwargs["agent"], Assistant)
     assert reply == "generate_reply"
     assert reply_kwargs == {"instructions": entrypoint.GREETING}
+    [close] = shutdown
+    await close("done")
+    assert database.closed
 
 
 def test_main_loads_dotenv_then_runs_cli(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,17 +183,88 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     injector.binder.bind(Settings, to=Settings(_env_file=None))  # type: ignore[call-arg]
     injector.binder.bind(VoicePipelineFactory, to=factory)  # type: ignore[arg-type]
     injector.binder.bind(UserRepo, to=InstanceProvider(InMemoryUserRepo(state)))  # type: ignore[type-abstract]
+    world = build_world()
+    world.state.users[user.id] = user
+    followup = make_followup(user.id, text="Ask how the interview went")
+    world.state.followups[followup.id] = followup
+    injector.binder.bind(MemoryService, to=world.service)
+    database = FakeDatabase()
+    injector.binder.bind(Database, to=database)  # type: ignore[arg-type]
+    shutdown: list[Callable[[str], Awaitable[None]]] = []
     ctx = SimpleNamespace(
         proc=SimpleNamespace(userdata={"injector": injector, "vad": object()}),
-        room=object(),
+        room=SimpleNamespace(name="baatein-room"),
         job=SimpleNamespace(metadata=json.dumps({"user_id": user.id})),
+        add_shutdown_callback=shutdown.append,
     )
 
     await entrypoint.entrypoint(ctx)  # type: ignore[arg-type]
+    await ctx.proc.userdata["warm_up"]
 
     assert factory.requested == ["english"]
     agent = session.calls[0][1]["agent"]
     assert "You are talking with Asha." in agent.instructions
+    assert f"[{followup.id}] Ask how the interview went" in agent.instructions
+    [call] = world.state.sessions.values()
+    assert (call.user_id, call.room_name) == (user.id, "baatein-room")
+
+    on_item = session.handlers["conversation_item_added"]
+    on_item(SimpleNamespace(item=llm.ChatMessage(role="user", content=["Kal interview hai"])))
+    on_item(SimpleNamespace(item=llm.ChatMessage(role="assistant", content=["All the best!"])))
+    [close] = shutdown
+    await close("user_left")
+
+    assert [(t.role, t.text, t.language) for t in world.state.turns] == [
+        (Role.USER, "Kal interview hai", "english"),
+        (Role.ASSISTANT, "All the best!", "english"),
+    ]
+    assert world.state.sessions[call.id].end_reason == "user_left"
+    assert database.closed
+
+
+async def test_end_call_closes_database_even_if_session_end_fails() -> None:
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+    world.state.sessions.clear()
+    injector = Injector()
+    database = FakeDatabase()
+    injector.binder.bind(Database, to=database)  # type: ignore[arg-type]
+
+    with pytest.raises(NotFoundError):
+        await entrypoint.end_call(injector, memory, "error")
+
+    assert database.closed
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        llm.ChatMessage(role="system", content=["hidden"]),
+        llm.ChatMessage(role="user", content=["   "]),
+        llm.ChatMessage(role="user", content=[]),
+        object(),
+    ],
+)
+async def test_record_item_skips_non_conversation_items(item: object) -> None:
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+
+    entrypoint.record_item(memory, item)
+    await memory.flush()
+
+    assert world.state.turns == []
+
+
+async def test_record_item_saves_interrupted_flag() -> None:
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+
+    message = llm.ChatMessage(role="assistant", content=[" Accha "], interrupted=True)
+    entrypoint.record_item(memory, message)
+    await memory.flush()
+
+    [turn] = world.state.turns
+    assert (turn.text, turn.interrupted) == ("Accha", True)
 
 
 async def test_resolve_user_returns_none_for_unknown_user() -> None:

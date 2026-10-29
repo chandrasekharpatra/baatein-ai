@@ -4,18 +4,21 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 
 ## Status (2026-10-29)
 
-**Done:** Phases 0–3. You can sign up in the web client, start a call, and have a live Hinglish voice conversation (Sarvam STT → Claude Haiku 5.5 → Sarvam TTS). Verified end to end on 2026-10-29, both from the browser and with a headless test client.
+**Done:** Phases 0–4. You can sign up in the web client, start a call and have a live Hinglish voice conversation (Sarvam STT → Claude Haiku 5.5 → Sarvam TTS). Each call now has a `sessions` row, every message is saved as a turn while the call runs, the agent starts with memory context (recent summaries, open follow-ups, top facts), searches facts on every user turn, and has `recall_memory`, `add_followup` and `resolve_followup` tools. Verified end to end on 2026-10-29: in one call the user mentioned an interview and the agent saved a dated follow-up; in the next call it remembered the interview and resolved the follow-up.
 
-**Not yet:** nothing from a call is saved or remembered. Every call starts fresh. The storage for this (sessions, turns, follow-ups, facts with hybrid search) exists, but nothing calls it during a call.
+**Not yet:** nothing turns a finished call into summaries or facts, so call-start context only contains follow-ups until Phase 5.
 
-**Next: Phase 4** (see §10):
-1. `SessionModule` + child injector per call (`CurrentUser`, session id).
-2. On call start: create the `sessions` row; on `close`/shutdown: `SessionRepo.end`.
-3. Persist each `conversation_item_added` message as a `Turn` (ordered `seq`, role, interrupted flag).
-4. `MemoryService.load_context`: last summaries, open follow-ups, top active facts → `context_builder` → initial `ChatContext`.
-5. `Assistant.on_user_turn_completed`: `MemoryStore.search` under a ~300 ms timeout, inject results as hidden context.
-6. Tools: `recall_memory`, `add_followup`, `resolve_followup`.
-7. Decide STT script: Sarvam `codemix` returns Devanagari for Hindi words; try `translit` mode (Roman) for consistent transcripts/search.
+**Next: Phase 5** (see §10):
+1. Finalizer: on `pending` sessions, one structured Claude call over the transcript, open follow-ups and similar facts → summary, new/resolved follow-ups, fact add/supersede/retire.
+2. Retry worker for `failed` sessions (`finalize_attempts`).
+3. Proactive opener: greet with the most relevant due follow-up.
+4. Decide STT script: Sarvam `codemix` returns Devanagari for Hindi words (e.g. "अगले Friday मेरा Google में interview है"); try `translit` mode (Roman) for consistent transcripts/search.
+
+**Phase 4 notes**
+- Per-call state is a `CallMemory` object created by the process-wide `MemoryService` (`memory/service.py`), not a child injector: it only needs the session and the repos, and a plain object is easier to test.
+- Turns are numbered and queued synchronously from `conversation_item_added`, written in order in the background, and flushed before the session ends.
+- Per-turn recall runs `MemoryStore.search` under `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` (0.3 s) and is skipped silently on timeout or error. The embedder is warmed up at call start, in parallel with the greeting.
+- One shutdown callback ends the session and then closes the database; LiveKit runs shutdown callbacks in parallel, and an open `aiosqlite` thread kept job processes from exiting.
 
 **How to run** (see README): `cp .env.example .env` and fill keys, then `livekit-server --dev`, `uv run baatein-agent dev`, `uv run baatein serve`, open http://localhost:8000.
 
@@ -179,11 +182,11 @@ src/baatein/
   memory/
     ranking.py              reciprocal rank fusion
     embeddings/             registry.py, fastembed.py
-    service.py              (Phase 4) MemoryService
-    context_builder.py      (Phase 4)
+    service.py              MemoryService, CallMemory
+    context_builder.py      memory → agent instructions / per-turn context / tool output
     analyzer.py             (Phase 5) session analyzer
   voice/                    languages.py, providers.py
-  agent/                    assistant.py, entrypoint.py
+  agent/                    assistant.py, entrypoint.py, tools.py
   auth/                     passwords.py, tokens.py, livekit.py, service.py
   api/                      app.py (FastAPI), static/index.html (web client)
   workers/finalizer.py      (Phase 5)
@@ -261,7 +264,7 @@ Tests don't have to be written before the code, but every change ships with test
 | 1 ✅ | repo contract suite, migrations, transactions, cascades, Devanagari search | SQLite layer, repos, `StorageModule`, `baatein migrate` |
 | 2 ✅ | `MemoryStore` contract (SQLite + fake), vector index lifecycle, embedder adapter, real model | `Embedder` port + FastEmbed, `facts` + `sqlite-vec` + FTS5 hybrid search, `MemoryModule`, `baatein reembed` |
 | 3 ✅ | auth service, Argon2, JWT expiry via clock, LiveKit token claims, API routes, identity → agent | `AuthService`, `/auth/signup`, `/auth/login`, `/me`, `/livekit/token`, `AuthModule`, `baatein serve`, web client at `/` with live transcripts; agent resolves the user from dispatch metadata. Verified live end to end |
-| 4 | MemoryService unit tests, lifecycle tests | Session lifecycle, transcript persistence, call-start context, per-turn retrieval, memory tools |
+| 4 ✅ | MemoryService unit tests, lifecycle tests, entrypoint wiring, memory tool behaviour against real Claude | Session lifecycle, transcript persistence, call-start context, per-turn retrieval, memory tools. Verified live across two calls |
 | 5 | finalizer state-machine tests, analyzer evals, agent opener test | Session analyzer (summary + follow-ups + fact ops), retry worker, proactive opener |
 | 6 | evals, deletion tests | "Forget me", logging/metrics, demo polish |
 

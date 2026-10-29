@@ -9,6 +9,7 @@ from baatein.auth.tokens import JwtAccessTokens
 from baatein.config import Settings
 from baatein.domain.errors import ConfigurationError
 from baatein.memory.embeddings.registry import EmbedderRegistry, default_embedder_registry
+from baatein.memory.service import MemoryDeps, MemoryService
 from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
@@ -92,6 +93,21 @@ class MemoryModule(Module):
     @provider
     def memory_store(self, store: SqliteMemoryStore) -> MemoryStore:
         return store
+
+    @singleton
+    @provider
+    def memory_service(
+        self,
+        settings: Settings,
+        sessions: SessionRepo,
+        turns: TurnRepo,
+        followups: FollowUpRepo,
+        store: MemoryStore,
+        embedder: Embedder,
+        clock: Clock,
+    ) -> MemoryService:
+        deps = MemoryDeps(sessions, turns, followups, store, clock, settings.memory)
+        return MemoryService(deps, embedder)
 
 
 class AuthModule(Module):

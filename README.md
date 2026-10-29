@@ -4,7 +4,7 @@ A Hinglish voice companion that remembers you. Talk to it in the browser in the 
 
 Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam and SQLite. Python 3.12, no Docker.
 
-> **Status:** Phases 0–3 of 6 are done. You can sign up, start a call and have a live Hinglish voice conversation. The memory store (facts, follow-ups, transcripts, hybrid search) is built and tested, but calls don't use it yet: that's Phase 4. See [Roadmap](#roadmap) and [docs/PLAN.md](docs/PLAN.md).
+> **Status:** Phases 0–4 of 6 are done. You can sign up, start a call and have a live Hinglish voice conversation. Calls are saved turn by turn, the agent starts with what it remembers, looks up relevant facts on every turn, and saves follow-ups ("ask how Friday's interview went") for the next call. Turning finished calls into summaries and facts is Phase 5. See [Roadmap](#roadmap) and [docs/PLAN.md](docs/PLAN.md).
 
 ## How it works
 
@@ -19,7 +19,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 
 1. The web client signs you up or logs you in and gets an access token.
 2. `/livekit/token` creates a fresh room and a LiveKit token that dispatches the `baatein` agent, signed with your user id.
-3. The agent worker joins the room, loads your profile (name and language) and talks with you in real time.
+3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens; on each of your turns it searches your facts, and it can save or resolve follow-ups.
 
 ## Tech stack
 
@@ -95,6 +95,9 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` | `fastembed` / MiniLM / `384` | Fact embeddings; run `baatein reembed` after changing |
 | `BAATEIN_EMBEDDING__CACHE_DIR` | `data/models` | Where the embedding model is downloaded |
 | `BAATEIN_MEMORY__MIN_SIMILARITY` | `0.3` | Cosine threshold for semantic fact matches |
+| `BAATEIN_MEMORY__CONTEXT_SUMMARIES` / `__CONTEXT_FOLLOWUPS` / `__CONTEXT_FACTS` | `3` / `5` / `10` | How much memory goes into the agent's instructions at call start |
+| `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall_memory` tool |
+| `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0.3` | Per-turn recall is skipped if it takes longer |
 
 ## Commands
 
@@ -126,11 +129,11 @@ Errors use `409` for a duplicate email, `401` for bad credentials or tokens, and
 
 ```
 src/baatein/
-  agent/          LiveKit worker: prewarm, per-call entrypoint, Assistant
+  agent/          LiveKit worker: prewarm, per-call entrypoint, Assistant, memory tools
   api/            FastAPI app and static web client
   auth/           Argon2 hashing, JWT tokens, LiveKit call tokens, AuthService
   domain/         Models (User, Session, Turn, FollowUp, Fact), errors, ids
-  memory/         Embedders and ranking
+  memory/         MemoryService (per-call memory), context rendering, embedders, ranking
   ports/          Protocols every adapter implements (repos, memory, embedder, auth, clock)
   storage/sqlite/ Connection, migrations, repositories, memory store with sqlite-vec
   voice/          Language profiles and STT/TTS/LLM provider registries
@@ -163,6 +166,8 @@ To test the live stack end to end without a browser, the bundled probe signs up 
 uv run python .claude/skills/livekit-agents/scripts/probe_call.py --say "Kal mera interview hai"
 ```
 
+Pass `--email someone@example.com` to call as the same user every time (signed up on first use), which is how to check that the agent remembers things between calls.
+
 ## Extending
 
 - **New language**: add a `LanguageProfile` in `src/baatein/voice/languages.py` with its STT, TTS and reply style. Users pick it at signup.
@@ -189,8 +194,8 @@ uv run python .claude/skills/livekit-agents/scripts/probe_call.py --say "Kal mer
 | 1 | SQLite layer, migrations, repositories | ✅ |
 | 2 | Fact memory: embeddings, sqlite-vec + FTS5 hybrid search | ✅ |
 | 3 | Email/password auth, LiveKit tokens, web client | ✅ |
-| 4 | Call lifecycle: save transcripts, load context at call start, per-turn memory retrieval, memory tools | Next |
-| 5 | End-of-call analyzer: summary, follow-ups, fact updates; proactive opener | |
+| 4 | Call lifecycle: save transcripts, load context at call start, per-turn memory retrieval, memory tools | ✅ |
+| 5 | End-of-call analyzer: summary, follow-ups, fact updates; proactive opener | Next |
 | 6 | "Forget me", observability, evals, demo polish | |
 
 Design decisions, including why the project uses its own memory store instead of Mem0, are in [docs/PLAN.md](docs/PLAN.md).
