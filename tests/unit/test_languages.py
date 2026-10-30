@@ -50,3 +50,54 @@ def test_default_registry_includes_hinglish_with_codemix_stt() -> None:
     assert hinglish.stt.provider == "sarvam"
     assert hinglish.stt.options["mode"] == "codemix"
     assert "Hinglish" in hinglish.reply_style
+
+
+def test_hinglish_speaks_through_cartesia_sonic_3_6_with_speed_control() -> None:
+    hinglish = default_language_registry().get("hinglish")
+
+    assert (hinglish.tts.provider, hinglish.pace_option) == ("cartesia", "speed")
+    assert hinglish.tts.options == {
+        "model": "sonic-3.6",
+        "language": "hi",
+        "voice": "4459a9a5-69d6-4680-b970-e13dc51845b6",  # Siya
+        "word_timestamps": False,
+    }
+    assert hinglish.cannot_hear.startswith("Maaf kijiye")
+
+
+def test_english_and_kannada_speak_through_sarvam_bulbul_v4_flash_with_pace_control() -> None:
+    registry = default_language_registry()
+    voices = {
+        code: (
+            registry.get(code).tts.provider,
+            registry.get(code).tts.options["model"],
+            registry.get(code).tts.options["target_language_code"],
+            registry.get(code).pace_option,
+        )
+        for code in ("english", "kannada")
+    }
+
+    assert voices == {
+        "english": ("sarvam", "bulbul:v4-flash", "en-IN", "pace"),
+        "kannada": ("sarvam", "bulbul:v4-flash", "kn-IN", "pace"),
+    }
+
+
+def test_odia_and_kannada_have_their_own_script_and_respect() -> None:
+    from baatein.voice.languages import KANNADA, ODIA
+
+    registry = default_language_registry()
+    assert registry.get("odia") is ODIA
+    assert registry.get("kannada") is KANNADA
+    # bulbul:v4-flash has no Odia voice yet (and Cartesia has no Odia), so Odia keeps v3.
+    assert (ODIA.tts.options["model"], ODIA.tts.options["target_language_code"]) == (
+        "bulbul:v3",
+        "od-IN",
+    )
+    assert ODIA.pace_option == "pace"
+    for profile in (ODIA, KANNADA):
+        assert profile.stt.options["mode"] == "codemix"
+        assert "never reply in Hindi" in profile.reply_style
+        assert profile.formal_you
+    assert ODIA.honorific is None  # its respectful suffixes depend on gender
+    assert KANNADA.honorific == "avare"

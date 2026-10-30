@@ -5,6 +5,7 @@ from baatein.ports.auth import AccessTokens, PasswordHasher
 from baatein.ports.clock import Clock
 from baatein.ports.repos import UserRepo
 from baatein.voice.languages import LanguageRegistry
+from baatein.voice.personas import PersonaRegistry
 
 
 def normalize_email(email: str) -> str:
@@ -18,14 +19,18 @@ class AuthService:
         hasher: PasswordHasher,
         tokens: AccessTokens,
         languages: LanguageRegistry,
+        personas: PersonaRegistry,
         clock: Clock,
         default_language: str,
+        default_persona: str = "casual",
         min_password_length: int = 8,
     ) -> None:
         self._users = users
         self._hasher = hasher
         self._tokens = tokens
         self._languages = languages
+        self._personas = personas
+        self._default_persona = default_persona
         self._clock = clock
         self._default_language = default_language
         self._min_password_length = min_password_length
@@ -37,11 +42,14 @@ class AuthService:
         password: str,
         display_name: str | None = None,
         language: str | None = None,
+        persona: str | None = None,
     ) -> User:
         if len(password) < self._min_password_length:
             raise WeakPasswordError(self._min_password_length)
         language = language or self._default_language
         self._languages.get(language)
+        persona = persona or self._default_persona
+        self._personas.get(persona)
         user = User(
             id=new_id(),
             email=normalize_email(email),
@@ -49,6 +57,7 @@ class AuthService:
             created_at=self._clock.now(),
             display_name=display_name.strip() if display_name and display_name.strip() else None,
             language=language,
+            persona=persona,
         )
         await self._users.add(user)
         return user

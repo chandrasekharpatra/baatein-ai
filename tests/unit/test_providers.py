@@ -72,3 +72,23 @@ def test_pipeline_factory_builds_components_for_language() -> None:
     assert pipeline.stt == Built("stt", {"mode": "codemix"})
     assert pipeline.tts == Built("tts", {"voice": "v"})
     assert pipeline.llm == Built("llm", {"model": "m"})
+
+
+def test_pipeline_factory_sets_tts_pace_only_where_supported() -> None:
+    languages = LanguageRegistry(
+        [
+            LanguageProfile("paced", ProviderSpec("s"), ProviderSpec("t", {"v": 1}), "x", "pace"),
+            LanguageProfile("plain", ProviderSpec("s"), ProviderSpec("t", {"v": 1}), "x"),
+        ]
+    )
+    factory = VoicePipelineFactory(
+        languages=languages,
+        stt=STTRegistry({"s": recorder("stt")}),
+        tts=TTSRegistry({"t": recorder("tts")}),
+        llm=LLMRegistry({"l": recorder("llm")}),
+        llm_spec=ProviderSpec("l"),
+    )
+
+    assert factory.build("paced", pace=0.85).tts == Built("tts", {"v": 1, "pace": 0.85})
+    assert factory.build("paced").tts == Built("tts", {"v": 1})
+    assert factory.build("plain", pace=0.85).tts == Built("tts", {"v": 1})

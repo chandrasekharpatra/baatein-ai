@@ -25,7 +25,40 @@ def test_fresh_database_migrates_to_latest(tmp_path: Path) -> None:
     version = migrate(path)
 
     assert version == len(bundled_migrations())
-    assert {"users", "sessions", "turns", "turns_fts", "followups", "turns_ai"} <= tables(path)
+    assert {"users", "sessions", "turns", "turns_fts", "threads", "turns_ai"} <= tables(path)
+    assert "followups" not in tables(path)
+
+
+def test_followups_become_threads(tmp_path: Path) -> None:
+    path = tmp_path / "app.db"
+    migrate(path, bundled_migrations()[:3])
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, created_at) VALUES ('u', 'e', 'h', 't')"
+        )
+        conn.executemany(
+            "INSERT INTO followups (id, user_id, text, due_at, status, created_at)"
+            " VALUES (?, 'u', ?, ?, ?, 't')",
+            [
+                ("f1", "Ask about the interview", "2026-11-06", "open"),
+                ("f2", "Ask about the flat", None, "done"),
+                ("f3", "Ask about the trip", None, "dropped"),
+            ],
+        )
+
+    migrate(path)
+
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            "SELECT id, title, status, check_in_after, kind FROM threads ORDER BY id"
+        ).fetchall()
+        timezone = conn.execute("SELECT timezone FROM users").fetchone()[0]
+    assert rows == [
+        ("f1", "Ask about the interview", "open", "2026-11-06", "plan"),
+        ("f2", "Ask about the flat", "done", None, "plan"),
+        ("f3", "Ask about the trip", "cancelled", None, "plan"),
+    ]
+    assert timezone == "Asia/Kolkata"
 
 
 def test_migrate_is_idempotent(tmp_path: Path) -> None:

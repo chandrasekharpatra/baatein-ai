@@ -22,6 +22,12 @@ class DuplicateTurnError(BaateinError):
         self.seq = seq
 
 
+class DuplicatePersonError(BaateinError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"a person named '{name}' already exists for this user")
+        self.name = name
+
+
 class InvalidCredentialsError(BaateinError):
     def __init__(self) -> None:
         super().__init__("invalid email or password")
@@ -35,6 +41,16 @@ class WeakPasswordError(BaateinError):
     def __init__(self, min_length: int) -> None:
         super().__init__(f"password must be at least {min_length} characters")
         self.min_length = min_length
+
+
+class SignupClosedError(BaateinError):
+    def __init__(self) -> None:
+        super().__init__("signup is closed; ask an admin for an account")
+
+
+class NotAdminError(BaateinError):
+    def __init__(self) -> None:
+        super().__init__("only admins can do this")
 
 
 class ConfigurationError(BaateinError):

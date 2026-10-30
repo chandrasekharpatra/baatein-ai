@@ -4,19 +4,36 @@ from pathlib import Path
 
 import pytest
 
-from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
+from baatein.ports.repos import (
+    BoundaryRepo,
+    PeopleRepo,
+    ReminderRepo,
+    SessionRepo,
+    SuggestionRepo,
+    ThreadRepo,
+    TurnRepo,
+    UserRepo,
+)
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import (
-    SqliteFollowUpRepo,
+    SqliteBoundaryRepo,
+    SqlitePeopleRepo,
+    SqliteReminderRepo,
     SqliteSessionRepo,
+    SqliteSuggestionRepo,
+    SqliteThreadRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
 )
 from tests.fakes.repos import (
-    InMemoryFollowUpRepo,
+    InMemoryBoundaryRepo,
+    InMemoryPeopleRepo,
+    InMemoryReminderRepo,
     InMemorySessionRepo,
     InMemoryState,
+    InMemorySuggestionRepo,
+    InMemoryThreadRepo,
     InMemoryTurnRepo,
     InMemoryUserRepo,
 )
@@ -27,7 +44,11 @@ class Repos:
     users: UserRepo
     sessions: SessionRepo
     turns: TurnRepo
-    followups: FollowUpRepo
+    people: PeopleRepo
+    threads: ThreadRepo
+    boundaries: BoundaryRepo
+    suggestions: SuggestionRepo
+    reminders: ReminderRepo
 
 
 @pytest.fixture(params=["sqlite", "memory"])
@@ -38,7 +59,11 @@ async def repos(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator
             InMemoryUserRepo(state),
             InMemorySessionRepo(state),
             InMemoryTurnRepo(state),
-            InMemoryFollowUpRepo(state),
+            InMemoryPeopleRepo(state),
+            InMemoryThreadRepo(state),
+            InMemoryBoundaryRepo(state),
+            InMemorySuggestionRepo(state),
+            InMemoryReminderRepo(state),
         )
         return
 
@@ -46,6 +71,13 @@ async def repos(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator
     migrate(path)
     db = Database(path)
     yield Repos(
-        SqliteUserRepo(db), SqliteSessionRepo(db), SqliteTurnRepo(db), SqliteFollowUpRepo(db)
+        SqliteUserRepo(db),
+        SqliteSessionRepo(db),
+        SqliteTurnRepo(db),
+        SqlitePeopleRepo(db),
+        SqliteThreadRepo(db),
+        SqliteBoundaryRepo(db),
+        SqliteSuggestionRepo(db),
+        SqliteReminderRepo(db),
     )
     await db.close()

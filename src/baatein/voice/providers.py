@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from livekit.agents import llm, stt, tts
@@ -28,8 +28,22 @@ def default_tts_registry() -> TTSRegistry:
     return TTSRegistry({"sarvam": sarvam.TTS, "cartesia": cartesia.TTS})
 
 
+def anthropic_llm(**options: Any) -> anthropic.LLM:
+    """Claude with plain tool schemas and prompt caching.
+
+    Strict schemas allow at most 16 optional parameters across all tools, and the memory tools
+    need more. The tools validate their own arguments (see `agent.tools.choice`).
+
+    Caching marks the tools, the instructions and the conversation so far, so each reply
+    re-reads them from Anthropic's cache (about a tenth of the price, and faster) instead of
+    sending ~13k tokens at full price every turn. The instructions stay the same for the
+    whole call (memory notes are added as messages), which is what lets the cache hit.
+    """
+    return anthropic.LLM(_strict_tool_schema=False, caching="ephemeral", **options)
+
+
 def default_llm_registry() -> LLMRegistry:
-    return LLMRegistry({"anthropic": anthropic.LLM})
+    return LLMRegistry({"anthropic": anthropic_llm})
 
 
 @dataclass(frozen=True)
@@ -55,11 +69,14 @@ class VoicePipelineFactory:
         self._llm = llm
         self._llm_spec = llm_spec
 
-    def build(self, language_code: str) -> VoicePipeline:
+    def build(self, language_code: str, pace: float = 1.0) -> VoicePipeline:
         profile = self._languages.get(language_code)
+        tts_spec = profile.tts
+        if profile.pace_option and pace != 1.0:
+            tts_spec = replace(tts_spec, options={**tts_spec.options, profile.pace_option: pace})
         return VoicePipeline(
             profile=profile,
             stt=self._stt.create(profile.stt),
             llm=self._llm.create(self._llm_spec),
-            tts=self._tts.create(profile.tts),
+            tts=self._tts.create(tts_spec),
         )

@@ -6,14 +6,42 @@ import aiosqlite
 from sqlite_vec import serialize_float32
 
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import Fact, FactCategory, ScoredFact
-from baatein.memory.ranking import reciprocal_rank_fusion
+from baatein.domain.models import (
+    Certainty,
+    Fact,
+    FactCategory,
+    MemoryKind,
+    ScoredFact,
+    Sensitivity,
+)
+from baatein.memory.ranking import KEYWORD_FLOOR, reciprocal_rank_fusion
 from baatein.ports.embedder import Embedder
 from baatein.storage.sqlite.db import Database
-from baatein.storage.sqlite.repos import fts_query, is_fk_violation, required, to_db
+from baatein.storage.sqlite.repos import (
+    from_db,
+    fts_query,
+    is_fk_violation,
+    required,
+    to_db,
+)
 
 CANDIDATE_MULTIPLIER = 4
 REINDEX_BATCH = 64
+
+
+async def _drop_vectors(conn: aiosqlite.Connection, pks: list[int]) -> None:
+    """Delete these facts' vectors from every model's index, not only the current one: an
+    index built for an earlier embedder still holds them."""
+    if not pks:
+        return
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+        " AND name LIKE 'facts\\_vec\\_%' ESCAPE '\\' AND sql LIKE 'CREATE VIRTUAL TABLE%'"
+    ) as cursor:
+        tables = [name for (name,) in await cursor.fetchall()]
+    marks = ", ".join("?" * len(pks))
+    for table in tables:
+        await conn.execute(f"DELETE FROM {table} WHERE rowid IN ({marks})", pks)
 
 
 def vec_table_name(model_id: str, dimensions: int) -> str:
@@ -36,6 +64,36 @@ class SqliteMemoryStore:
     async def add(self, fact: Fact) -> None:
         vector = await self._embed_passage(fact.text)
         await self._ensure_index()
+        await self._add(fact, vector)
+
+    async def add_unless_similar(self, fact: Fact, min_similarity: float) -> list[ScoredFact]:
+        vector = await self._embed_passage(fact.text)  # embedded once, for both steps
+        await self._ensure_index()
+        async with self._db.read() as conn:
+            async with conn.execute(
+                f"SELECT rowid, distance FROM {self._table}"
+                " WHERE embedding MATCH ? AND k = 3 AND user_id = ? ORDER BY distance",
+                (serialize_float32(vector), fact.user_id),
+            ) as cursor:
+                close = {
+                    pk: 1.0 - d for pk, d in await cursor.fetchall() if 1.0 - d >= min_similarity
+                }
+            similar: list[ScoredFact] = []
+            if close:
+                async with conn.execute(
+                    f"SELECT * FROM facts WHERE pk IN ({', '.join('?' * len(close))})",
+                    tuple(close),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                similar = sorted(
+                    (ScoredFact(_fact(row), close[row["pk"]]) for row in rows),
+                    key=lambda s: -s.score,
+                )
+        if not similar:
+            await self._add(fact, vector)
+        return similar
+
+    async def _add(self, fact: Fact, vector: list[float]) -> None:
         try:
             async with self._db.transaction() as conn:
                 await self._insert(conn, fact, vector)
@@ -89,7 +147,22 @@ class SqliteMemoryStore:
             rows = await cursor.fetchall()
         return [_fact(row) for row in rows]
 
-    async def search(self, user_id: str, query: str, limit: int) -> list[ScoredFact]:
+    async def saved_in(self, session_id: str) -> list[Fact]:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT * FROM facts WHERE source_session_id = ? AND retired_at IS NULL"
+                " ORDER BY created_at, pk",
+                (session_id,),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        return [_fact(row) for row in rows]
+
+    async def search(
+        self, user_id: str, query: str, limit: int, min_similarity: float | None = None
+    ) -> list[ScoredFact]:
+        cut_off = self._min_similarity if min_similarity is None else min_similarity
         match = fts_query(query)
         if match is None:
             return []
@@ -103,11 +176,8 @@ class SqliteMemoryStore:
                 " WHERE embedding MATCH ? AND k = ? AND user_id = ? ORDER BY distance",
                 (serialize_float32(vector), candidates, user_id),
             ) as cursor:
-                semantic = [
-                    pk
-                    for pk, distance in await cursor.fetchall()
-                    if 1.0 - distance >= self._min_similarity
-                ]
+                similarity = {pk: 1.0 - distance for pk, distance in await cursor.fetchall()}
+            semantic = [pk for pk, score in similarity.items() if score >= cut_off]
             async with conn.execute(
                 "SELECT facts.pk FROM facts_fts JOIN facts ON facts.pk = facts_fts.rowid"
                 " WHERE facts_fts MATCH ? AND facts.user_id = ? AND facts.retired_at IS NULL"
@@ -115,6 +185,17 @@ class SqliteMemoryStore:
                 (match, user_id, candidates),
             ) as cursor:
                 keyword = [pk for (pk,) in await cursor.fetchall()]
+            unscored = [pk for pk in keyword if pk not in similarity]
+            if unscored:
+                async with conn.execute(
+                    f"SELECT rowid, vec_distance_cosine(embedding, ?) FROM {self._table}"
+                    f" WHERE rowid IN ({', '.join('?' * len(unscored))})",
+                    (serialize_float32(vector), *unscored),
+                ) as cursor:
+                    similarity |= {pk: 1.0 - distance for pk, distance in await cursor.fetchall()}
+            # A fact with no vector yet (embedder switched, `reembed` not run) keeps its keyword
+            # match: there is nothing to judge it by.
+            keyword = [pk for pk in keyword if similarity.get(pk, KEYWORD_FLOOR) >= KEYWORD_FLOOR]
 
             scores = reciprocal_rank_fusion([semantic, keyword])
             if not scores:
@@ -128,6 +209,55 @@ class SqliteMemoryStore:
         scored = [ScoredFact(_fact(row), scores[row["pk"]]) for row in rows]
         scored.sort(key=lambda s: (-s.score, -s.fact.importance, -s.fact.created_at.timestamp()))
         return scored[:limit]
+
+    async def count_about(self, person_id: str) -> int:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT COUNT(*) FROM facts WHERE about_person_id = ? AND retired_at IS NULL",
+                (person_id,),
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def forget(self, fact_id: str, at: datetime) -> list[str]:
+        await self._ensure_index()
+        async with self._db.transaction() as conn:
+            await self._lookup(conn, fact_id)
+            chain: dict[int, str | None] = {}
+            frontier = [fact_id]
+            while frontier:
+                marks = ", ".join("?" * len(frontier))
+                async with conn.execute(
+                    "SELECT pk, id, source_session_id FROM facts"
+                    f" WHERE id IN ({marks}) OR superseded_by IN ({marks})",
+                    (*frontier, *frontier),
+                ) as cursor:
+                    rows = [row for row in await cursor.fetchall() if row["pk"] not in chain]
+                chain |= {row["pk"]: row["source_session_id"] for row in rows}
+                frontier = [row["id"] for row in rows]
+            for pk in chain:
+                await conn.execute(
+                    "UPDATE facts SET text = '', quote = NULL,"
+                    " deleted_at = COALESCE(deleted_at, ?), retired_at = COALESCE(retired_at, ?)"
+                    " WHERE pk = ?",
+                    (to_db(at), to_db(at), pk),
+                )
+                await _drop_vectors(conn, [pk])
+        return sorted({session_id for session_id in chain.values() if session_id})
+
+    async def forget_all(self, user_id: str, at: datetime) -> None:
+        async with self._db.transaction() as conn:
+            async with conn.execute("SELECT pk FROM facts WHERE user_id = ?", (user_id,)) as cursor:
+                pks = [pk for (pk,) in await cursor.fetchall()]
+            await conn.execute(
+                "UPDATE facts SET text = '', quote = NULL, about_person_id = NULL,"
+                " deleted_at = COALESCE(deleted_at, ?), retired_at = COALESCE(retired_at, ?)"
+                " WHERE user_id = ?",
+                (to_db(at), to_db(at), user_id),
+            )
+            await _drop_vectors(conn, pks)
 
     async def rebuild_index(self) -> int:
         async with self._db.transaction() as conn:
@@ -179,7 +309,8 @@ class SqliteMemoryStore:
     async def _insert(self, conn: aiosqlite.Connection, fact: Fact, vector: list[float]) -> None:
         cursor = await conn.execute(
             "INSERT INTO facts (id, user_id, text, category, importance, source_session_id,"
-            " superseded_by, created_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " superseded_by, created_at, retired_at, kind, quote, about_person_id, certainty,"
+            " sensitivity, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 fact.id,
                 fact.user_id,
@@ -190,6 +321,12 @@ class SqliteMemoryStore:
                 fact.superseded_by,
                 to_db(fact.created_at),
                 to_db(fact.retired_at),
+                fact.kind.value,
+                fact.quote,
+                fact.about_person_id,
+                fact.certainty.value,
+                fact.sensitivity.value,
+                to_db(fact.deleted_at),
             ),
         )
         if fact.is_active:
@@ -220,5 +357,11 @@ def _fact(row: aiosqlite.Row) -> Fact:
         importance=row["importance"],
         source_session_id=row["source_session_id"],
         superseded_by=row["superseded_by"],
-        retired_at=None if row["retired_at"] is None else required(row["retired_at"]),
+        retired_at=from_db(row["retired_at"]),
+        kind=MemoryKind(row["kind"]),
+        quote=row["quote"],
+        about_person_id=row["about_person_id"],
+        certainty=Certainty(row["certainty"]),
+        sensitivity=Sensitivity(row["sensitivity"]),
+        deleted_at=from_db(row["deleted_at"]),
     )

@@ -9,22 +9,37 @@ from baatein.auth.service import AuthService
 from baatein.config import Settings
 from baatein.container import build_root
 from baatein.domain.errors import ConfigurationError
-from baatein.memory.embeddings.fastembed import FastEmbedEmbedder
+from baatein.memory.analyzer import ClaudeAnalyzer
+from baatein.memory.embeddings.pinecone import PineconeEmbedder
+from baatein.memory.service import MemoryDeps, MemoryService
+from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import CallTokenIssuer, PasswordHasher
-from baatein.ports.clock import Clock, SystemClock
+from baatein.ports.clock import Clock, DemoClock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
+from baatein.ports.repos import (
+    BoundaryRepo,
+    PeopleRepo,
+    SessionRepo,
+    SuggestionRepo,
+    ThreadRepo,
+    TurnRepo,
+    UserRepo,
+)
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
-    SqliteFollowUpRepo,
+    SqliteBoundaryRepo,
+    SqlitePeopleRepo,
     SqliteSessionRepo,
+    SqliteSuggestionRepo,
+    SqliteThreadRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
 )
 from baatein.voice.languages import LanguageProfile, LanguageRegistry, ProviderSpec
 from baatein.voice.providers import VoicePipelineFactory
+from tests.fakes.clock import FrozenClock
 
 
 def test_root_binds_given_settings() -> None:
@@ -61,8 +76,12 @@ def test_extra_modules_override_defaults() -> None:
         (UserRepo, SqliteUserRepo),
         (SessionRepo, SqliteSessionRepo),
         (TurnRepo, SqliteTurnRepo),
-        (FollowUpRepo, SqliteFollowUpRepo),
+        (PeopleRepo, SqlitePeopleRepo),
+        (ThreadRepo, SqliteThreadRepo),
+        (BoundaryRepo, SqliteBoundaryRepo),
+        (SuggestionRepo, SqliteSuggestionRepo),
         (Clock, SystemClock),
+        (CallAnalyzer, ClaudeAnalyzer),
     ],
 )
 def test_ports_resolve_to_default_adapters(port: type, adapter: type) -> None:
@@ -85,8 +104,15 @@ def test_memory_store_is_sqlite_store_with_configured_embedder() -> None:
     store = injector.get(MemoryStore)
 
     assert store is injector.get(SqliteMemoryStore)
-    assert isinstance(injector.get(Embedder), FastEmbedEmbedder)
-    assert store.vec_table.endswith("_384")  # type: ignore[attr-defined]
+    assert isinstance(injector.get(Embedder), PineconeEmbedder)
+    assert store.vec_table.endswith("_2048")  # type: ignore[attr-defined]
+
+
+def test_memory_service_is_a_singleton() -> None:
+    injector = build_root(settings=Settings(_env_file=None))  # type: ignore[call-arg]
+
+    assert isinstance(injector.get(MemoryService), MemoryService)
+    assert injector.get(MemoryService) is injector.get(MemoryService)
 
 
 def test_auth_requires_jwt_secret() -> None:
@@ -112,3 +138,26 @@ def test_auth_components_resolve_when_configured(monkeypatch: pytest.MonkeyPatch
     assert isinstance(injector.get(AuthService), AuthService)
     assert isinstance(injector.get(CallTokenIssuer), LiveKitCallTokens)  # type: ignore[type-abstract]
     assert isinstance(injector.get(PasswordHasher), Argon2PasswordHasher)  # type: ignore[type-abstract]
+
+
+def test_a_demo_clock_moves_memory_time_but_not_logins(tmp_path: Path) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        database={"url": f"sqlite:///{tmp_path}/app.db"},
+        auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
+        dev={"clock_file": str(tmp_path / "clock.json")},
+    )
+    frozen = FrozenClock()
+
+    class Frozen(Module):
+        @singleton
+        @provider
+        def clock(self) -> Clock:
+            return frozen
+
+    injector = build_root(Frozen(), settings=settings)
+
+    demo = injector.get(MemoryDeps).clock
+    assert isinstance(demo, DemoClock)
+    assert demo.now() == frozen.now()  # with no demo date, the app's own clock (a test's too)
+    assert injector.get(Clock) is frozen  # type: ignore[type-abstract]

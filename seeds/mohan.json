@@ -1,0 +1,76 @@
+{
+  "user": { "email": "mohan@example.com", "display_name": "Mohan", "language": "hinglish" },
+  "persona": "elder",
+  "preferences": { "fewer_questions": true },
+  "people": [
+    { "name": "Ramesh", "relation": "college friend" },
+    { "name": "Ravi", "relation": "son" },
+    { "name": "Sunita", "relation": "neighbour" }
+  ],
+  "calls": [
+    {
+      "key": "first",
+      "days_ago": 9,
+      "summary": "Talked about college days and his friend Ramesh; he wants to call him again.",
+      "turns": [
+        { "role": "user", "text": "Mera ek dost tha, Ramesh. Hum har shaam saath chai peete the." },
+        { "role": "assistant", "text": "Kitni pyaari yaad hai, Mohan ji. Kya main yeh yaad rakhun?" },
+        { "role": "user", "text": "Haan, yaad rakhna." }
+      ]
+    },
+    {
+      "key": "last",
+      "days_ago": 2,
+      "summary": "Spoke about his garden and the village fair.",
+      "ended_abruptly": true,
+      "unfinished_topic": "Phir hum gaon ke mele mein gaye aur wahan ek ajeeb cheez hui"
+    }
+  ],
+  "memories": [
+    {
+      "text": "Misses college friend Ramesh; they had chai together every evening",
+      "kind": "story",
+      "quote": "Hum har shaam saath chai peete the",
+      "about": "Ramesh",
+      "call": "first"
+    },
+    { "text": "Likes chai without elaichi", "kind": "preference", "importance": 2 },
+    { "text": "Is painting a landscape of his village", "kind": "fact" },
+    {
+      "text": "His wife passed away three years ago",
+      "sensitivity": "grief",
+      "importance": 5
+    }
+  ],
+  "threads": [
+    {
+      "title": "Reconnect with college friend Ramesh by phone",
+      "kind": "relationship",
+      "status": "in_progress",
+      "next_step": "Call him on Sunday",
+      "about": "Ramesh",
+      "call": "first",
+      "events": [
+        { "text": "Wants to call Ramesh again", "status": "open", "days_ago": 9 },
+        { "text": "Plans to call him on Sunday", "status": "in_progress", "days_ago": 2 }
+      ]
+    },
+    { "title": "Finish the village painting", "kind": "aspiration" },
+    { "title": "Join the morning yoga class", "status": "cancelled" }
+  ],
+  "boundaries": [{ "topic": "painting" }],
+  "declined_suggestions": ["go for a walk"],
+  "reminders": [
+    {
+      "title": "Ravi's birthday",
+      "date": "today+6",
+      "time": "09:00",
+      "repeat": "yearly",
+      "days_before": [7, 0],
+      "about": "Ravi",
+      "note": "Buy him a watch"
+    },
+    { "title": "Electricity bill", "date": "today+12", "repeat": "monthly_date" },
+    { "title": "Visit daughter in June" }
+  ]
+}

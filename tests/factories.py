@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from baatein.domain.ids import new_id
-from baatein.domain.models import Fact, FollowUp, Role, Session, Turn, User
+from baatein.domain.models import Boundary, Fact, Reminder, Role, Session, Thread, Turn, User
 
 T0 = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 
@@ -37,11 +37,21 @@ def make_turn(session_id: str, seq: int, text: str = "hello", **overrides: Any) 
     return Turn(**(fields | overrides))
 
 
-def make_followup(user_id: str, **overrides: Any) -> FollowUp:
-    fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "text": "ask", "created_at": T0}
-    return FollowUp(**(fields | overrides))
+def make_thread(user_id: str, title: str = "Reconnect with Ramesh", **overrides: Any) -> Thread:
+    fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "title": title, "created_at": T0}
+    return Thread(**(fields | overrides))
+
+
+def make_boundary(user_id: str, topic: str = "painting", **overrides: Any) -> Boundary:
+    fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "topic": topic, "created_at": T0}
+    return Boundary(**(fields | overrides))
 
 
 def make_fact(user_id: str, text: str = "likes chai", **overrides: Any) -> Fact:
     fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "text": text, "created_at": T0}
     return Fact(**(fields | overrides))
+
+
+def make_reminder(user_id: str, title: str = "Ravi's birthday", **overrides: Any) -> Reminder:
+    fields: dict[str, Any] = {"id": new_id(), "user_id": user_id, "title": title, "created_at": T0}
+    return Reminder(**(fields | overrides))

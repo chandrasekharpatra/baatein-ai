@@ -5,36 +5,59 @@ from pathlib import Path
 import pytest
 
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import FactCategory
+from baatein.domain.models import (
+    Certainty,
+    FactCategory,
+    MemoryKind,
+    Person,
+    Sensitivity,
+)
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import UserRepo
+from baatein.ports.repos import PeopleRepo, SessionRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.migrate import migrate
-from baatein.storage.sqlite.repos import SqliteUserRepo
-from tests.factories import at, make_fact, make_user
-from tests.fakes.embedder import FakeEmbedder
+from baatein.storage.sqlite.repos import SqlitePeopleRepo, SqliteSessionRepo, SqliteUserRepo
+from tests.factories import T0, at, make_fact, make_session, make_user
+from tests.fakes.embedder import FakeEmbedder, MappedEmbedder
 from tests.fakes.memory import InMemoryMemoryStore
-from tests.fakes.repos import InMemoryState, InMemoryUserRepo
+from tests.fakes.repos import (
+    InMemoryPeopleRepo,
+    InMemorySessionRepo,
+    InMemoryState,
+    InMemoryUserRepo,
+)
 
 
 @dataclass(frozen=True)
 class Memory:
     store: MemoryStore
     users: UserRepo
+    sessions: SessionRepo
+    people: PeopleRepo
 
 
 @pytest.fixture(params=["sqlite", "memory"])
 async def memory(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[Memory]:
     if request.param == "memory":
         state = InMemoryState()
-        yield Memory(InMemoryMemoryStore(state, FakeEmbedder()), InMemoryUserRepo(state))
+        yield Memory(
+            InMemoryMemoryStore(state, FakeEmbedder()),
+            InMemoryUserRepo(state),
+            InMemorySessionRepo(state),
+            InMemoryPeopleRepo(state),
+        )
         return
 
     path = tmp_path / "test.db"
     migrate(path)
     db = Database(path)
-    yield Memory(SqliteMemoryStore(db, FakeEmbedder()), SqliteUserRepo(db))
+    yield Memory(
+        SqliteMemoryStore(db, FakeEmbedder()),
+        SqliteUserRepo(db),
+        SqliteSessionRepo(db),
+        SqlitePeopleRepo(db),
+    )
     await db.close()
 
 
@@ -170,3 +193,199 @@ async def test_retire_hides_fact_and_is_idempotent(memory: Memory) -> None:
 async def test_retire_missing_raises(memory: Memory) -> None:
     with pytest.raises(NotFoundError):
         await memory.store.retire("missing", at(0))
+
+
+async def add_session(memory: Memory, user_id: str) -> str:
+    session = make_session(user_id)
+    await memory.sessions.add(session)
+    return session.id
+
+
+async def test_memory_fields_round_trip(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    ramesh = Person("p-ramesh", user_id, "Ramesh", T0, relation="college friend")
+    await memory.people.add(ramesh)
+    fact = make_fact(
+        user_id,
+        "Misses college friend Ramesh",
+        kind=MemoryKind.STORY,
+        quote="Hum har shaam saath chai peete the",
+        about_person_id=ramesh.id,
+        certainty=Certainty.UNCERTAIN,
+        sensitivity=Sensitivity.PERSONAL,
+        source_session_id=await add_session(memory, user_id),
+    )
+
+    await memory.store.add(fact)
+
+    assert await memory.store.get(fact.id) == fact
+
+
+async def test_forget_tombstones_fact_and_earlier_versions(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    first, second = await add_session(memory, user_id), await add_session(memory, user_id)
+    original = make_fact(user_id, "Suman is my sister", quote="Suman", source_session_id=first)
+    await memory.store.add(original)
+    corrected = make_fact(
+        user_id, "Sunita is my neighbour", created_at=at(5), source_session_id=second
+    )
+    await memory.store.supersede(original.id, corrected)
+    unrelated = make_fact(user_id, "Likes masala chai")
+    await memory.store.add(unrelated)
+
+    sessions = await memory.store.forget(corrected.id, at(10))
+
+    assert sessions == sorted([first, second])
+    for fact_id in (original.id, corrected.id):
+        tombstone = await memory.store.get(fact_id)
+        assert tombstone is not None
+        assert (tombstone.text, tombstone.quote) == ("", None)
+        assert tombstone.is_deleted
+        assert not tombstone.is_active
+    assert (await memory.store.get(corrected.id)).deleted_at == at(10)  # type: ignore[union-attr]
+    assert await memory.store.active(user_id, limit=10) == [unrelated]
+    assert await memory.store.search(user_id, "Sunita neighbour Suman sister", limit=5) == []
+
+
+async def test_forget_is_idempotent_and_keeps_first_deletion_time(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    fact = make_fact(user_id, "Something private")
+    await memory.store.add(fact)
+    await memory.store.forget(fact.id, at(1))
+
+    assert await memory.store.forget(fact.id, at(2)) == []
+    assert (await memory.store.get(fact.id)).deleted_at == at(1)  # type: ignore[union-attr]
+
+
+async def test_forget_missing_raises(memory: Memory) -> None:
+    with pytest.raises(NotFoundError):
+        await memory.store.forget("missing", at(0))
+
+
+async def test_count_about_counts_current_facts_only(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    await memory.people.add(Person("p1", user_id, "Ravi", T0))
+    current = make_fact(user_id, "Ravi plays cricket", about_person_id="p1")
+    retired = make_fact(user_id, "Ravi lives in Pune", about_person_id="p1")
+    for fact in (current, retired, make_fact(user_id, "Likes chai")):
+        await memory.store.add(fact)
+    await memory.store.retire(retired.id, at(1))
+
+    assert await memory.store.count_about("p1") == 1
+    await memory.store.forget(current.id, at(2))
+    assert await memory.store.count_about("p1") == 0
+
+
+async def test_saved_in_lists_current_facts_from_a_call(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    call, other_call = make_session(user_id), make_session(user_id)
+    for session in (call, other_call):
+        await memory.sessions.add(session)
+    second = make_fact(user_id, "Likes chai", source_session_id=call.id, created_at=at(2))
+    first = make_fact(user_id, "Ravi plays cricket", source_session_id=call.id, created_at=at(1))
+    forgotten = make_fact(user_id, "Ravi lives in Pune", source_session_id=call.id)
+    elsewhere = make_fact(user_id, "Has a dog", source_session_id=other_call.id)
+    for fact in (second, first, forgotten, elsewhere):
+        await memory.store.add(fact)
+    await memory.store.forget(forgotten.id, at(3))
+
+    saved = await memory.store.saved_in(call.id)
+
+    assert [f.id for f in saved] == [first.id, second.id]
+
+
+async def test_each_search_can_set_its_own_cut_off(memory: Memory) -> None:
+    # The cut-off depends on the language of the words (docs/RETRIEVAL_BENCHMARK.md).
+    user_id = await add_user(memory)
+    fact = make_fact(user_id, "It is in the garden")
+    await memory.store.add(fact)
+    # Only stopwords overlap: a meaning match without any keyword match (similarity 0.8).
+    query = "is it in the zebra"
+
+    loose = await memory.store.search(user_id, query, 5, min_similarity=0.5)
+    strict = await memory.store.search(user_id, query, 5, min_similarity=0.9)
+
+    assert [r.fact.id for r in loose] == [fact.id]
+    assert strict == []
+
+
+@pytest.mark.parametrize("kind", ["sqlite", "memory"])
+async def test_a_keyword_match_needs_a_little_shared_meaning(kind: str, tmp_path: Path) -> None:
+    # Shared words alone pulled up unrelated memories ("sleep", "pine cone"); keep a keyword
+    # match only if its similarity reaches KEYWORD_FLOOR (0.1).
+    embedder = MappedEmbedder(
+        {
+            "guitar": [1.0, 0.0],
+            "plays guitar in a band": [0.05, 1.0],  # similarity ~0.05
+            "gave away the old guitar": [0.2, 1.0],  # similarity ~0.2
+        }
+    )
+    if kind == "memory":
+        state = InMemoryState()
+        store: MemoryStore = InMemoryMemoryStore(state, embedder)
+        users: UserRepo = InMemoryUserRepo(state)
+    else:
+        migrate(tmp_path / "test.db")
+        db = Database(tmp_path / "test.db")
+        store, users = SqliteMemoryStore(db, embedder), SqliteUserRepo(db)
+    user = make_user()
+    await users.add(user)
+    for text in ("plays guitar in a band", "gave away the old guitar"):
+        await store.add(make_fact(user.id, text))
+
+    found = await store.search(user.id, "guitar", 5, min_similarity=0.9)  # no meaning match
+
+    assert [r.fact.text for r in found] == ["gave away the old guitar"]
+    if kind == "sqlite":
+        await db.close()
+
+
+async def test_add_unless_similar_returns_the_close_facts_instead_of_saving(
+    memory: Memory,
+) -> None:
+    user_id = await add_user(memory)
+    saved = make_fact(user_id, "Wife Sabitri is 54")
+    await memory.store.add(saved)
+    await memory.store.add(make_fact(user_id, "Loves masala chai"))
+    repeat = make_fact(user_id, "Wife Sabitri is 54 years old")  # bag-of-words similarity 0.82
+
+    similar = await memory.store.add_unless_similar(repeat, 0.8)
+
+    assert [s.fact.id for s in similar] == [saved.id]
+    assert similar[0].score >= 0.8
+    assert await memory.store.get(repeat.id) is None
+
+
+async def test_add_unless_similar_saves_a_new_fact(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    await memory.store.add(make_fact(user_id, "Wife Sabitri is 54"))
+    new = make_fact(user_id, "Plays chess with Prafulla every evening")
+
+    assert await memory.store.add_unless_similar(new, 0.8) == []
+
+    assert await memory.store.get(new.id) == new
+    assert [r.fact.id for r in await memory.store.search(user_id, "chess", 5)] == [new.id]
+
+
+async def test_add_unless_similar_for_unknown_user_raises(memory: Memory) -> None:
+    with pytest.raises(NotFoundError):
+        await memory.store.add_unless_similar(make_fact("nobody"), 0.8)
+
+
+async def test_forget_all_tombstones_every_fact_of_the_user(memory: Memory) -> None:
+    user_id, other_id = await add_user(memory), await add_user(memory)
+    old = make_fact(user_id, "Plays chess with Prafulla")
+    await memory.store.add(old)
+    await memory.store.supersede(old.id, make_fact(user_id, "Plays chess with Prafulla daily"))
+    kept = make_fact(other_id, "Plays chess with Bijay")
+    await memory.store.add(kept)
+
+    await memory.store.forget_all(user_id, at(5))
+    await memory.store.forget_all(await add_user(memory), at(5))  # nothing saved: no-op
+
+    assert await memory.store.active(user_id, 10) == []
+    assert await memory.store.search(user_id, "chess", 5) == []
+    gone = await memory.store.get(old.id)
+    assert gone is not None
+    assert (gone.text, gone.deleted_at) == ("", at(5))
+    assert await memory.store.get(kept.id) == kept

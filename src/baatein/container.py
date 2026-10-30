@@ -1,28 +1,51 @@
 from datetime import timedelta
+from pathlib import Path
 
+from anthropic import AsyncAnthropic
 from injector import Binder, Injector, Module, provider, singleton
 
+from baatein.accounts import Accounts
 from baatein.auth.livekit import LiveKitCallTokens
 from baatein.auth.passwords import Argon2PasswordHasher
 from baatein.auth.service import AuthService
 from baatein.auth.tokens import JwtAccessTokens
 from baatein.config import Settings
 from baatein.domain.errors import ConfigurationError
+from baatein.memory.analyzer import ClaudeAnalyzer
 from baatein.memory.embeddings.registry import EmbedderRegistry, default_embedder_registry
+from baatein.memory.finalizer import Finalizer
+from baatein.memory.seed import Seeder
+from baatein.memory.service import MemoryDeps, MemoryService
+from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
-from baatein.ports.clock import Clock, SystemClock
+from baatein.ports.clock import Clock, DemoClock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
-from baatein.ports.repos import FollowUpRepo, SessionRepo, TurnRepo, UserRepo
+from baatein.ports.repos import (
+    BoundaryRepo,
+    PeopleRepo,
+    ReminderRepo,
+    SessionRepo,
+    SuggestionRepo,
+    ThreadRepo,
+    TurnRepo,
+    UserRepo,
+)
+from baatein.registry import ProviderSpec
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
-    SqliteFollowUpRepo,
+    SqliteBoundaryRepo,
+    SqlitePeopleRepo,
+    SqliteReminderRepo,
     SqliteSessionRepo,
+    SqliteSuggestionRepo,
+    SqliteThreadRepo,
     SqliteTurnRepo,
     SqliteUserRepo,
 )
 from baatein.voice.languages import LanguageRegistry, default_language_registry
+from baatein.voice.personas import PersonaRegistry, default_persona_registry
 from baatein.voice.providers import (
     LLMRegistry,
     STTRegistry,
@@ -66,8 +89,28 @@ class StorageModule(Module):
 
     @singleton
     @provider
-    def followups(self, db: Database) -> FollowUpRepo:
-        return SqliteFollowUpRepo(db)
+    def people(self, db: Database) -> PeopleRepo:
+        return SqlitePeopleRepo(db)
+
+    @singleton
+    @provider
+    def threads(self, db: Database) -> ThreadRepo:
+        return SqliteThreadRepo(db)
+
+    @singleton
+    @provider
+    def boundaries(self, db: Database) -> BoundaryRepo:
+        return SqliteBoundaryRepo(db)
+
+    @singleton
+    @provider
+    def suggestions(self, db: Database) -> SuggestionRepo:
+        return SqliteSuggestionRepo(db)
+
+    @singleton
+    @provider
+    def reminders(self, db: Database) -> ReminderRepo:
+        return SqliteReminderRepo(db)
 
 
 class MemoryModule(Module):
@@ -86,12 +129,68 @@ class MemoryModule(Module):
     def sqlite_memory_store(
         self, db: Database, embedder: Embedder, settings: Settings
     ) -> SqliteMemoryStore:
-        return SqliteMemoryStore(db, embedder, settings.memory.min_similarity)
+        return SqliteMemoryStore(db, embedder, settings.embedding.cut_off())
 
     @singleton
     @provider
     def memory_store(self, store: SqliteMemoryStore) -> MemoryStore:
         return store
+
+    @singleton
+    @provider
+    def memory_deps(
+        self,
+        settings: Settings,
+        users: UserRepo,
+        sessions: SessionRepo,
+        turns: TurnRepo,
+        people: PeopleRepo,
+        threads: ThreadRepo,
+        boundaries: BoundaryRepo,
+        suggestions: SuggestionRepo,
+        reminders: ReminderRepo,
+        store: MemoryStore,
+        clock: Clock,
+    ) -> MemoryDeps:
+        if settings.dev.clock_file:  # demos only; tokens and logins keep the real clock
+            clock = DemoClock(Path(settings.dev.clock_file), clock)
+        return MemoryDeps(
+            users,
+            sessions,
+            turns,
+            people,
+            threads,
+            boundaries,
+            suggestions,
+            reminders,
+            store,
+            clock,
+            settings.memory,
+        )
+
+    @singleton
+    @provider
+    def memory_service(
+        self, deps: MemoryDeps, embedder: Embedder, settings: Settings
+    ) -> MemoryService:
+        return MemoryService(
+            deps, embedder, settings.embedding.cut_off, settings.embedding.duplicate_at()
+        )
+
+    @singleton
+    @provider
+    def seeder(self, deps: MemoryDeps, personas: PersonaRegistry) -> Seeder:
+        return Seeder(deps, personas)
+
+    @singleton
+    @provider
+    def call_analyzer(self, settings: Settings) -> CallAnalyzer:
+        return ClaudeAnalyzer(AsyncAnthropic(), settings.finalize.model, settings.finalize.effort)
+
+    @singleton
+    @provider
+    def finalizer(self, deps: MemoryDeps, analyzer: CallAnalyzer, settings: Settings) -> Finalizer:
+        return Finalizer(deps, analyzer, settings.finalize)
 
 
 class AuthModule(Module):
@@ -99,6 +198,19 @@ class AuthModule(Module):
     @provider
     def password_hasher(self) -> PasswordHasher:
         return Argon2PasswordHasher()
+
+    @singleton
+    @provider
+    def accounts(
+        self,
+        db: Database,
+        deps: MemoryDeps,
+        seeder: Seeder,
+        hasher: PasswordHasher,
+        languages: LanguageRegistry,
+        settings: Settings,
+    ) -> Accounts:
+        return Accounts(db, deps, seeder, hasher, languages, settings)
 
     @singleton
     @provider
@@ -134,6 +246,7 @@ class AuthModule(Module):
         hasher: PasswordHasher,
         tokens: AccessTokens,
         languages: LanguageRegistry,
+        personas: PersonaRegistry,
         clock: Clock,
     ) -> AuthService:
         return AuthService(
@@ -141,8 +254,10 @@ class AuthModule(Module):
             hasher,
             tokens,
             languages,
+            personas,
             clock,
             default_language=settings.voice.default_language,
+            default_persona=settings.voice.default_persona,
             min_password_length=settings.auth.min_password_length,
         )
 
@@ -150,8 +265,18 @@ class AuthModule(Module):
 class VoiceModule(Module):
     @singleton
     @provider
-    def languages(self) -> LanguageRegistry:
-        return default_language_registry()
+    def languages(self, settings: Settings) -> LanguageRegistry:
+        return default_language_registry(
+            {
+                code: (ProviderSpec(voice.provider, voice.options), voice.pace_option)
+                for code, voice in settings.voice.tts.items()
+            }
+        )
+
+    @singleton
+    @provider
+    def personas(self) -> PersonaRegistry:
+        return default_persona_registry()
 
     @singleton
     @provider

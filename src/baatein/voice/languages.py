@@ -1,5 +1,5 @@
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 
 from baatein.registry import ProviderSpec
 
@@ -10,6 +10,16 @@ class LanguageProfile:
     stt: ProviderSpec
     tts: ProviderSpec
     reply_style: str
+    pace_option: str | None = None
+    """The TTS option that sets speaking speed, if the provider has one."""
+    cannot_hear: str = "Sorry, I can't hear you right now. Let's talk again in a little while."
+    """Said before ending a call when speech-to-text stops working."""
+    honorific: str | None = None
+    """Respectful word after a name for a respectful persona, e.g. "ji" (Hindi)."""
+    formal_you: str | None = None
+    """How a respectful persona says "you" in this language."""
+    thinking: str = "Hmm…"
+    """Said while a slow memory lookup runs, so the caller hears a pause, not silence."""
 
 
 class UnknownLanguageError(LookupError):
@@ -42,23 +52,100 @@ class LanguageRegistry:
 HINGLISH = LanguageProfile(
     code="hinglish",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "hi-IN"}),
+    # Cartesia sonic-3.6, voice "Siya - Bright Conversationalist" (D31). Sonic 3.6 reads
+    # Roman-script Hindi, and keeps one stream per reply, so its tone doesn't jump between
+    # sentences as Sarvam's did. No word timestamps for Hindi: LiveKit times the transcript.
     tts=ProviderSpec(
-        "sarvam", {"model": "bulbul:v3", "target_language_code": "hi-IN", "speaker": "shubh"}
+        "cartesia",
+        {
+            "model": "sonic-3.6",
+            "language": "hi",
+            "voice": "4459a9a5-69d6-4680-b970-e13dc51845b6",
+            "word_timestamps": False,
+        },
     ),
     reply_style=(
         "Speak in natural, casual Hinglish the way urban Indians talk: mix Hindi and English "
         "freely, written in Roman script (e.g. 'Aaj ka din kaisa raha?'). Match the user's "
-        "balance of Hindi and English."
+        "balance of Hindi and English. Always write in Roman script, never Devanagari, even "
+        "when the user's words reach you in Devanagari."
     ),
+    pace_option="speed",
+    cannot_hear=(
+        "Maaf kijiye, aapki awaaz mujh tak nahi pahunch rahi. Thodi der mein phir baat karte hain."
+    ),
+    honorific="ji",
+    formal_you="Say 'aap', never 'tum'.",
 )
 
 ENGLISH = LanguageProfile(
     code="english",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "transcribe", "language": "en-IN"}),
-    tts=ProviderSpec("cartesia", {"model": "sonic-3", "language": "en"}),
+    tts=ProviderSpec(
+        "sarvam",
+        {
+            "model": "bulbul:v4-flash",
+            "target_language_code": "en-IN",
+            "speaker": "sanchita_en_companion",
+        },
+    ),
     reply_style="Speak in simple, friendly Indian English.",
+    pace_option="pace",
+    honorific="ji",
+)
+
+ODIA = LanguageProfile(
+    code="odia",
+    stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "od-IN"}),
+    # bulbul:v4-flash has no Odia voice yet, so Odia keeps bulbul:v3 (Cartesia has no Odia).
+    tts=ProviderSpec(
+        "sarvam", {"model": "bulbul:v3", "target_language_code": "od-IN", "speaker": "kavya"}
+    ),
+    reply_style=(
+        "Speak in natural, everyday Odia, written in Odia script (e.g. 'ଆଜି ଦିନ କେମିତି "
+        "ଗଲା?'). Keep the English words the user uses themselves (phone, doctor, TV) in Latin "
+        "script. Never write Odia in Roman script, and never reply in Hindi."
+    ),
+    pace_option="pace",
+    cannot_hear=("କ୍ଷମା କରିବେ, ଆପଣଙ୍କ କଥା ମୋ ପାଖରେ ପହଞ୍ଚୁନାହିଁ। ଟିକିଏ ପରେ ପୁଣି କଥା ହେବା।"),
+    # Odia's respectful suffixes depend on gender (babu, apa), which Baatein doesn't know.
+    formal_you="Say 'ଆପଣ' (apana), never 'ତୁମେ' or 'ତୁ'.",
+)
+
+KANNADA = LanguageProfile(
+    code="kannada",
+    stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "kn-IN"}),
+    tts=ProviderSpec(
+        "sarvam",
+        {
+            "model": "bulbul:v4-flash",
+            "target_language_code": "kn-IN",
+            "speaker": "chaitra_kn_conversation",
+        },
+    ),
+    reply_style=(
+        "Speak in natural, everyday Kannada, written in Kannada script (e.g. 'ಇವತ್ತು ದಿನ "
+        "ಹೇಗಿತ್ತು?'). Keep the English words the user uses themselves (phone, doctor, TV) in "
+        "Latin script. Never write Kannada in Roman script, and never reply in Hindi."
+    ),
+    pace_option="pace",
+    cannot_hear=("ಕ್ಷಮಿಸಿ, ನಿಮ್ಮ ಧ್ವನಿ ನನಗೆ ಕೇಳುತ್ತಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಮಾತನಾಡೋಣ."),
+    honorific="avare",
+    formal_you="Say 'ನೀವು' (neevu), never 'ನೀನು'.",
 )
 
 
-def default_language_registry() -> LanguageRegistry:
-    return LanguageRegistry([HINGLISH, ENGLISH])
+def default_language_registry(
+    voices: Mapping[str, tuple[ProviderSpec, str | None]] | None = None,
+) -> LanguageRegistry:
+    """The built-in profiles. `voices` replaces a profile's text-to-speech (spec and pace
+    option) by language code, e.g. an expressive voice for a demo."""
+    profiles = [HINGLISH, ENGLISH, ODIA, KANNADA]
+    voices = voices or {}
+    unknown = set(voices) - {p.code for p in profiles}
+    if unknown:
+        raise UnknownLanguageError(f"no language profile for voice override: {sorted(unknown)}")
+    return LanguageRegistry(
+        replace(p, tts=voices[p.code][0], pace_option=voices[p.code][1]) if p.code in voices else p
+        for p in profiles
+    )

@@ -1,9 +1,11 @@
+from dataclasses import replace
+
 import pytest
 
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import FinalizeStatus, Session
+from baatein.domain.models import CallSummary, FinalizeStatus, Role, Session
 from tests.contract.conftest import Repos
-from tests.factories import at, make_session, make_user
+from tests.factories import at, make_session, make_turn, make_user
 
 
 async def add_user(repos: Repos) -> str:
@@ -13,7 +15,15 @@ async def add_user(repos: Repos) -> str:
 
 
 async def test_add_then_get_round_trips(repos: Repos) -> None:
-    session = make_session(await add_user(repos), room_name="room-1")
+    session = make_session(
+        await add_user(repos),
+        room_name="room-1",
+        ended_abruptly=True,
+        unfinished_topic="mela",
+        notes=("Mentioned a trip to Puri",),
+        saving_paused=True,
+        finalize_retry_at=at(9),
+    )
 
     await repos.sessions.add(session)
 
@@ -37,6 +47,26 @@ async def test_recent_for_user_newest_first_limited_and_scoped(repos: Repos) -> 
     assert [s.id for s in recent] == [newest.id, new.id]
 
 
+async def test_recent_conversations_skip_finished_calls_where_the_user_said_nothing(
+    repos: Repos,
+) -> None:
+    user_id = await add_user(repos)
+    spoken, silent, ongoing, seeded = (
+        make_session(user_id, started_at=at(m), ended_at=at(m + 1)) for m in (0, 10, 20, 30)
+    )
+    ongoing = replace(ongoing, ended_at=None)
+    seeded = replace(seeded, summary="Talked about chai.")  # a summary but no transcript
+    for session in (spoken, silent, ongoing, seeded):
+        await repos.sessions.add(session)
+    await repos.turns.append(make_turn(spoken.id, 1, role=Role.USER))
+    await repos.turns.append(make_turn(silent.id, 1, "Namaste!", role=Role.ASSISTANT))
+
+    recent = await repos.sessions.recent_conversations(user_id, limit=5)
+
+    assert [s.id for s in recent] == [seeded.id, ongoing.id, spoken.id]
+    assert len(await repos.sessions.recent_conversations(user_id, limit=1)) == 1
+
+
 async def test_end_marks_pending_finalization(repos: Repos) -> None:
     session = make_session(await add_user(repos))
     await repos.sessions.add(session)
@@ -48,24 +78,79 @@ async def test_end_marks_pending_finalization(repos: Repos) -> None:
     assert ended.ended_at == at(5)
     assert ended.end_reason == "participant_disconnected"
     assert ended.finalize_status is FinalizeStatus.PENDING
+    assert (ended.ended_abruptly, ended.unfinished_topic) == (False, None)
+    assert ended.saving_paused is False
+
+
+async def test_end_records_that_saving_was_paused(repos: Repos) -> None:
+    session = make_session(await add_user(repos))
+    await repos.sessions.add(session)
+
+    await repos.sessions.end(session.id, at(5), None, saving_paused=True)
+
+    ended = await repos.sessions.get(session.id)
+    assert ended is not None
+    assert ended.saving_paused is True
+
+
+async def test_end_records_a_call_cut_off_mid_story(repos: Repos) -> None:
+    session = make_session(await add_user(repos))
+    await repos.sessions.add(session)
+
+    await repos.sessions.end(
+        session.id, at(5), None, ended_abruptly=True, unfinished_topic="Gaon ka mela"
+    )
+
+    ended = await repos.sessions.get(session.id)
+    assert ended is not None
+    assert (ended.ended_abruptly, ended.unfinished_topic) == (True, "Gaon ka mela")
 
 
 async def test_finalize_lifecycle(repos: Repos) -> None:
     session = make_session(await add_user(repos))
     await repos.sessions.add(session)
-    await repos.sessions.end(session.id, at(5), None)
+    await repos.sessions.end(
+        session.id, at(5), None, ended_abruptly=True, unfinished_topic="Kal main bata raha tha"
+    )
 
-    await repos.sessions.mark_finalize_failed(session.id)
-    await repos.sessions.mark_finalize_failed(session.id)
+    await repos.sessions.mark_finalize_failed(session.id, at(6))
+    await repos.sessions.mark_finalize_failed(session.id, at(8))
     failed = await repos.sessions.get(session.id)
-    await repos.sessions.mark_finalized(session.id, "Talked about the interview.")
+    await repos.sessions.mark_finalized(
+        session.id,
+        CallSummary(
+            "Started a childhood story; the call ended before it finished.",
+            ended_abruptly=True,
+            unfinished_topic="childhood story about the village",
+            notes=("Mentioned his old school friend Bijay",),
+        ),
+    )
     done = await repos.sessions.get(session.id)
 
     assert failed is not None
     assert (failed.finalize_status, failed.finalize_attempts) == (FinalizeStatus.FAILED, 2)
+    assert failed.finalize_retry_at == at(8)
     assert done is not None
     assert done.finalize_status is FinalizeStatus.DONE
-    assert done.summary == "Talked about the interview."
+    assert done.summary == "Started a childhood story; the call ended before it finished."
+    assert (done.ended_abruptly, done.unfinished_topic) == (
+        True,
+        "childhood story about the village",
+    )
+    assert done.notes == ("Mentioned his old school friend Bijay",)
+    assert done.finalize_retry_at is None
+
+
+async def test_finalized_verdict_replaces_the_guess_from_end(repos: Repos) -> None:
+    session = make_session(await add_user(repos))
+    await repos.sessions.add(session)
+    await repos.sessions.end(session.id, at(5), None, ended_abruptly=True, unfinished_topic="x")
+
+    await repos.sessions.mark_finalized(session.id, CallSummary("Said goodbye."))
+
+    done = await repos.sessions.get(session.id)
+    assert done is not None
+    assert (done.ended_abruptly, done.unfinished_topic, done.notes) == (False, None, ())
 
 
 async def test_pending_finalization_filters_orders_and_limits(repos: Repos) -> None:
@@ -79,23 +164,27 @@ async def test_pending_finalization_filters_orders_and_limits(repos: Repos) -> N
 
     active = make_session(user_id)
     await repos.sessions.add(active)
-    late, early, retrying, exhausted, done = (
+    late, early, retrying, waiting, exhausted, done = (
         await ended(30),
         await ended(10),
         await ended(20),
+        await ended(25),
         await ended(5),
         await ended(1),
     )
-    await repos.sessions.mark_finalize_failed(retrying.id)
+    await repos.sessions.mark_finalize_failed(retrying.id, at(40))
+    await repos.sessions.mark_finalize_failed(waiting.id, at(60))
     for _ in range(3):
-        await repos.sessions.mark_finalize_failed(exhausted.id)
-    await repos.sessions.mark_finalized(done.id, None)
+        await repos.sessions.mark_finalize_failed(exhausted.id, at(40))
+    await repos.sessions.mark_finalized(done.id, CallSummary(None))
 
-    pending = await repos.sessions.pending_finalization(max_attempts=3, limit=10)
-    limited = await repos.sessions.pending_finalization(max_attempts=3, limit=1)
+    pending = await repos.sessions.pending_finalization(max_attempts=3, limit=10, now=at(45))
+    limited = await repos.sessions.pending_finalization(max_attempts=3, limit=1, now=at(45))
+    later = await repos.sessions.pending_finalization(max_attempts=3, limit=10, now=at(60))
 
     assert [s.id for s in pending] == [early.id, retrying.id, late.id]
     assert [s.id for s in limited] == [early.id]
+    assert waiting.id in {s.id for s in later}
 
 
 async def test_set_memory_synced_seq(repos: Repos) -> None:
@@ -114,11 +203,45 @@ async def test_set_memory_synced_seq(repos: Repos) -> None:
     [
         lambda r: r.sessions.end("missing", at(0), None),
         lambda r: r.sessions.set_memory_synced_seq("missing", 1),
-        lambda r: r.sessions.mark_finalized("missing", None),
-        lambda r: r.sessions.mark_finalize_failed("missing"),
+        lambda r: r.sessions.mark_finalized("missing", CallSummary(None)),
+        lambda r: r.sessions.mark_finalize_failed("missing", at(0)),
     ],
     ids=["end", "set_memory_synced_seq", "mark_finalized", "mark_finalize_failed"],
 )
 async def test_updates_on_missing_session_raise(repos: Repos, action) -> None:  # type: ignore[no-untyped-def]
     with pytest.raises(NotFoundError):
         await action(repos)
+
+
+async def test_clear_summary(repos: Repos) -> None:
+    user = make_user()
+    await repos.users.add(user)
+    session = make_session(
+        user.id, summary="Talked about Ramesh", unfinished_topic="Ramesh", notes=("Ramesh",)
+    )
+    await repos.sessions.add(session)
+
+    await repos.sessions.clear_summary(session.id)
+
+    stored = await repos.sessions.get(session.id)
+    assert stored is not None
+    assert (stored.summary, stored.unfinished_topic, stored.notes) == (None, None, ())
+    with pytest.raises(NotFoundError):
+        await repos.sessions.clear_summary("missing")
+
+
+async def test_metrics_are_kept_per_call_and_listed_by_date_and_user(repos: Repos) -> None:
+    ram, asha = await add_user(repos), await add_user(repos)
+    old = make_session(ram, started_at=at(-100))
+    new = make_session(ram, started_at=at(10))
+    other = make_session(asha, started_at=at(20))
+    quiet = make_session(ram, started_at=at(30))  # ended without metrics
+    for session in (old, new, other, quiet):
+        await repos.sessions.add(session)
+    for session, replies in ((old, 1), (new, 2), (other, 3)):
+        await repos.sessions.save_metrics(session.id, {"replies": replies})
+
+    assert await repos.sessions.metrics_since(at(0)) == [{"replies": 2}, {"replies": 3}]
+    assert await repos.sessions.metrics_since(at(-200), ram) == [{"replies": 1}, {"replies": 2}]
+    with pytest.raises(NotFoundError):
+        await repos.sessions.save_metrics("missing", {})

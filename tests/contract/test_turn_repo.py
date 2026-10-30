@@ -89,3 +89,20 @@ async def test_search_with_no_terms_returns_nothing(repos: Repos, query: str) ->
     await repos.turns.append(make_turn(session_id, 1, "hello"))
 
     assert await repos.turns.search(user_id, query, limit=5) == []
+
+
+async def test_redact_session_replaces_text_of_that_session_only(repos: Repos) -> None:
+    user = make_user()
+    await repos.users.add(user)
+    forgotten, kept = await add_session(repos, user.id), await add_session(repos, user.id)
+    for seq, text in ((1, "Family wali baat"), (2, "Aur kuch")):
+        await repos.turns.append(make_turn(forgotten, seq, text))
+    await repos.turns.append(make_turn(kept, 1, "Family dinner tha"))
+
+    changed = await repos.turns.redact_session(forgotten, "[forgotten]")
+
+    assert changed == 2
+    assert [t.text for t in await repos.turns.list_for_session(forgotten)] == ["[forgotten]"] * 2
+    assert [t.text for t in await repos.turns.list_for_session(kept)] == ["Family dinner tha"]
+    assert [t.session_id for t in await repos.turns.search(user.id, "family", 5)] == [kept]
+    assert await repos.turns.redact_session("missing", "x") == 0

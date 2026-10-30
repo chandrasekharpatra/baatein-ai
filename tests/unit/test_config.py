@@ -57,3 +57,41 @@ def test_unsupported_database_url(url: str) -> None:
 
     with pytest.raises(UnsupportedDatabaseError, match="unsupported database url"):
         settings.database.sqlite_path()
+
+
+def test_cut_offs_are_measured_per_model_and_language() -> None:
+    from baatein.config import EmbeddingSettings
+
+    llama = EmbeddingSettings()
+    minilm = EmbeddingSettings(
+        provider="fastembed", model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
+
+    assert (llama.cut_off("english"), llama.cut_off("hinglish"), llama.cut_off()) == (
+        0.20,
+        0.14,
+        0.12,
+    )
+    assert llama.cut_off("odia") == 0.12  # not measured yet: the default
+    assert minilm.cut_off("english") == minilm.cut_off() == 0.3
+    assert EmbeddingSettings(model="someone/new").cut_off("english") == 0.3
+
+
+def test_cut_offs_can_be_set_by_hand() -> None:
+    from baatein.config import EmbeddingSettings
+
+    tuned = EmbeddingSettings(min_similarity={"english": 0.25, "default": 0.1})
+
+    assert (tuned.cut_off("english"), tuned.cut_off("hinglish"), tuned.cut_off()) == (
+        0.25,
+        0.1,
+        0.1,
+    )
+
+
+def test_the_duplicate_threshold_is_measured_per_model_or_set_by_hand() -> None:
+    from baatein.config import EmbeddingSettings
+
+    assert EmbeddingSettings().duplicate_at() == 0.80
+    assert EmbeddingSettings(model="unmeasured").duplicate_at() is None
+    assert EmbeddingSettings(duplicate_similarity=0.9).duplicate_at() == 0.9

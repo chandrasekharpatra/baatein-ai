@@ -6,12 +6,14 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
+    "anthropic>=1.17.0",
     "argon2-cffi>=25.1.0",
     "email-validator>=2.3.0",
     "fastapi>=0.162.0",
     "fastembed>=0.9.1",
     "injector~=0.24",
     "livekit-agents[anthropic,cartesia,sarvam,silero,turn-detector]~=1.8",
+    "pinecone==10.0.0",
     "pydantic-settings~=2.16",
     "pyjwt>=2.15.1",
     "python-dotenv>=1.2.4",
@@ -49,7 +51,7 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers -m 'not llm and not model' --cov=baatein --cov-report=term-missing"
 markers = [
     "llm: calls a real LLM provider (needs API keys); run with -m llm",
-    "model: downloads and runs a real local embedding model; run with -m model",
+    "model: downloads and runs the local FastEmbed model (~0.22 GB); run with -m model",
 ]
 
 [tool.coverage.run]

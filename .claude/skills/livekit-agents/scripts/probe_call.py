@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import urllib.error
 import urllib.request
 import uuid
 from typing import Any
@@ -11,6 +12,7 @@ from livekit import rtc
 from livekit.plugins import sarvam
 
 SILENCE_SECONDS = 3
+DEFAULT_SAY = "Haan main theek hoon. Aaj office mein bahut kaam tha."
 
 
 def post(api: str, path: str, body: dict[str, Any], token: str | None = None) -> dict[str, Any]:
@@ -33,19 +35,44 @@ async def synthesize(text: str) -> list[rtc.AudioFrame]:
         return [event.frame async for event in tts.synthesize(text)]
 
 
-async def probe(api: str, say: str | None, wait: float) -> None:
-    frames = await synthesize(say) if say else []
+PASSWORD = "probe-password"
 
-    session = post(
-        api,
-        "/auth/signup",
-        {
-            "email": f"probe-{uuid.uuid4().hex[:8]}@example.com",
-            "password": "probe-password",
-            "display_name": "Probe",
-        },
-    )
-    grant = post(api, "/livekit/token", {}, session["access_token"])
+
+def access_token(api: str, email: str | None, password: str) -> str:
+    """Log in as `email` (signing it up on first use), or sign up a throwaway user.
+
+    With signup closed (the default, and on a deployed server) give an existing account's
+    --email and --password, e.g. one made with `baatein create-user` or an admin upload.
+    """
+    if email:
+        try:
+            return str(
+                post(api, "/auth/login", {"email": email, "password": password})["access_token"]
+            )
+        except urllib.error.HTTPError as error:
+            if error.code != 401:
+                raise
+    body = {
+        "email": email or f"probe-{uuid.uuid4().hex[:8]}@example.com",
+        "password": password,
+        "display_name": "Probe",
+    }
+    try:
+        return str(post(api, "/auth/signup", body)["access_token"])
+    except urllib.error.HTTPError as error:
+        if error.code == 403:
+            raise SystemExit(
+                "Signup is closed: pass --email and --password of an existing account "
+                "(or set BAATEIN_AUTH__SIGNUP_ENABLED=true locally)."
+            ) from error
+        raise
+
+
+async def probe(api: str, says: list[str], wait: float, email: str | None, password: str) -> None:
+    utterances = [(text, await synthesize(text)) for text in says]
+
+    token = access_token(api, email, password)
+    grant = post(api, "/livekit/token", {}, token)
     print(f"room: {grant['room_name']}")
 
     room = rtc.Room()
@@ -69,15 +96,16 @@ async def probe(api: str, say: str | None, wait: float) -> None:
     room.on("participant_connected", lambda p: print(f"joined: {p.identity}"))
     await room.connect(grant["server_url"], grant["participant_token"])
 
-    if frames:
-        source = rtc.AudioSource(frames[0].sample_rate, frames[0].num_channels)
+    if utterances:
+        first = utterances[0][1][0]
+        source = rtc.AudioSource(first.sample_rate, first.num_channels)
         track = rtc.LocalAudioTrack.create_audio_track("probe-mic", source)
         options = rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
         await room.local_participant.publish_track(track, options)
 
     await asyncio.sleep(wait)
-    if frames:
-        print(f"speaking: {say}")
+    for text, frames in utterances:
+        print(f"speaking: {text}")
         for frame in frames:
             await source.capture_frame(frame)
         rate, channels = frames[0].sample_rate, frames[0].num_channels
@@ -97,11 +125,18 @@ def main() -> None:
     load_dotenv(find_dotenv(usecwd=True))
     parser = argparse.ArgumentParser(description="Place a headless test call to Baatein.")
     parser.add_argument("--api", default="http://127.0.0.1:8000")
-    parser.add_argument("--say", default="Haan main theek hoon. Aaj office mein bahut kaam tha.")
+    parser.add_argument(
+        "--say",
+        action="append",
+        help="a sentence to speak; repeat to speak several in turn (default: one small-talk line)",
+    )
     parser.add_argument("--no-speech", action="store_true", help="only listen for the greeting")
     parser.add_argument("--wait", type=float, default=8.0, help="seconds to wait per phase")
+    parser.add_argument("--email", help="call as this user (signed up on first use) to test memory")
+    parser.add_argument("--password", default=PASSWORD, help="that user's password")
     args = parser.parse_args()
-    asyncio.run(probe(args.api, None if args.no_speech else args.say, args.wait))
+    says = [] if args.no_speech else args.say or [DEFAULT_SAY]
+    asyncio.run(probe(args.api, says, args.wait, args.email, args.password))
 
 
 if __name__ == "__main__":

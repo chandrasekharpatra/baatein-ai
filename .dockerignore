@@ -1,0 +1,9 @@
+# Only what the image needs: pyproject.toml, uv.lock, README.md, src/, seeds/, deploy/
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!seeds/
+!deploy/
+**/__pycache__

@@ -1,0 +1,5 @@
+ALTER TABLE sessions ADD COLUMN notes TEXT NOT NULL DEFAULT '[]';
+
+ALTER TABLE sessions ADD COLUMN saving_paused INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE sessions ADD COLUMN finalize_retry_at TEXT;

@@ -10,7 +10,7 @@ from baatein.storage.sqlite.memory_store import SqliteMemoryStore, vec_table_nam
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import SqliteUserRepo
 from tests.factories import at, make_fact, make_user
-from tests.fakes.embedder import FakeEmbedder
+from tests.fakes.embedder import FakeEmbedder, MappedEmbedder
 
 
 @pytest.fixture
@@ -151,3 +151,39 @@ async def test_duplicate_fact_id_propagates_integrity_error(db: Database) -> Non
 
     with pytest.raises(sqlite3.IntegrityError):
         await store.add(fact)
+
+
+async def test_keyword_matches_outside_the_nearest_candidates_are_scored_too(
+    db: Database,
+) -> None:
+    # A keyword match beyond the nearest `limit * 4` facts has no similarity yet; it is scored
+    # on its own before the floor applies.
+    user_id = await add_user(db)
+    near = {f"near {name}": [1.0, 0.0] for name in ("alpha", "beta", "gamma", "delta")}
+    embedder = MappedEmbedder(
+        {"guitar": [1.0, 0.0], **near, "guitar teacher": [0.5, 0.87], "old guitar": [0.02, 1.0]}
+    )
+    store = SqliteMemoryStore(db, embedder)
+    for text in [*near, "guitar teacher", "old guitar"]:
+        await store.add(make_fact(user_id, text))
+
+    found = await store.search(user_id, "guitar", 1, min_similarity=1.01)
+
+    assert [r.fact.text for r in found] == ["guitar teacher"]
+
+
+async def test_forgetting_drops_vectors_from_every_models_index(db: Database) -> None:
+    user_id = await add_user(db)
+    old = SqliteMemoryStore(db, FakeEmbedder(model_id="fake/old"))
+    one, two = make_fact(user_id, "Loves biryani"), make_fact(user_id, "Plays chess")
+    await old.add(one)
+    await old.add(two)
+    new = SqliteMemoryStore(db, FakeEmbedder(model_id="fake/new"))
+    await new.rebuild_index()
+
+    await new.forget(one.id, at(1))
+    assert await vector_rows(db, old.vec_table) == 1
+    await new.forget_all(user_id, at(2))
+
+    assert await vector_rows(db, old.vec_table) == 0
+    assert await vector_rows(db, new.vec_table) == 0
