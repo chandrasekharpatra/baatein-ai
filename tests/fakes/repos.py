@@ -17,6 +17,7 @@ from baatein.domain.models import (
     Person,
     Preferences,
     Reminder,
+    Role,
     Session,
     Thread,
     ThreadEvent,
@@ -100,6 +101,12 @@ class InMemorySessionRepo:
     async def recent_for_user(self, user_id: str, limit: int) -> list[Session]:
         sessions = [s for s in self._state.sessions.values() if s.user_id == user_id]
         return sorted(sessions, key=lambda s: s.started_at, reverse=True)[:limit]
+
+    async def recent_conversations(self, user_id: str, limit: int) -> list[Session]:
+        spoken = {t.session_id for t in self._state.turns if t.role is Role.USER}
+        recent = await self.recent_for_user(user_id, len(self._state.sessions))
+        talked = [s for s in recent if s.ended_at is None or s.summary or s.id in spoken]
+        return talked[:limit]
 
     async def end(
         self,

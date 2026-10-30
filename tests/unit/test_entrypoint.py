@@ -250,7 +250,7 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     agent = session.calls[0][1]["agent"]
     assert 'You are talking with Asha. Address them as "Asha ji".' in agent.instructions
     assert ELDER.style in agent.instructions
-    assert session.calls[1][1] == {"instructions": ELDER.greeting}
+    assert session.calls[1][1]["instructions"].startswith(ELDER.greeting + " It's ")
     assert f"[{thread.id}] Ask how the interview went" in agent.instructions
     assert "Today's one check-in." in agent.instructions
     [call] = world.state.sessions.values()

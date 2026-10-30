@@ -22,6 +22,7 @@ from baatein.domain.models import (
     Role,
     ScoredFact,
     Sensitivity,
+    Session,
     ThreadKind,
     ThreadStatus,
     Verbosity,
@@ -237,6 +238,37 @@ async def test_context_needs_no_earlier_call_when_the_last_has_a_summary(world: 
 
     assert context.last_call is not None
     assert context.last_call.summary == "Talked about chai."
+    assert context.earlier_call is None
+
+
+async def test_context_skips_silent_calls_and_keeps_every_call_from_today(
+    world: World,
+) -> None:
+    def call(minutes: int, summary: str | None = None) -> Session:
+        session = make_session(
+            world.user.id,
+            started_at=at(minutes),
+            ended_at=at(minutes + 1),
+            summary=summary,
+            finalize_status=FinalizeStatus.DONE,
+        )
+        world.state.sessions[session.id] = session
+        world.state.turns.append(make_turn(session.id, 1))
+        return session
+
+    call(-60 * 24, "Talked about exams.")  # yesterday
+    morning = call(-300, "Talked about chai.")
+    call(-200)  # too brief for a summary
+    noon = call(-100, "Talked about Lipsa.")
+    last = call(-30, "Talked about cricket.")
+    silent = make_session(world.user.id, started_at=at(-5), ended_at=at(-4))
+    world.state.sessions[silent.id] = silent  # nothing said: not a conversation
+    memory = await world.service.open_call(world.user)
+
+    context = await memory.context()
+
+    assert context.last_call == last
+    assert context.earlier_today == [morning, noon]  # oldest first; no summary, no line
     assert context.earlier_call is None
 
 

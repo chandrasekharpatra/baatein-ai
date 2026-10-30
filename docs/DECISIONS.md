@@ -215,3 +215,26 @@ An independent review of D14–D24 found these, all fixed:
 - **Demo clock:** a moment without a time zone is rejected, the warning is logged once, and a warning at startup says the demo clock is on.
 - **Web client:** erasing is blocked during a call; the mute label resets; a hang-up while connecting no longer leaves the timer running; an expired login no longer reads as a wrong password.
 - **Erasing is logged** (`erased everything Baatein remembered about user <id>`).
+
+### D26. A reminder that is due is brought up in the greeting (2026-10-30)
+Found in a live call: Ram asked to be reminded "in five minutes" that he had to go out. Baatein said honestly that it can't call him later (it never calls out; decision 3) and saved a reminder for today. In his next call, a minute later, it said nothing until he asked. Two causes:
+- **An alert that had already passed when the reminder was made never fired.** A reminder for today with no time alerts at 9 am, which was hours before he asked. An alert counts if it falls between the last call's start and now, so this one never did. Now an alert that had passed when the reminder was made counts as falling when it was made, so the next call brings it up. The same applies to "remind me a day before" when that day is today.
+- **The greeting couldn't mention it.** The opening reply is generated with a fixed instruction ("greet them and ask how they are"), so a reminder due now waited, and Claude kept making small talk. The real-Claude reminder test (#34) showed the same thing on Ravi's birthday. The code already knows which reminders are due, so the greeting instruction now adds "then, in the same reply, gently remind them of: …". This uses no extra model call; the reminder is only added to the instruction.
+
+The same test also exposed a bug from D23: the demo clock wrapped a new system clock instead of the app's own clock, so any run with `BAATEIN_DEV__CLOCK_FILE` set (the real-Claude tests load `.env`) ignored the test's clock. It now wraps the clock it is given.
+
+Still not done, on purpose: reminders at a set time ("in five minutes", "at 6 pm"). That needs Baatein to call or notify the user, which is out of scope until there's a phone or push channel.
+
+### D27. The greeting fits the moment (2026-10-30)
+Every call opened the same way ("Namaste, Ram Babu! Aap kaise hain?"), even a second call a few minutes after the first, where it asked again how his day was. The greeting instruction is now chosen in code (`opening()`), because the code knows when the last call was:
+- **A second call on the same day** doesn't greet as if for the first time or ask again how they are. Baatein welcomes them back and picks up something from that call (its summary is in the context), or asks what's on their mind. The context now gives that call's clock time and how long ago it was ("earlier today (at 4:04 pm, 19 minutes ago)"), not just the day.
+- **Other calls** greet as before, fitted to the time of day: morning, afternoon, evening or night.
+- **A reminder due now** is still added to the greeting (D26).
+
+This uses no extra model call. It's checked by a real-Claude scenario: a call about dinner at Lipsa's, then one three hours later that brings up the dinner and doesn't ask how his day is going.
+
+Two gaps found in Ram's data, also fixed:
+- **A silent call counted as "the last call".** A 37-second call where he said nothing pushed the real conversation's summary back a slot, and moved the start of the reminder window. The context now reads `recent_conversations`, which skips a finished call with no summary and no words from the user. Open calls still count, and so do seeded calls, which have a summary but no transcript.
+- **Only the last call's summary was shown.** A third call the same day didn't know what the first was about. The context now also lists every other summarised call from earlier today, oldest first ("Earlier today you also talked: - at 4:01 pm: …"). There are at most five, from the same query.
+
+The web client also got its own fonts: Baloo 2 for the name and headings, and Mukta for text, both from the Indian Type Foundry. They're warm and readable, with Devanagari as well as Latin, and fall back to system fonts until loaded.

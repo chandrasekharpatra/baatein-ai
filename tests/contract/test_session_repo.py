@@ -1,9 +1,11 @@
+from dataclasses import replace
+
 import pytest
 
 from baatein.domain.errors import NotFoundError
-from baatein.domain.models import CallSummary, FinalizeStatus, Session
+from baatein.domain.models import CallSummary, FinalizeStatus, Role, Session
 from tests.contract.conftest import Repos
-from tests.factories import at, make_session, make_user
+from tests.factories import at, make_session, make_turn, make_user
 
 
 async def add_user(repos: Repos) -> str:
@@ -43,6 +45,26 @@ async def test_recent_for_user_newest_first_limited_and_scoped(repos: Repos) -> 
     recent = await repos.sessions.recent_for_user(user_id, limit=2)
 
     assert [s.id for s in recent] == [newest.id, new.id]
+
+
+async def test_recent_conversations_skip_finished_calls_where_the_user_said_nothing(
+    repos: Repos,
+) -> None:
+    user_id = await add_user(repos)
+    spoken, silent, ongoing, seeded = (
+        make_session(user_id, started_at=at(m), ended_at=at(m + 1)) for m in (0, 10, 20, 30)
+    )
+    ongoing = replace(ongoing, ended_at=None)
+    seeded = replace(seeded, summary="Talked about chai.")  # a summary but no transcript
+    for session in (spoken, silent, ongoing, seeded):
+        await repos.sessions.add(session)
+    await repos.turns.append(make_turn(spoken.id, 1, role=Role.USER))
+    await repos.turns.append(make_turn(silent.id, 1, "Namaste!", role=Role.ASSISTANT))
+
+    recent = await repos.sessions.recent_conversations(user_id, limit=5)
+
+    assert [s.id for s in recent] == [seeded.id, ongoing.id, spoken.id]
+    assert len(await repos.sessions.recent_conversations(user_id, limit=1)) == 1
 
 
 async def test_end_marks_pending_finalization(repos: Repos) -> None:

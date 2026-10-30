@@ -36,6 +36,21 @@ def _ago(days: int) -> str:
     return {0: "earlier today", 1: "yesterday"}.get(days, f"{days} days ago")
 
 
+def _since(gap: timedelta) -> str:
+    minutes = max(int(gap.total_seconds() // 60), 1)
+    if minutes < 60:
+        return f"{minutes} minute{'s' * (minutes > 1)} ago"
+    hours = minutes // 60
+    return f"about {hours} hour{'s' * (hours > 1)} ago"
+
+
+PARTS_OF_DAY = ((5, "night"), (12, "morning"), (17, "afternoon"), (21, "evening"), (24, "night"))
+
+
+def _part_of_day(now: datetime) -> str:
+    return next(part for end, part in PARTS_OF_DAY if now.hour < end)
+
+
 REPEATS = {
     Repeat.ONCE: "",
     Repeat.WEEKLY: "every week",
@@ -179,8 +194,14 @@ def render_context(context: MemoryContext) -> str:
             "know them gently."
         )
     else:
-        days = (now.date() - last.started_at.astimezone(tz).date()).days
-        line = f"Your last call was {_ago(days)} ({_local_day(last.started_at, tz)})."
+        started = last.started_at.astimezone(tz)
+        days = (now.date() - started.date()).days
+        when = (
+            f"at {_clock(started)}, {_since(now - started)}"
+            if days == 0
+            else _local_day(last.started_at, tz)
+        )
+        line = f"Your last call was {_ago(days)} ({when})."
         if last.summary:
             line += f" Summary: {last.summary[:MAX_SUMMARY_CHARS]}"
         lines.append(line)
@@ -195,6 +216,12 @@ def render_context(context: MemoryContext) -> str:
                 f"{why} The call before it, {_local_day(earlier.started_at, tz)}: "
                 f"{earlier.summary[:MAX_SUMMARY_CHARS]}"
             )
+        if context.earlier_today:
+            lines.append("Earlier today you also talked:")
+            lines += [
+                f"- at {_clock(s.started_at.astimezone(tz))}: {s.summary or ''}"[:MAX_SUMMARY_CHARS]
+                for s in context.earlier_today
+            ]
         if last.ended_abruptly and last.unfinished_topic:
             lines.append(
                 f'It cut off in the middle of: "{last.unfinished_topic}". Offer once to '
@@ -248,6 +275,30 @@ def render_context(context: MemoryContext) -> str:
     if not (context.facts or context.people or context.threads):
         lines += ["", "You have nothing saved about this user yet."]
     return "\n".join(lines)
+
+
+def opening(greeting: str, context: MemoryContext) -> str:
+    """The greeting's instructions, fitted to the moment. A second call on the same day picks
+    up from the first instead of asking again how their day is going; any other greeting fits
+    the time of day. A reminder that is due now goes into the greeting itself: told only to
+    greet and ask how they are, Claude made small talk and left it until asked."""
+    now, last = context.now, context.last_call
+    if last is not None and last.started_at.astimezone(now.tzinfo).date() == now.date():
+        text = (
+            "You already talked with them earlier today (your last call is in your "
+            "instructions). Don't greet them as if for the first time today, and don't ask "
+            "again how they are or how their day is going. Welcome them back in one short "
+            "sentence, and either pick up something from that call or ask what's on their mind."
+        )
+    else:
+        text = f"{greeting} It's {_part_of_day(now)} for them; let the greeting fit that."
+    due = [d.reminder.title for d in context.reminders if d.alerted]
+    if due:
+        text += (
+            " Then, in the same reply, gently remind them of what they asked you to remind "
+            f"them of: {'; '.join(due)}."
+        )
+    return text
 
 
 def render_recall(facts: Sequence[ScoredFact], late: bool = False) -> str | None:

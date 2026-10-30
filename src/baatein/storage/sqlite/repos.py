@@ -190,6 +190,15 @@ class SqliteSessionRepo:
             (user_id, limit),
         )
 
+    async def recent_conversations(self, user_id: str, limit: int) -> list[Session]:
+        return await self._many(
+            "SELECT * FROM sessions s WHERE user_id = ? AND (ended_at IS NULL "
+            "OR summary IS NOT NULL "
+            "OR EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.id AND t.role = 'user')) "
+            "ORDER BY started_at DESC LIMIT ?",
+            (user_id, limit),
+        )
+
     async def end(
         self,
         session_id: str,

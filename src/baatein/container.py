@@ -152,7 +152,7 @@ class MemoryModule(Module):
         clock: Clock,
     ) -> MemoryDeps:
         if settings.dev.clock_file:  # demos only; tokens and logins keep the real clock
-            clock = DemoClock(Path(settings.dev.clock_file))
+            clock = DemoClock(Path(settings.dev.clock_file), clock)
         return MemoryDeps(
             users,
             sessions,

@@ -39,6 +39,7 @@ from baatein.storage.sqlite.repos import (
 )
 from baatein.voice.languages import LanguageProfile, LanguageRegistry, ProviderSpec
 from baatein.voice.providers import VoicePipelineFactory
+from tests.fakes.clock import FrozenClock
 
 
 def test_root_binds_given_settings() -> None:
@@ -146,7 +147,17 @@ def test_a_demo_clock_moves_memory_time_but_not_logins(tmp_path: Path) -> None:
         auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
         dev={"clock_file": str(tmp_path / "clock.json")},
     )
-    injector = build_root(settings=settings)
+    frozen = FrozenClock()
 
-    assert isinstance(injector.get(MemoryDeps).clock, DemoClock)
-    assert isinstance(injector.get(Clock), SystemClock)  # type: ignore[type-abstract]
+    class Frozen(Module):
+        @singleton
+        @provider
+        def clock(self) -> Clock:
+            return frozen
+
+    injector = build_root(Frozen(), settings=settings)
+
+    demo = injector.get(MemoryDeps).clock
+    assert isinstance(demo, DemoClock)
+    assert demo.now() == frozen.now()  # with no demo date, the app's own clock (a test's too)
+    assert injector.get(Clock) is frozen  # type: ignore[type-abstract]

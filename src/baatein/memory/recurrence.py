@@ -81,6 +81,9 @@ def due(
     An occurrence counts if it is today or later and isn't done or skipped (`settled`). It is
     alerted (bring it up now) if one of its alert times fell since the last call (`since`).
     Otherwise it counts as coming up if an alert or the day itself falls within `horizon`.
+
+    An alert that had already passed when the reminder was made (a reminder for later today,
+    or "a day before" asked on that day) falls when it was made, so the next call brings it up.
     """
     if not reminder.is_open:
         return []
@@ -92,7 +95,7 @@ def due(
         if day in settled:
             continue
         alerts = [
-            datetime.combine(day - timedelta(days=d), reminder.at, tz)
+            max(datetime.combine(day - timedelta(days=d), reminder.at, tz), reminder.created_at)
             for d in reminder.alert_days_before
         ]
         alerted = any(since < alert <= now for alert in alerts)

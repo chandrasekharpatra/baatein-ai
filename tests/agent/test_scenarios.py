@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from injector import Injector, Module, provider, singleton
-from livekit.agents import AgentSession
+from livekit.agents import AgentSession, llm
 
 from baatein.agent.assistant import Assistant
 from baatein.agent.entrypoint import record_item
@@ -32,7 +32,7 @@ from baatein.domain.models import (
     User,
     Verbosity,
 )
-from baatein.memory.context_builder import render_context
+from baatein.memory.context_builder import opening, render_context
 from baatein.memory.finalizer import Finalizer
 from baatein.memory.service import MemoryService
 from baatein.ports.clock import Clock
@@ -229,8 +229,9 @@ async def test_offers_once_to_continue_a_cut_off_story_and_accepts_no() -> None:
 
 
 class Calls:
-    """Runs text-mode calls the way the entrypoint does: turns are recorded, per-turn recall
-    runs, and after each call the session is closed and summarised by the real finalizer."""
+    """Runs text-mode calls the way the entrypoint does: Baatein greets first, turns are
+    recorded, per-turn recall runs, and after each call the session is closed and summarised
+    by the real finalizer."""
 
     def __init__(self, injector: Injector, clock: FrozenClock, user: User) -> None:
         self.injector = injector
@@ -241,13 +242,22 @@ class Calls:
         user = await self.injector.get(UserRepo).get(self.user_id)  # type: ignore[type-abstract]
         assert user is not None
         memory = await self.injector.get(MemoryService).open_call(user)
-        self.context = render_context(await memory.context())
+        known = await memory.context()
+        self.context = render_context(known)
         replies = []
         self.tools: list[str] = []
         async with JudgeLLM(model=MODEL) as model, AgentSession(llm=model) as session:
             session.on("conversation_item_added", lambda event: record_item(memory, event.item))
             agent = Assistant(HINGLISH, user.display_name, memory, self.context, CASUAL)
             await session.start(agent)
+            self.opening = opening(CASUAL.greeting, known)
+            greeting = await session.generate_reply(instructions=self.opening)
+            await greeting.wait_for_playout()
+            self.greeting = [
+                item.text_content or ""
+                for item in greeting.chat_items
+                if isinstance(item, llm.ChatMessage) and item.role == "assistant"
+            ]
             for line in lines:
                 result = await turn(session, line)
                 replies.append(assistant_replies(result))
@@ -369,10 +379,24 @@ async def test_a_reminder_is_created_rescheduled_and_completed_over_three_calls(
 
     calls.clock.advance(datetime(2026, 11, 19, 5, 0, tzinfo=UTC) - calls.clock.now())
     replies = await calls.call(
-        "Namaste!",
-        "Main theek hoon.",
         "Haan, maine aaj subah Ravi ko birthday wish kar diya, woh bahut khush tha.",
     )
-    assert mentions([reply for turn in replies[:2] for reply in turn], "ravi"), replies
+    assert mentions(calls.greeting, "ravi"), (calls.greeting, calls.opening)  # in the greeting
     settled = await reminders.settled(birthday.id)
     assert settled.get(date(2026, 11, 19)) is OccurrenceStatus.DONE, settled
+
+
+async def test_a_second_call_the_same_day_picks_up_instead_of_starting_over(
+    calls: Calls,
+) -> None:
+    await calls.call(
+        "Aaj shaam main apni beti Lipsa ke ghar dinner pe ja raha hoon, bahut dinon baad.",
+        "Haan, bahut achha lag raha hai. Chalo, baad mein baat karte hain.",
+    )
+
+    calls.clock.advance(timedelta(hours=3))
+    await calls.call("Haan, abhi wapas aaya hoon.")
+    again = " ".join(calls.greeting).lower()
+
+    assert not re.search(r"din kaisa|kaise (ho|hain)", again), (calls.greeting, calls.opening)
+    assert re.search(r"lipsa|dinner|khana", again), (calls.greeting, calls.context)

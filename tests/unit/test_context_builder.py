@@ -16,6 +16,7 @@ from baatein.domain.models import (
 )
 from baatein.memory.context_builder import (
     MAX_SUMMARY_CHARS,
+    opening,
     render_context,
     render_memory,
     render_recall,
@@ -74,7 +75,7 @@ def test_last_call_shows_how_long_ago_and_its_summary() -> None:
         session = make_session("u", started_at=NOW - timedelta(days=days), **fields)
         return render_context(context(last_call=session)).splitlines()[1]
 
-    assert last_call_line(0) == "Your last call was earlier today (Thu 29 Oct 2026)."
+    assert last_call_line(0) == "Your last call was earlier today (at 7:40 pm, 1 minute ago)."
     assert last_call_line(1).startswith("Your last call was yesterday")
     long = last_call_line(2, summary="x" * (MAX_SUMMARY_CHARS + 50))
     assert long == f"Your last call was 2 days ago (Tue 27 Oct 2026). Summary: {'x' * 400}"
@@ -88,9 +89,25 @@ def test_a_brief_last_call_brings_the_one_before_it() -> None:
     lines = render_context(context(last_call=brief, earlier_call=earlier)).splitlines()
     waiting = render_context(context(last_call=pending, earlier_call=earlier)).splitlines()
 
-    assert lines[1] == "Your last call was earlier today (Thu 29 Oct 2026)."
+    assert lines[1] == "Your last call was earlier today (at 7:40 pm, 1 minute ago)."
     assert lines[2] == "It was very brief. The call before it, Tue 27 Oct 2026: Talked about Bapa."
     assert waiting[2].startswith("Its summary isn't ready. The call before it,")
+
+
+def test_other_calls_from_today_are_listed_after_the_last() -> None:
+    last = make_session("u", started_at=NOW - timedelta(minutes=10), summary="Cricket.")
+    morning = make_session("u", started_at=NOW.replace(hour=9, minute=5), summary="Chai.")
+    noon = make_session("u", started_at=NOW.replace(hour=12, minute=30), summary="Lipsa.")
+
+    lines = render_context(context(last_call=last, earlier_today=[morning, noon])).splitlines()
+
+    assert lines[1].endswith("Summary: Cricket.")
+    assert lines[2:5] == [
+        "Earlier today you also talked:",
+        "- at 9:05 am: Chai.",
+        "- at 12:30 pm: Lipsa.",
+    ]
+    assert "Earlier today" not in render_context(context(last_call=last))
 
 
 def test_call_cut_off_mid_story_is_offered_once() -> None:
@@ -289,3 +306,38 @@ def test_reminders_are_split_into_due_coming_and_undated() -> None:
     assert "don't bring them up" in text
     assert "complete_occurrence" in text
     assert "Reminders" not in render_context(context())
+
+
+def test_the_greeting_fits_the_time_of_day() -> None:
+    def greeting(hour: int) -> str:
+        return opening("Greet them.", context(now=NOW.replace(hour=hour)))
+
+    assert greeting(19) == "Greet them. It's evening for them; let the greeting fit that."
+    parts = [greeting(hour).split("It's ")[1].split()[0] for hour in (4, 5, 12, 17, 21)]
+    assert parts == ["night", "morning", "afternoon", "evening", "night"]
+
+
+def test_a_second_call_the_same_day_picks_up_instead_of_starting_over() -> None:
+    earlier = make_session("u", started_at=NOW - timedelta(hours=2), summary="Dinner plans.")
+    yesterday = make_session("u", started_at=NOW - timedelta(days=1), summary="Dinner plans.")
+
+    again = opening("Greet them.", context(last_call=earlier))
+
+    assert again.startswith("You already talked with them earlier today")
+    assert "Greet them." not in again
+    assert opening("Greet them.", context(last_call=yesterday)).startswith("Greet them.")
+    line = render_context(context(last_call=earlier)).splitlines()[1]
+    assert line.startswith("Your last call was earlier today (at 5:40 pm, about 2 hours ago).")
+
+
+def test_the_greeting_brings_up_reminders_due_now() -> None:
+    errand = make_reminder("u", "Going out", on=date(2026, 10, 30))
+    dentist = make_reminder("u", "Dentist", on=date(2026, 11, 2))
+    due = DueReminder(errand, date(2026, 10, 30), alerted=True)
+    coming = DueReminder(dentist, date(2026, 11, 2), alerted=False)
+
+    greeting = opening("Greet them.", context(reminders=[due, coming]))
+
+    assert "Then, in the same reply, gently remind them" in greeting
+    assert greeting.endswith(": Going out.")
+    assert "remind them" not in opening("Greet them.", context(reminders=[coming]))

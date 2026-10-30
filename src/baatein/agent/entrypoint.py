@@ -14,7 +14,7 @@ from baatein.agent.resilience import SpeechGuard, connect_options
 from baatein.config import LiveKitSettings, Settings, VoiceSettings
 from baatein.container import build_root
 from baatein.domain.models import Role, User
-from baatein.memory.context_builder import render_context
+from baatein.memory.context_builder import opening, render_context
 from baatein.memory.service import CallMemory, MemoryService
 from baatein.metrics import CallMetrics
 from baatein.ports.repos import UserRepo
@@ -153,6 +153,7 @@ async def entrypoint(ctx: JobContext) -> None:
     SpeechGuard(session, voice.stt_max_errors, pipeline.profile.cannot_hear)
     user_name = user.display_name if user else None
     memory: CallMemory | None = None
+    greeting = persona.greeting
 
     async def on_shutdown(reason: str) -> None:
         await end_call(injector, memory, reason)
@@ -184,7 +185,9 @@ async def entrypoint(ctx: JobContext) -> None:
         def _on_usage(event: MetricsCollectedEvent) -> None:
             note_usage(call_memory.metrics, event.metrics)
 
-        context = render_context(await memory.context())
+        known = await memory.context()
+        context = render_context(known)
+        greeting = opening(persona.greeting, known)
         assistant = Assistant(
             pipeline.profile,
             user_name=user_name,
@@ -194,7 +197,7 @@ async def entrypoint(ctx: JobContext) -> None:
         )
 
     await session.start(agent=assistant, room=ctx.room)
-    await session.generate_reply(instructions=persona.greeting)
+    await session.generate_reply(instructions=greeting)
 
 
 def main() -> None:

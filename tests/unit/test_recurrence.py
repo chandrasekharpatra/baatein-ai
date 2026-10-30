@@ -138,3 +138,18 @@ def test_an_old_alert_for_an_event_beyond_the_week_is_not_repeated() -> None:
     wedding = make_reminder("u", on=date(2026, 12, 20), alert_days_before=(30,))
 
     assert due(wedding, set(), ist(date(2026, 11, 25)), ist(date(2026, 12, 1)), IST) == []
+
+
+def test_an_alert_already_past_when_made_falls_when_it_was_made() -> None:
+    # Asked at 4 pm to be reminded today: the default 9 am alert had passed, so the next call
+    # today brings it up, and a call later still doesn't bring it up again.
+    made = ist(date(2026, 10, 30), 16)
+    today = make_reminder("u", on=date(2026, 10, 30), created_at=made)
+    later = made + timedelta(minutes=1)
+
+    assert due(today, set(), made - timedelta(minutes=2), later, IST) == [
+        (date(2026, 10, 30), True)
+    ]
+    assert due(today, set(), later, later + timedelta(hours=1), IST) == [
+        (date(2026, 10, 30), False)
+    ]
