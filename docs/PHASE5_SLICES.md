@@ -272,7 +272,32 @@ A live call is summarised automatically after it ends, and the next call opens w
 
 ---
 
-## Slice 6: scenario tests against real Claude
+## Slice 6: scenario tests against real Claude ✅ built
+
+**Status:** built on 2026-10-30. All 35 real-Claude tests passed twice in a row (`uv run --env-file .env pytest -m llm --no-cov`, about 4 minutes). Every test turn now runs the agent's per-turn hook as a voice call does (`turn()` in `tests/agent/test_assistant_behaviour.py`); LiveKit's text mode skips it.
+
+| Scenario | Test |
+|---|---|
+| #1 | `test_asks_before_saving_and_saves_after_yes`, `test_checks_in_once_and_records_how_the_story_moved`, and over three calls from a real database: `test_a_storyline_moves_over_three_calls` |
+| #11 | `test_respects_a_boundary_and_lifts_it_when_reopened` |
+| #12 | `test_accepts_a_correction_and_keeps_only_the_new_version` |
+| #13 | `test_forgets_on_request_and_does_not_use_it_again` |
+| #14 | `test_saves_nothing_after_user_says_not_to`; summary side in `test_call_analyzer.py` |
+| #15 | `test_first_call_admits_it_has_nothing_saved` |
+| #16, #17 | `test_accepts_a_change_of_mind_and_never_suggests_it_again`, `test_not_done_is_fine_and_the_topic_is_left_alone` |
+| #21, #23 | `test_fewer_questions_when_asked_and_remembered`, `test_shorter_replies_when_asked`, `test_slower_speech_when_asked` |
+| #25 | `test_gives_safety_advice_after_an_otp_scam_and_stores_no_number` |
+| #31 | `test_offers_once_to_continue_a_cut_off_story_and_accepts_no`; detection in `test_call_analyzer.py` |
+| #34, #36 | `test_reads_back_a_reminder_then_saves_it_honestly`, `test_does_not_guess_an_unclear_date`, and create, reschedule, complete over three calls: `test_a_reminder_is_created_rescheduled_and_completed_over_three_calls` |
+
+The scenario tests live in `tests/agent/test_scenarios.py`. The two multi-call tests use SQLite, a frozen clock and the real end-of-call summary between calls.
+
+**What the evals found, and the kind of fix:**
+- *Structural:* a reminder more than a week away wasn't in the call context at all, so "18 nahi, 19 November" couldn't change it (Claude corrected the memory and said it couldn't see the reminder). The context now lists later reminders, "so you can change one".
+- *Structural:* the check-in was asked twice when the user answered something else (also the cause of the old flaky `test_accepts_no_to_a_check_in`). Once a reply names the check-in's person (or two words of its title), `Assistant` adds a hidden note: already asked, don't ask again.
+- *Structural:* "11 November ko yaad dilaungi" and "saved for 9 baje" promises. `create_reminder` now returns the exact honest sentence built from the reminder's dates ("Jab bhi hum 11 November se 18 November ke beech baat karenge…"), plus a line when a time was asked for.
+- *Prompt:* Claude sometimes saved "misses his friend Ramesh" as `personal`, which keeps it out of check-ins and summaries; the tool docs now say everyday feelings are `normal`.
+- *Known slip, not fixed:* about 1 reply in 7 to Devanagari input ends with a stray Devanagari vowel sign.
 
 ### How it works
 Each test starts from a fixed memory state, runs a short conversation in LiveKit's text mode with real Claude, and checks what Claude did (tool calls) and said (an LLM judge). They run with `uv run pytest -m llm`.

@@ -48,18 +48,21 @@ recall to check first.
 - When they mention a plan, a wish or something coming up, you may offer to ask about it \
 next time; if they agree, call track_thread. When they tell you how a storyline went, call \
 update_thread. Not doing it or changing their mind is fine; never make them feel guilty.
-- If your context has a check-in, bring it up once, gently, within your first two or three \
-replies, and accept "nahi". Never raise anything else from memory on your own.
+- If your context has a check-in, ask about it once, gently, within your first two or three \
+replies. Once asked, it's done for this call: if they answer something else, say "nahi" or \
+ignore it, don't ask again or rephrase it; only talk about it if they bring it up. Never \
+raise anything else from memory on your own.
 - If they ask you not to bring something up ("aaj painting yaad nahi dilana"), call \
 set_boundary; this deletes nothing. If they reopen it, call lift_boundary.
 - If they're unhappy with a suggestion you made, apologise and call note_declined_suggestion.
 - If others can hear them ("kamre mein mehmaan hain"), call privacy_mode and keep the rest of \
 the call free of personal details.
-- If they ask you to remind them of something, read back the date, time and repeat in simple \
-words, and after "haan" call create_reminder. Never guess a date. You can't alert them at a \
-time: you can only bring it up when they talk to you. So never say "9 baje yaad dila dungi"; \
-say "Jab hum 11 November ke aas-paas baat karenge, main yaad dila dungi." To change one, use \
-update_reminder, not a new reminder.
+- If they ask you to remind them of something, read back the date and repeat (and a time \
+only if they gave one) in simple words, and after "haan" call create_reminder. Never guess a \
+date. You can't alert them at a time or on a day: you can only bring it up when they talk to \
+you. So never promise a day or time ("9 baje yaad dila dungi", "11 November ko yaad \
+dilaungi"); say "Jab bhi hum us waqt ke aas-paas baat karenge, main yaad dila dungi." To \
+change one, use update_reminder, not a new reminder.
 - If they ask you to talk differently ("dheere bolo", "itne sawaal mat poochho", "mujhe \
 Mohan kaho"), call set_preference; it applies right away and in later calls.
 - Never say you are looking things up, and never read ids aloud.
@@ -112,6 +115,7 @@ class Assistant(Agent):
         )
         self._memory = memory
         self._recalled: set[str] = set()
+        self._check_in_noted = False
 
     def _compose(self, preferences: Preferences | None) -> str:
         return build_instructions(
@@ -129,16 +133,38 @@ class Assistant(Agent):
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
-        if self._memory is None or self._memory.private or not (text := new_message.text_content):
+        if self._memory is None:
             return
-        # LiveKit drops turn_ctx changes after this reply. Keep what was recalled in the chat
-        # history too, or on the next turn Claude sees its own answer without the memory behind
-        # it and apologises for "inventing" it. Each memory goes in once per call.
+        await self._note_check_in_asked(turn_ctx)
+        if self._memory.private or not (text := new_message.text_content):
+            return
         found = [s for s in await self._memory.recall(text) if s.fact.id not in self._recalled]
         recalled = render_recall(found)
         if recalled:
             self._recalled.update(s.fact.id for s in found)
-            turn_ctx.add_message(role="system", content=recalled)
-            history = self.chat_ctx.copy()
-            history.add_message(role="system", content=recalled)
-            await self.update_chat_ctx(history)
+            await self._add_note(turn_ctx, recalled)
+
+    async def _note_check_in_asked(self, turn_ctx: llm.ChatContext) -> None:
+        """Once a reply has brought up the check-in, say so: told only "ask once", Claude
+        sometimes asked again when the user answered something else (found in scenario #1)."""
+        memory = self._memory
+        if self._check_in_noted or memory is None or memory.check_in is None:
+            return
+        replies = (m.text_content or "" for m in self.chat_ctx.messages() if m.role == "assistant")
+        if not any(memory.mentions_check_in(reply) for reply in replies):
+            return
+        self._check_in_noted = True
+        await self._add_note(
+            turn_ctx,
+            f'You have already asked about "{memory.check_in.title}" in this call. Don\'t ask '
+            "about it again; talk about it only if they bring it up.",
+        )
+
+    async def _add_note(self, turn_ctx: llm.ChatContext, note: str) -> None:
+        """Add a hidden note for this reply and keep it in the call history. LiveKit drops
+        turn_ctx changes after the reply; without the history copy, Claude later saw its own
+        answer without the memory behind it and apologised for "inventing" it."""
+        turn_ctx.add_message(role="system", content=note)
+        history = self.chat_ctx.copy()
+        history.add_message(role="system", content=note)
+        await self.update_chat_ctx(history)

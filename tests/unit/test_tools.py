@@ -9,6 +9,7 @@ from livekit.agents import llm
 from baatein.agent.tools import (
     PAUSED,
     choice,
+    honest_promise,
     memory_tools,
     parse_date,
     parse_day,
@@ -28,7 +29,7 @@ from baatein.domain.models import (
     ThreadStatus,
 )
 from baatein.memory.service import CallMemory
-from tests.factories import make_thread
+from tests.factories import make_reminder, make_thread
 from tests.fakes.world import World, build_world
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -366,7 +367,14 @@ async def test_reminder_tools_create_update_settle_and_cancel() -> None:
     waiting = await tools["create_reminder"]("June trip", repeat="sometimes")
     birthday, trip = world.state.reminders.values()
 
-    assert saved.startswith(f"Saved as [{birthday.id}]. You can't alert them at a time")
+    assert saved.startswith(f"Saved as [{birthday.id}]. You can't alert them on a day")
+    assert '"Jab bhi hum 11 November se 18 November ke beech baat karenge' in saved
+    assert '"11 November ko yaad dilaungi"' in saved
+    assert saved.endswith(
+        "They asked for 09:00: say plainly that you can't remind them at a set "
+        "time, and don't say it is saved for that time."
+    )
+    assert "They asked for" not in await tools["create_reminder"]("Dentist", "2026-11-02")
     assert (birthday.on, birthday.repeat, birthday.alert_days_before) == (
         date(2026, 11, 18),
         Repeat.YEARLY,
@@ -395,4 +403,16 @@ async def test_reminder_tools_create_update_settle_and_cancel() -> None:
     )
     assert await tools["cancel_reminder"](run_context(user_messages=3), birthday.id) == (
         "No open reminder with that id."
+    )
+
+
+def test_the_honest_promise_covers_the_days_baatein_will_bring_it_up() -> None:
+    on_the_day = make_reminder("u", on=date(2026, 3, 1))
+    week_before = make_reminder("u", on=date(2026, 3, 1), alert_days_before=(0, 7))
+
+    assert honest_promise(on_the_day) == (
+        "Jab bhi hum 1 March ke aas-paas baat karenge, main yaad dila dungi."
+    )
+    assert honest_promise(week_before) == (
+        "Jab bhi hum 22 February se 1 March ke beech baat karenge, main yaad dila dungi."
     )

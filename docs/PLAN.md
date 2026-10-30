@@ -16,7 +16,7 @@ Slice 4 is built (2026-10-30): reminders with repeat rules and "remind me N days
 
 Slice 5 is built (2026-10-30): `baatein serve` summarises each finished call in the background (one Claude request; only what the user agreed to keep is named), records whether it was cut off mid-story, keeps up to two "maybe ask next time" notes, and retries failures with backoff. `baatein finalize` runs it by hand.
 
-**Not yet:** scenario evals (slice 6).
+Slice 6 is built (2026-10-30): real-Claude scenario evals for every scenario in §13, including #1 and #34 replayed over three calls from a real database with summaries in between. All 35 real-Claude tests pass. Still to do for Phase 5: a live voice run of those two sequences.
 
 **Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
 1. Memory structure, consent-only saving, correct and forget ✅
@@ -24,7 +24,7 @@ Slice 5 is built (2026-10-30): `baatein serve` summarises each finished call in 
 3. Persona and preferences ✅
 4. Reminders (delivered in conversation only) ✅
 5. End-of-call summary and retry ✅
-6. Scenario evals
+6. Scenario evals ✅
 
 **Phase 4 notes**
 - Per-call state is a `CallMemory` object created by the process-wide `MemoryService` (`memory/service.py`), not a child injector: it only needs the session and the repos, and a plain object is easier to test.
@@ -390,7 +390,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 **Tests**: finalizer state machine (pending → done, failed → retried, max attempts); analyzer output validation. Evals on fixed transcripts: #10 gives a summary and no notes; a #14-style transcript keeps the unsaved detail out of the summary.
 
-### Slice 6: scenario evals
+### Slice 6: scenario evals ✅ (built; mapping and findings in `docs/PHASE5_SLICES.md`)
 
 Real-Claude tests (`-m llm`) built from the library, each starting from a fixed memory state:
 

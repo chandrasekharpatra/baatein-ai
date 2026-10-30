@@ -4,10 +4,11 @@ from typing import Any
 from livekit.agents import llm
 
 from baatein.agent.assistant import Assistant, build_instructions
-from baatein.domain.models import Pace, Preferences
+from baatein.domain.models import Pace, Person, Preferences
+from baatein.memory.service import CallMemory
 from baatein.voice.languages import LanguageProfile, ProviderSpec
 from baatein.voice.personas import ELDER
-from tests.factories import make_fact
+from tests.factories import at, make_fact, make_session, make_thread
 from tests.fakes.world import build_world
 
 PROFILE = LanguageProfile("hinglish", ProviderSpec("s"), ProviderSpec("t"), "Speak Hinglish.")
@@ -38,7 +39,7 @@ def test_instructions_include_memory_context_and_guidance() -> None:
     assert "Kya main yeh yaad rakhun?" in text
     assert "pause_saving" in text
     assert "set_boundary" in text
-    assert "bring it up once" in text
+    assert "ask about it once" in text
     assert "pause_saving" not in build_instructions(PROFILE)
 
 
@@ -205,3 +206,76 @@ async def test_apply_preferences_skips_tts_without_a_pace_option() -> None:
     await apply(PROFILE, None, Preferences(pace=Pace.SLOW))
 
     assert tts.options == {}
+
+
+async def call_with_check_in(about: str | None) -> tuple[Assistant, CallMemory]:
+    """A call whose context picked the Ramesh storyline as its one check-in."""
+    world = build_world()
+    last = make_session(world.user.id, started_at=at(-3 * 24 * 60))
+    world.state.sessions[last.id] = last
+    if about:
+        world.state.people["p1"] = Person("p1", world.user.id, about, at(0))
+    thread = make_thread(
+        world.user.id, "Visit the Puri temple", about_person_id="p1" if about else None
+    )
+    world.state.threads[thread.id] = thread
+    memory = await world.service.open_call(world.user)
+    await memory.context()
+    return Assistant(PROFILE, memory=memory, memory_context=""), memory
+
+
+async def say(assistant: Assistant, user: str, reply: str) -> None:
+    await assistant.on_user_turn_completed(
+        llm.ChatContext(), llm.ChatMessage(role="user", content=[user])
+    )
+    history = assistant.chat_ctx.copy()
+    history.add_message(role="assistant", content=reply)
+    await assistant.update_chat_ctx(history)
+
+
+def notes(assistant: Assistant) -> list[str]:
+    return [
+        m.text_content or ""
+        for m in assistant.chat_ctx.messages()
+        if m.role == "system" and "already asked" in (m.text_content or "")
+    ]
+
+
+async def test_once_the_check_in_is_asked_later_replies_are_told_not_to_ask_again() -> None:
+    assistant, memory = await call_with_check_in(about="Ramesh")
+    assert memory.check_in is not None
+
+    await say(assistant, "Namaste!", "Namaste! Aaj din kaisa raha?")
+    assert notes(assistant) == []
+    await say(assistant, "Theek hai.", "Achha. Ramesh ji se baat hui kya?")
+    await say(assistant, "Main theek hoon, aap batao.", "Main bhi theek hoon.")
+    await say(assistant, "Hmm.", "Aur kya chal raha hai?")
+
+    assert notes(assistant) == [
+        'You have already asked about "Visit the Puri temple" in this call. Don\'t ask about '
+        "it again; talk about it only if they bring it up."
+    ]
+
+
+async def test_a_storyline_without_a_person_counts_as_asked_on_two_title_words() -> None:
+    assistant, memory = await call_with_check_in(about=None)
+
+    assert not memory.mentions_check_in("Aaj temple gaye the?")
+    assert memory.mentions_check_in("Puri ke temple ka plan bana?")
+    await say(assistant, "Namaste!", "Puri ke temple ka plan bana?")
+    await say(assistant, "Pata nahi.", "Koi baat nahi.")
+    assert len(notes(assistant)) == 1
+
+
+async def test_no_check_in_means_no_note() -> None:
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+    await memory.context()
+    assistant = Assistant(PROFILE, memory=memory, memory_context="")
+
+    await say(assistant, "Namaste!", "Ramesh se baat hui?")
+    await say(assistant, "Haan.", "Achha.")
+
+    assert memory.check_in is None
+    assert not memory.mentions_check_in("Ramesh se baat hui?")
+    assert notes(assistant) == []

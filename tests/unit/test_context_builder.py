@@ -255,6 +255,7 @@ def test_reminders_are_split_into_due_coming_and_undated() -> None:
     birthday = make_reminder("u", on=date(2026, 11, 18), repeat=Repeat.YEARLY)
     dentist = make_reminder("u", "Dentist", on=date(2026, 11, 2))
     trip = make_reminder("u", "June trip")
+    checkup = make_reminder("u", "Checkup", on=date(2027, 3, 1))
 
     text = render_context(
         context(
@@ -263,11 +264,14 @@ def test_reminders_are_split_into_due_coming_and_undated() -> None:
                 DueReminder(dentist, date(2026, 11, 2), alerted=False),
             ],
             undated_reminders=[trip],
+            later_reminders=[checkup],
         )
     )
 
-    due, coming, undated = (text.index(h) for h in ("due now", "coming up", "waiting for"))
+    headings = ("due now", "coming up", "waiting for", "Later reminders")
+    due, coming, undated, later = (text.index(h) for h in headings)
     assert due < text.index(birthday.id) < coming < text.index(dentist.id) < undated
-    assert text.index(trip.id) > undated
+    assert undated < text.index(trip.id) < later < text.index(checkup.id)
+    assert "don't bring them up" in text
     assert "complete_occurrence" in text
     assert "Reminders" not in render_context(context())

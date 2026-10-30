@@ -74,7 +74,9 @@ def render_reminder(reminder: Reminder, on: date | None = None) -> str:
     return f"- [{reminder.id}] {reminder.title}{suffix}"
 
 
-def _reminders(due: Sequence[DueReminder], undated: Sequence[Reminder]) -> list[str]:
+def _reminders(
+    due: Sequence[DueReminder], undated: Sequence[Reminder], later: Sequence[Reminder]
+) -> list[str]:
     lines = []
     alerted = [d for d in due if d.alerted]
     coming = [d for d in due if not d.alerted]
@@ -91,6 +93,9 @@ def _reminders(due: Sequence[DueReminder], undated: Sequence[Reminder]) -> list[
     if undated:
         lines += ["", "Reminders still waiting for a date (ask only if they bring it up):"]
         lines += [render_reminder(r) for r in undated]
+    if later:
+        lines += ["", "Later reminders (don't bring them up; they're here so you can change one):"]
+        lines += [render_reminder(r) for r in later]
     return lines
 
 
@@ -226,7 +231,7 @@ def render_context(context: MemoryContext) -> str:
         ]
         lines += _events(context.check_in_events, tz)
 
-    lines += _reminders(context.reminders, context.undated_reminders)
+    lines += _reminders(context.reminders, context.undated_reminders, context.later_reminders)
 
     if not (context.facts or context.people or context.threads):
         lines += ["", "You have nothing saved about this user yet."]

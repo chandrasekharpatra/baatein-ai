@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from livekit.agents import NOT_GIVEN, AgentSession, NotGivenOr
+from livekit.agents import NOT_GIVEN, AgentSession, NotGivenOr, llm
 from livekit.agents.llm import LLMStream
 from livekit.agents.voice.run_result import ChatMessageEvent, RunResult
 from livekit.plugins import anthropic
@@ -52,7 +52,7 @@ async def test_replies_in_short_hinglish() -> None:
     async with JudgeLLM(model=model) as llm, AgentSession(llm=llm) as session:
         await session.start(Assistant(HINGLISH))
 
-        result = await session.run(user_input="Hi yaar, aaj office mein bahut kaam tha.")
+        result = await turn(session, "Hi yaar, aaj office mein bahut kaam tha.")
 
         await (
             result.expect.next_event()
@@ -89,6 +89,15 @@ def assistant_replies(result: RunResult[None]) -> list[str]:
     ]
 
 
+async def turn(session: AgentSession[None], text: str) -> RunResult[None]:
+    """One user turn as a voice call runs it: LiveKit's text mode skips the agent's per-turn
+    hook (memory recall, the check-in note), so it is called here first."""
+    agent = session.current_agent
+    message = llm.ChatMessage(role="user", content=[text])
+    await agent.on_user_turn_completed(agent.chat_ctx.copy(), message)
+    return await session.run(user_input=text)
+
+
 async def start_with_memory(
     session: AgentSession[None],
     world: World,
@@ -110,16 +119,17 @@ async def test_asks_before_saving_and_saves_after_yes() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Mohan")
 
-        first = await session.run(
-            user_input="Aaj college ke din yaad aa rahe the. Mera ek dost tha, Ramesh. Hum har "
-            "shaam saath chai peete the. Pachees saal ho gaye, kabhi sochta hoon phone karun."
+        first = await turn(
+            session,
+            "Aaj college ke din yaad aa rahe the. Mera ek dost tha, Ramesh. Hum har "
+            "shaam saath chai peete the. Pachees saal ho gaye, kabhi sochta hoon phone karun.",
         )
         assert await world.store.active(world.user.id, limit=5) == []
         await first.expect.contains_message(role="assistant").judge(
             llm, intent="Responds warmly and asks whether it may remember this about Ramesh."
         )
 
-        await session.run(user_input="Haan, yaad rakhna.")
+        await turn(session, "Haan, yaad rakhna.")
 
         [fact] = await world.store.active(world.user.id, limit=5)
         assert "ramesh" in fact.text.lower()
@@ -130,9 +140,7 @@ async def test_saves_directly_when_the_user_asks_to_remember() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Asha")
 
-        await session.run(
-            user_input="Ek baat yaad rakhoge? Mere bete Ravi ka birthday 18 November ko hai."
-        )
+        await turn(session, "Ek baat yaad rakhoge? Mere bete Ravi ka birthday 18 November ko hai.")
 
         [fact] = await world.store.active(world.user.id, limit=5)
         assert "ravi" in fact.text.lower()
@@ -144,11 +152,9 @@ async def test_saves_nothing_after_user_says_not_to() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         memory = await start_with_memory(session, world)
 
-        await session.run(
-            user_input="Aaj gardening par baat kar sakte hain, lekin kuch bhi save mat karna."
-        )
-        await session.run(
-            user_input="Mere balcony mein tulsi aur gulab hain, roz subah unhe paani deti hoon."
+        await turn(session, "Aaj gardening par baat kar sakte hain, lekin kuch bhi save mat karna.")
+        await turn(
+            session, "Mere balcony mein tulsi aur gulab hain, roz subah unhe paani deti hoon."
         )
 
         assert memory.saving_paused
@@ -165,20 +171,18 @@ async def test_forgets_on_request_and_does_not_use_it_again() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        asked = await session.run(
-            user_input="Maine jo family wali pareshani batayi thi, use bhool jao."
-        )
+        asked = await turn(session, "Maine jo family wali pareshani batayi thi, use bhool jao.")
         [fact] = list(world.store._facts.values())
         assert not fact.is_deleted
         await asked.expect.contains_message(role="assistant").judge(
             llm, intent="Asks the user to confirm before deleting the family matter."
         )
 
-        await session.run(user_input="Haan, poori tarah mita do.")
+        await turn(session, "Haan, poori tarah mita do.")
         [fact] = list(world.store._facts.values())
         assert fact.is_deleted
 
-        result = await session.run(user_input="Tumhe meri family wali baat yaad hai?")
+        result = await turn(session, "Tumhe meri family wali baat yaad hai?")
         await result.expect.contains_message(role="assistant").judge(
             llm,
             intent="Says it no longer has that family matter saved (or that it was deleted), "
@@ -191,10 +195,8 @@ async def test_offers_to_check_in_and_tracks_it_after_yes() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        await session.run(
-            user_input="Agle Friday mera Google mein interview hai, thoda nervous hoon."
-        )
-        await session.run(user_input="Haan, next time zaroor poochna kaisa gaya.")
+        await turn(session, "Agle Friday mera Google mein interview hai, thoda nervous hoon.")
+        await turn(session, "Haan, next time zaroor poochna kaisa gaya.")
 
         [thread] = world.state.threads.values()
         assert "interview" in thread.title.lower()
@@ -207,12 +209,12 @@ async def test_checks_in_once_and_records_how_the_story_moved() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Mohan")
 
-        replies = assistant_replies(await session.run(user_input="Namaste Baatein!"))
+        replies = assistant_replies(await turn(session, "Namaste Baatein!"))
         if not any("ramesh" in reply.lower() for reply in replies):
-            replies += assistant_replies(await session.run(user_input="Main theek hoon."))
+            replies += assistant_replies(await turn(session, "Main theek hoon."))
         assert sum("ramesh" in reply.lower() for reply in replies) == 1, replies
 
-        await session.run(user_input="Haan! Maine unko phone kar diya, bahut achha laga.")
+        await turn(session, "Haan! Maine unko phone kar diya, bahut achha laga.")
 
         assert world.state.thread_events, "update_thread was not called"
         assert world.state.threads[thread_id].status in (
@@ -227,8 +229,8 @@ async def test_accepts_no_to_a_check_in() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Mohan")
 
-        await session.run(user_input="Namaste Baatein!")
-        result = await session.run(user_input="Nahi, abhi uske baare mein baat nahi karni.")
+        await turn(session, "Namaste Baatein!")
+        result = await turn(session, "Nahi, abhi uske baare mein baat nahi karni.")
 
         await result.expect.contains_message(role="assistant").judge(
             llm,
@@ -248,12 +250,12 @@ async def test_respects_a_boundary_and_lifts_it_when_reopened() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        result = await session.run(user_input="Hi Baatein, aaj kuch halki-phulki baat karte hain.")
+        result = await turn(session, "Hi Baatein, aaj kuch halki-phulki baat karte hain.")
         await result.expect.contains_message(role="assistant").judge(
             llm, intent="Replies warmly without mentioning painting or the village landscape."
         )
 
-        await session.run(user_input="Ab painting ke baare mein poochh sakte ho.")
+        await turn(session, "Ab painting ke baare mein poochh sakte ho.")
 
         assert world.state.boundaries[boundary.id].lifted_at is not None
 
@@ -263,7 +265,7 @@ async def test_sets_a_boundary_when_asked() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        await session.run(user_input="Almari saaf karne ke baare mein mujhse mat poochhna.")
+        await turn(session, "Almari saaf karne ke baare mein mujhse mat poochhna.")
 
         [boundary] = world.state.boundaries.values()
         assert "almari" in boundary.topic.lower() or "cupboard" in boundary.topic.lower()
@@ -275,10 +277,10 @@ async def test_forgets_a_storyline_only_after_confirmation() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Mohan")
 
-        await session.run(user_input="Ramesh wali baat poori tarah bhool jao.")
+        await turn(session, "Ramesh wali baat poori tarah bhool jao.")
         assert thread_id in world.state.threads
 
-        await session.run(user_input="Haan, mita do.")
+        await turn(session, "Haan, mita do.")
         assert thread_id not in world.state.threads
 
 
@@ -290,7 +292,7 @@ async def test_elder_persona_is_respectful_and_brief() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Mohan", persona=ELDER)
 
-        result = await session.run(user_input="Namaste beta. Aaj ghutno mein thoda dard tha.")
+        result = await turn(session, "Namaste beta. Aaj ghutno mein thoda dard tha.")
 
         [reply] = assistant_replies(result)
         assert re.search(r"\bji\b", reply, re.IGNORECASE), reply
@@ -308,7 +310,7 @@ async def test_replies_in_roman_script_to_devanagari_input() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        result = await session.run(user_input="आज मैंने अपनी बेटी से बहुत देर तक बात की।")
+        result = await turn(session, "आज मैंने अपनी बेटी से बहुत देर तक बात की।")
 
         [reply] = assistant_replies(result)
         assert not DEVANAGARI.search(reply), reply
@@ -320,12 +322,10 @@ async def test_fewer_questions_when_asked_and_remembered() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Kamala")
 
-        await session.run(user_input="Arre, itne sawaal mat poochho, bas suno.")
+        await turn(session, "Arre, itne sawaal mat poochho, bas suno.")
         assert world.state.users[world.user.id].preferences.fewer_questions
 
-        result = await session.run(
-            user_input="Aaj bazaar gayi thi, sabzi bahut mehngi ho gayi hai aajkal."
-        )
+        result = await turn(session, "Aaj bazaar gayi thi, sabzi bahut mehngi ho gayi hai aajkal.")
         [reply] = assistant_replies(result)
         assert reply.count("?") <= 1, reply
 
@@ -336,7 +336,7 @@ async def test_slower_speech_when_asked() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        await session.run(user_input="Thoda dheere bolo, sunai nahi diya.")
+        await turn(session, "Thoda dheere bolo, sunai nahi diya.")
 
         assert world.state.users[world.user.id].preferences.pace is Pace.SLOW
 
@@ -350,16 +350,17 @@ async def test_reads_back_a_reminder_then_saves_it_honestly() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Asha")
 
-        asked = await session.run(
-            user_input="Mere bete Ravi ka birthday 18 November ko hai. Har saal 11 November aur "
-            "18 November subah 9 baje yaad dilana."
+        asked = await turn(
+            session,
+            "Mere bete Ravi ka birthday 18 November ko hai. Har saal 11 November aur "
+            "18 November subah 9 baje yaad dilana.",
         )
         assert world.state.reminders == {}, "saved before reading it back"
         [readback] = assistant_replies(asked)
         assert "18" in readback, readback
         assert "?" in readback, readback
 
-        saved = await session.run(user_input="Haan, sahi hai.")
+        saved = await turn(session, "Haan, sahi hai.")
 
         [reminder] = world.state.reminders.values()
         assert (reminder.on, reminder.repeat) == (date(2026, 11, 18), Repeat.YEARLY)
@@ -368,7 +369,8 @@ async def test_reads_back_a_reminder_then_saves_it_honestly() -> None:
             llm,
             intent="Confirms the reminder and makes clear it will bring it up when they talk "
             "around that date. It must not promise to alert, notify, message or call them at a "
-            "set time (e.g. 'subah 9 baje yaad dilaungi' fails).",
+            "set time (e.g. 'subah 9 baje yaad dilaungi' fails); saying it can't alert them at "
+            "9 is honest and fine.",
         )
 
 
@@ -378,11 +380,11 @@ async def test_does_not_guess_an_unclear_date() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        await session.run(
-            user_input="Beti ke ghar jaane ka plan hai, shayad June ke aakhri hafte mein. Yaad "
-            "dila dena."
+        await turn(
+            session,
+            "Beti ke ghar jaane ka plan hai, shayad June ke aakhri hafte mein. Yaad dila dena.",
         )
-        await session.run(user_input="Haan, theek hai.")
+        await turn(session, "Haan, theek hai.")
 
         assert all(r.on is None for r in world.state.reminders.values())
 
@@ -395,11 +397,12 @@ async def test_reschedules_the_same_reminder() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world)
 
-        await session.run(
-            user_input="Aaj chashma lene gaya tha par dukaan band thi. Somvaar ko phir yaad "
-            "dilana, purani ko hi badal do, do alag-alag mat banana."
+        await turn(
+            session,
+            "Aaj chashma lene gaya tha par dukaan band thi. Somvaar ko phir yaad "
+            "dilana, purani ko hi badal do, do alag-alag mat banana.",
         )
-        await session.run(user_input="Haan.")
+        await turn(session, "Haan.")
 
         [reminder] = world.state.reminders.values()
         assert reminder.on == date(2026, 1, 5)
@@ -416,8 +419,8 @@ async def test_brings_up_a_due_reminder() -> None:
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Asha", persona=ELDER)
 
-        replies = assistant_replies(await session.run(user_input="Namaste!"))
-        replies += assistant_replies(await session.run(user_input="Main theek hoon."))
+        replies = assistant_replies(await turn(session, "Namaste!"))
+        replies += assistant_replies(await turn(session, "Main theek hoon."))
 
         assert any("ravi" in reply.lower() for reply in replies), replies
 
@@ -425,17 +428,36 @@ async def test_brings_up_a_due_reminder() -> None:
 RAM = Path(__file__).parents[2] / "seeds" / "ram_mohapatra.json"
 
 
-async def test_looks_up_saved_details_before_saying_they_are_not_saved() -> None:
-    """Ram's wedding is saved but not in the call-start context: Baatein must call recall."""
-    world = build_world()
+async def with_ram(world: World) -> None:
     seeder = Seeder(world.service._deps, default_persona_registry())
-    seed = SeedFile.model_validate_json(RAM.read_text())
-    await seeder.load(world.user, seed)
+    await seeder.load(world.user, SeedFile.model_validate_json(RAM.read_text()))
+
+
+WEDDING = "Tumhe yaad hai meri shaadi kab aur kahan hui thi?"
+
+
+async def test_answers_from_saved_details_outside_the_call_start_context() -> None:
+    """Ram's wedding is saved but not in the call-start context."""
+    world = build_world()
+    await with_ram(world)
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
         await start_with_memory(session, world, user_name="Ram", persona=ELDER)
 
-        result = await session.run(user_input="Tumhe yaad hai meri shaadi kab aur kahan hui thi?")
+        [reply] = assistant_replies(await turn(session, WEDDING))
+
+        assert "1995" in reply or "puri" in reply.lower(), reply
+
+
+async def test_looks_up_saved_details_before_saying_they_are_not_saved() -> None:
+    """When the per-turn search misses it (as it often does for Hinglish), Claude must call
+    recall rather than say it isn't saved. Skipping the hook here stands in for that miss."""
+    world = build_world()
+    await with_ram(world)
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Ram", persona=ELDER)
+
+        result = await session.run(user_input="Mere Bapa kya karte the, yaad hai?")
 
         result.expect.contains_function_call(name="recall")
         [reply] = assistant_replies(result)
-        assert "1995" in reply or "puri" in reply.lower(), reply
+        assert "headmaster" in reply.lower() or "school" in reply.lower(), reply

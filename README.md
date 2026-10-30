@@ -200,7 +200,7 @@ Pass `--email someone@example.com` to call as the same user every time (signed u
 | 2 | Fact memory: embeddings, sqlite-vec + FTS5 hybrid search | ✅ |
 | 3 | Email/password auth, LiveKit tokens, web client | ✅ |
 | 4 | Call lifecycle: save transcripts, load context at call start, per-turn memory retrieval, memory tools | ✅ |
-| 5 | Consent-based memory layer: consent, storylines, persona, reminders, end-of-call summary, scenario evals | In progress (slices 1–5 built) |
+| 5 | Consent-based memory layer: consent, storylines, persona, reminders, end-of-call summary, scenario evals | All six slices built; live voice check pending |
 | 6 | "Forget me", observability, evals, demo polish | |
 
 Design decisions, including why the project uses its own memory store instead of Mem0, are in [docs/PLAN.md](docs/PLAN.md).

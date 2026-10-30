@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 
 from livekit.agents import RunContext, function_tool, llm
@@ -11,6 +11,7 @@ from baatein.domain.models import (
     OccurrenceStatus,
     Pace,
     Preferences,
+    Reminder,
     Repeat,
     Sensitivity,
     ThreadKind,
@@ -38,10 +39,25 @@ CANCEL_REPLIES = {
     ForgetOutcome.NOT_FOUND: "No open reminder with that id.",
 }
 REMINDER_SAVED = (
-    "Saved as [{id}]. You can't alert them at a time, only bring it up when they talk to you. "
-    'Say so, e.g. "Jab hum us din ke aas-paas baat karenge, main yaad dila dungi", never '
-    '"9 baje yaad dila dungi".'
+    "Saved as [{id}]. You can't alert them on a day or at a time, only bring it up when they "
+    'talk to you. Tell them in these words: "{promise}" Never promise a day or a time '
+    '("{first} ko yaad dilaungi", "9 baje yaad dila dungi").'
 )
+
+
+def honest_promise(reminder: Reminder) -> str:
+    """What Baatein can truly promise for a dated reminder: to bring it up in any call from its
+    earliest alert to the day itself (decision 3)."""
+    assert reminder.on is not None
+    day = f"{reminder.on.day} {reminder.on:%B}"
+    lead = max(reminder.alert_days_before, default=0)
+    if lead == 0:
+        return f"Jab bhi hum {day} ke aas-paas baat karenge, main yaad dila dungi."
+    first = reminder.on - timedelta(days=lead)
+    start = f"{first.day} {first:%B}"
+    return f"Jab bhi hum {start} se {day} ke beech baat karenge, main yaad dila dungi."
+
+
 NEEDS_DATE = "Saved as [{id}], waiting for a date. Ask for it only when they know it."
 FORGET_THREAD_REPLIES = FORGET_REPLIES | {
     ForgetOutcome.NEEDS_CONFIRMATION: FORGET_REPLIES[ForgetOutcome.NEEDS_CONFIRMATION].replace(
@@ -138,8 +154,10 @@ def memory_tools(
                 peete the".
             about: Name of another person this is mainly about, e.g. "Ramesh".
             relation: That person's relation to the user, e.g. "college friend", "son".
-            sensitivity: One of "normal" (default), "personal" for private matters, "health",
-                "grief" or "crisis" for those topics.
+            sensitivity: One of "normal" (default), "personal" for private matters they
+                wouldn't want raised (money troubles, family disputes, secrets), "health",
+                "grief" or "crisis" for those topics. Everyday feelings, like missing a friend,
+                are "normal".
             uncertain: True if the user wasn't sure about the details.
         """
         fact = await memory.remember(
@@ -217,7 +235,8 @@ def memory_tools(
                 "worry", "story".
             about: Name of the person it is mainly about, e.g. "Ramesh".
             relation: That person's relation to the user, e.g. "college friend".
-            sensitivity: One of "normal" (default), "personal", "health", "grief", "crisis".
+            sensitivity: As for remember: "normal" (default) unless it is private ("personal"),
+                "health", "grief" or "crisis". A sensitive storyline is never a check-in.
         """
         thread = await memory.track_thread(
             title,
@@ -330,14 +349,14 @@ def memory_tools(
         note: str | None = None,
     ) -> str:
         """Save a reminder the user asked for, e.g. "Ravi ka birthday 18 November, har saal
-        yaad dilana". First read back the date, time and repeat in simple words and wait for
-        "haan". Never guess a date: if they aren't sure, leave it out.
+        yaad dilana". First read back the date and repeat (and a time only if they gave one) in
+        simple words and wait for "haan". Never guess a date: if they aren't sure, leave it out.
 
         Args:
             title: What to remind them of, in a few English words, e.g. "Ravi's birthday".
             date: The (first) day of the event as YYYY-MM-DD, resolved from "agle shanivaar",
                 "parson" etc. using today's date.
-            time: When to remind them, as HH:MM (24-hour), e.g. "09:00". Default 09:00.
+            time: Only if they gave one, as HH:MM (24-hour), e.g. "18:30" for a medicine.
             repeat: "once" (default), "weekly", "monthly_date" (same date every month),
                 "monthly_weekday" (e.g. first Sunday of every month), or "yearly".
             days_before: Days before the event to remind them too, e.g. [7, 0] for a week
@@ -354,8 +373,18 @@ def memory_tools(
             about=about,
             note=note,
         )
-        template = REMINDER_SAVED if reminder.on else NEEDS_DATE
-        return template.format(id=reminder.id)
+        if reminder.on is None:
+            return NEEDS_DATE.format(id=reminder.id)
+        first = reminder.on - timedelta(days=max(reminder.alert_days_before, default=0))
+        reply = REMINDER_SAVED.format(
+            id=reminder.id, promise=honest_promise(reminder), first=f"{first.day} {first:%B}"
+        )
+        if time is not None:
+            reply += (
+                f" They asked for {time}: say plainly that you can't remind them at a set time, "
+                "and don't say it is saved for that time."
+            )
+        return reply
 
     @function_tool
     async def update_reminder(

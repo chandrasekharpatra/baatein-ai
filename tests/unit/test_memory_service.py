@@ -861,6 +861,8 @@ async def test_context_brings_up_alerted_reminders_first(world: World) -> None:
     ]
     assert context.undated_reminders == [undated]
     assert later.id not in {d.reminder.id for d in context.reminders}
+    # Listed separately, so "18 nahi, 19 November" can change it (found in a scenario eval).
+    assert context.later_reminders == [later]
 
 
 async def test_reminder_people_are_kept_until_nothing_refers_to_them(world: World) -> None:

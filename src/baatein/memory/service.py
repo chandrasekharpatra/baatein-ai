@@ -50,7 +50,7 @@ from baatein.ports.repos import (
     TurnRepo,
     UserRepo,
 )
-from baatein.text import words
+from baatein.text import search_terms, words
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,8 @@ class MemoryContext:
     declined: list[DeclinedSuggestion]
     reminders: list[DueReminder] = field(default_factory=list)
     undated_reminders: list[Reminder] = field(default_factory=list)
+    later_reminders: list[Reminder] = field(default_factory=list)
+    """Active reminders with nothing due in the next week: listed so they can be changed."""
 
 
 class ForgetOutcome(StrEnum):
@@ -174,6 +176,8 @@ class CallMemory:
         self.saving_paused = False
         self.private = False
         self._forget_requests: dict[str, int] = {}
+        self.check_in: Thread | None = None
+        self._check_in_terms: frozenset[str] = frozenset()
 
     @property
     def user_id(self) -> str:
@@ -208,6 +212,11 @@ class CallMemory:
             )
             await deps.threads.update(check_in)
             events = await deps.threads.events(check_in.id, CHECK_IN_EVENTS)
+            person = next((p for p in people if p.id == check_in.about_person_id), None)
+            self.check_in = check_in
+            self._check_in_terms = frozenset(
+                words(person.name) if person else search_terms(check_in.title)
+            )
         return MemoryContext(
             now=now.astimezone(self.timezone),
             last_call=last_call,
@@ -220,7 +229,21 @@ class CallMemory:
             declined=declined,
             reminders=due_reminders,
             undated_reminders=[r for r in reminders if r.status is ReminderStatus.NEEDS_INFO],
+            later_reminders=[
+                r
+                for r in reminders
+                if r.status is ReminderStatus.ACTIVE
+                and all(d.reminder.id != r.id for d in due_reminders)
+            ],
         )
+
+    def mentions_check_in(self, reply: str) -> bool:
+        """Whether Baatein's reply brought up this call's check-in: it names the person the
+        storyline is about, or (without one) two words of its title."""
+        if not self._check_in_terms:
+            return False
+        said = set(words(reply)) & self._check_in_terms
+        return len(said) >= min(2, len(self._check_in_terms))
 
     async def _due_reminders(
         self, reminders: list[Reminder], since: datetime, now: datetime
