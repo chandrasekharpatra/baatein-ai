@@ -18,7 +18,22 @@ class LLMSettings(BaseModel):
         return ProviderSpec(self.provider, options)
 
 
+class VoiceOverride(BaseModel):
+    """Another text-to-speech voice for one language, e.g. an expressive voice for a demo."""
+
+    provider: str
+    options: dict[str, object] = Field(default_factory=dict)
+    pace_option: str | None = None
+    """The option that sets speaking speed for this provider ("pace" for Sarvam, "speed" for
+    Cartesia); None if it has none."""
+
+
 class VoiceSettings(BaseModel):
+    tts: dict[str, VoiceOverride] = Field(default_factory=dict)
+    """Voices to use instead of a language profile's own, by language code. For example
+    BAATEIN_VOICE__TTS='{"hinglish": {"provider": "sarvam", "options": {"model":
+    "bulbul:v4-flash", "speaker": "shalini_enhi_companion", "target_language_code": "hi-IN"},
+    "pace_option": "pace"}}'. Unset: the profile's measured default."""
     default_language: str = "hinglish"
     default_persona: str = "casual"
     stt_max_retry: int = 5

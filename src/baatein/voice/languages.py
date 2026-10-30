@@ -1,5 +1,5 @@
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 
 from baatein.registry import ProviderSpec
 
@@ -129,5 +129,17 @@ KANNADA = LanguageProfile(
 )
 
 
-def default_language_registry() -> LanguageRegistry:
-    return LanguageRegistry([HINGLISH, ENGLISH, ODIA, KANNADA])
+def default_language_registry(
+    voices: Mapping[str, tuple[ProviderSpec, str | None]] | None = None,
+) -> LanguageRegistry:
+    """The built-in profiles. `voices` replaces a profile's text-to-speech (spec and pace
+    option) by language code, e.g. an expressive voice for a demo."""
+    profiles = [HINGLISH, ENGLISH, ODIA, KANNADA]
+    voices = voices or {}
+    unknown = set(voices) - {p.code for p in profiles}
+    if unknown:
+        raise UnknownLanguageError(f"no language profile for voice override: {sorted(unknown)}")
+    return LanguageRegistry(
+        replace(p, tts=voices[p.code][0], pace_option=voices[p.code][1]) if p.code in voices else p
+        for p in profiles
+    )

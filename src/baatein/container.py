@@ -30,6 +30,7 @@ from baatein.ports.repos import (
     TurnRepo,
     UserRepo,
 )
+from baatein.registry import ProviderSpec
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.repos import (
@@ -250,8 +251,13 @@ class AuthModule(Module):
 class VoiceModule(Module):
     @singleton
     @provider
-    def languages(self) -> LanguageRegistry:
-        return default_language_registry()
+    def languages(self, settings: Settings) -> LanguageRegistry:
+        return default_language_registry(
+            {
+                code: (ProviderSpec(voice.provider, voice.options), voice.pace_option)
+                for code, voice in settings.voice.tts.items()
+            }
+        )
 
     @singleton
     @provider

@@ -199,3 +199,10 @@ An evaluation looked at where a "decision step" (rules, a small classifier, or a
 ### D23. A demo clock, so one recording session can show several days
 - **Why:** the demo shows Baatein reminding the day before an event and following up after it, which needs calls on different days.
 - **Chosen:** `DemoClock` (`BAATEIN_DEV__CLOCK_FILE`, development only). `baatein demo-date 2026-11-02 --time 10:00` sets the moment, and time runs on from it. Memory, reminders, the seeder and summaries use it; logins and LiveKit tokens keep the real clock, because the LiveKit server checks real time. The file is read on every call, so the worker, API and CLI follow a change without restarting.
+
+### D24. A language's voice can be swapped from settings, without changing the default
+- **Why:** the demo should use Sarvam's most expressive voices (`bulbul:v4-flash`: "companion", "conversational" and code-mixed `*_enhi_*` styles), while the product keeps the voice chosen for it. Hinglish uses Cartesia "Sneha", which reads Baatein's Roman-script Hinglish well.
+- **Chosen:**
+  - `BAATEIN_VOICE__TTS` (`VoiceSettings.tts`) replaces a profile's text-to-speech and its pace option, by language code.
+  - An override for a language with no profile is refused at startup. A voice name the plugin doesn't know fails when the pipeline is built.
+- **Before making a Sarvam voice the Hinglish default:** measure time to first audio and how well it reads Roman-script Hinglish (round-trip through speech-to-text) against Cartesia.
