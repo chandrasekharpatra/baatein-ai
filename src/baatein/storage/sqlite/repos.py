@@ -71,6 +71,16 @@ def ensure_changed(cursor: aiosqlite.Cursor, entity: str, entity_id: str) -> Non
         raise NotFoundError(entity, entity_id)
 
 
+ERASED_WITH_MEMORIES = (
+    "boundaries",
+    "declined_suggestions",
+    "reminders",
+    "threads",
+    "people",
+    "sessions",
+)
+
+
 class SqliteUserRepo:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -120,6 +130,13 @@ class SqliteUserRepo:
                 "UPDATE users SET persona = ? WHERE id = ?", (persona, user_id)
             )
             ensure_changed(cursor, "user", user_id)
+
+    async def erase_memories(self, user_id: str) -> None:
+        # One transaction; the rest cascades (thread events, occurrences, turns and their
+        # search index) or is unlinked (facts' sessions and people).
+        async with self._db.transaction() as conn:
+            for table in ERASED_WITH_MEMORIES:
+                await conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
 
     async def _one(self, sql: str, param: str) -> User | None:
         async with self._db.read() as conn, conn.execute(sql, (param,)) as cursor:

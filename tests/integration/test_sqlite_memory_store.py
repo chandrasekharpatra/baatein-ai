@@ -170,3 +170,20 @@ async def test_keyword_matches_outside_the_nearest_candidates_are_scored_too(
     found = await store.search(user_id, "guitar", 1, min_similarity=1.01)
 
     assert [r.fact.text for r in found] == ["guitar teacher"]
+
+
+async def test_forgetting_drops_vectors_from_every_models_index(db: Database) -> None:
+    user_id = await add_user(db)
+    old = SqliteMemoryStore(db, FakeEmbedder(model_id="fake/old"))
+    one, two = make_fact(user_id, "Loves biryani"), make_fact(user_id, "Plays chess")
+    await old.add(one)
+    await old.add(two)
+    new = SqliteMemoryStore(db, FakeEmbedder(model_id="fake/new"))
+    await new.rebuild_index()
+
+    await new.forget(one.id, at(1))
+    assert await vector_rows(db, old.vec_table) == 1
+    await new.forget_all(user_id, at(2))
+
+    assert await vector_rows(db, old.vec_table) == 0
+    assert await vector_rows(db, new.vec_table) == 0

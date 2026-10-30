@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -215,6 +216,27 @@ def test_seed_loads_into_the_current_user(tmp_path: Path) -> None:
         bad_call = {"memories": [{"text": "x", "call": "nope"}]}
         assert on.post("/dev/seed", json=bad_call, headers=auth).status_code == 422
         assert on.post("/dev/seed", json={}).status_code == 401
+
+
+def test_forget_me_needs_the_password_then_erases_memories_but_keeps_the_account(
+    tmp_path: Path,
+) -> None:
+    with seeding_client(tmp_path, enabled=True) as app:
+        token = signup(app, display_name="Mohan")["access_token"]
+        auth = bearer(token)
+        memories = {"memories": [{"text": "Misses Ramesh", "about": "Ramesh"}]}
+        assert app.post("/dev/seed", json=memories, headers=auth).status_code == 200
+
+        wrong = app.post("/me/forget", json={"password": "not-it"}, headers=auth)
+        erased = app.post("/me/forget", json={"password": "password123"}, headers=auth)
+
+        assert wrong.status_code == 401
+        assert erased.status_code == 204
+        assert app.get("/me", headers=auth).json()["display_name"] == "Mohan"
+        assert app.post("/me/forget", json={"password": "password123"}).status_code == 401
+    with sqlite3.connect(tmp_path / "seed.db") as conn:
+        assert conn.execute("SELECT count(*) FROM people").fetchone()[0] == 0
+        assert conn.execute("SELECT text FROM facts").fetchall() == [("",)]
 
 
 def test_the_api_summarises_finished_calls_in_the_background(tmp_path: Path) -> None:

@@ -128,6 +128,30 @@ def test_seed_creates_the_account_and_replaces_it_on_request(
         assert conn.execute("SELECT count(*) FROM facts").fetchone()[0] == 1
 
 
+def test_forget_user_needs_yes_then_erases_but_keeps_the_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    fake_embedding(monkeypatch)
+    seed = tmp_path / "ram.json"
+    seed.write_text(
+        '{"user": {"email": "ram@example.com", "password": "long-enough"},'
+        ' "memories": [{"text": "Loves rasagola", "about": "Sabitri"}]}'
+    )
+    assert main(["seed", str(seed)]) == 0
+
+    assert main(["forget-user", "ram@example.com"]) == 1
+    assert "Add --yes" in capsys.readouterr().out
+    assert main(["forget-user", "ram@example.com", "--yes"]) == 0
+    assert "erased everything Baatein remembered about ram@example.com" in capsys.readouterr().out
+    assert main(["forget-user", "nobody@example.com", "--yes"]) == 0
+    assert "no user nobody@example.com" in capsys.readouterr().out
+    with sqlite3.connect(tmp_path / "app.db") as conn:
+        assert conn.execute("SELECT count(*) FROM users").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM people").fetchone()[0] == 0
+        assert conn.execute("SELECT text FROM facts").fetchall() == [("",)]
+
+
 def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:
     seed = tmp_path / "no-user.json"
     seed.write_text('{"memories": []}')

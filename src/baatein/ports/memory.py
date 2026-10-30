@@ -30,6 +30,10 @@ class MemoryStore(Protocol):
         """How many current (not retired or deleted) facts are about this person."""
         ...
 
+    async def forget_all(self, user_id: str, at: datetime) -> None:
+        """Tombstone every fact of the user, as `forget` does one ("Forget me")."""
+        ...
+
     async def forget(self, fact_id: str, at: datetime) -> list[str]:
         """Tombstone the fact and every earlier version it replaced: wipe the text, quote and
         vectors, keep the row with `deleted_at`. Returns the ids of the sessions they came from."""

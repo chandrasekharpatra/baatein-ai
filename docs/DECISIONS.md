@@ -172,3 +172,17 @@ An evaluation looked at where a "decision step" (rules, a small classifier, or a
 - **Wait for the search when a saved person or relation is named** ("मेरे पिताजी…"), with "Hmm…": about +450 ms on roughly 15% of turns. Try it in live calls before deciding.
 - **A clear "yes" check before confirming forget or cancel,** because garbled speech recognition does happen ("साहिब क्यों?" for "save").
 - **Not worth it now:** reranking `recall` results (+500 ms), rewriting queries with an LLM (at most one more hit), choosing the cut-off from the turn's script.
+
+## Phase 6 (2026-10-30)
+
+### D21. "Forget me" erases what Baatein remembers and keeps the account
+- **Options:** delete the account and everything; erase memories and keep the account; offer both.
+- **Chosen (by the user):** erase memories, keep the account and its settings (language, persona, how they like to talk).
+  - Facts become tombstones, as when forgetting one (D7): text, quote and person link wiped, row kept with `deleted_at`.
+  - People, storylines and their events, boundaries, declined suggestions, reminders, and every call with its transcript and summary are deleted.
+  - Vectors are dropped from **every** model's index. Single-memory `forget` used to leave them in an older embedder's index; it no longer does.
+- **Where:**
+  - the web app (the password is asked again, so a borrowed, logged-in phone can't wipe memories): `POST /me/forget`
+  - `baatein forget-user EMAIL --yes`
+  - **Not by voice:** asked to forget everything, Baatein points to the app and offers to forget one named thing now. A misheard sentence shouldn't be able to wipe everything.
+- **Known gap:** a call in progress while erasing can still save a turn or memory afterwards.

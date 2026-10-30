@@ -105,6 +105,18 @@ class InMemoryMemoryStore:
             1 for f in self._facts.values() if f.about_person_id == person_id and f.is_active
         )
 
+    async def forget_all(self, user_id: str, at: datetime) -> None:
+        for fact in [f for f in self._facts.values() if f.user_id == user_id]:
+            self._facts[fact.id] = replace(
+                fact,
+                text="",
+                quote=None,
+                about_person_id=None,
+                deleted_at=fact.deleted_at or at,
+                retired_at=fact.retired_at or at,
+            )
+            self._vectors.pop(fact.id, None)
+
     async def forget(self, fact_id: str, at: datetime) -> list[str]:
         self._require(fact_id)
         chain: list[Fact] = []

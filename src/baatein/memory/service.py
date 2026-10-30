@@ -171,6 +171,13 @@ class MemoryService:
         self._cut_off = cut_off
         self._duplicate_at = duplicate_at
 
+    async def forget_user(self, user_id: str) -> None:
+        """ "Forget me": erase everything Baatein remembers about the user, keep the account and
+        its settings. Facts become tombstones first (as when forgetting one), then the rest is
+        deleted; if the second step fails, running it again finishes the job."""
+        await self._deps.store.forget_all(user_id, self._deps.clock.now())
+        await self._deps.users.erase_memories(user_id)
+
     async def warm_up(self) -> None:
         """Load the embedding model so the first per-turn recall fits its timeout."""
         try:

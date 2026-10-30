@@ -190,6 +190,23 @@ async def test_forgets_on_request_and_does_not_use_it_again() -> None:
         )
 
 
+async def test_forget_everything_points_to_the_app_and_deletes_nothing() -> None:
+    world = build_world()
+    await world.store.add(make_fact(world.user.id, "Plays chess with Prafulla every evening"))
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world)
+
+        result = await turn(session, "Mere baare mein sab kuch bhool jao, poori tarah.")
+
+        assert not any(f.is_deleted for f in world.store._facts.values())
+        await result.expect.contains_message(role="assistant").judge(
+            llm,
+            intent="Explains that everything can be erased at once from the app's settings "
+            "(Erase memories), and offers to forget a specific thing now; doesn't claim "
+            "anything was deleted.",
+        )
+
+
 async def test_offers_to_check_in_and_tracks_it_after_yes() -> None:
     world = build_world()
     async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:

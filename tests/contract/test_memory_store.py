@@ -370,3 +370,22 @@ async def test_add_unless_similar_saves_a_new_fact(memory: Memory) -> None:
 async def test_add_unless_similar_for_unknown_user_raises(memory: Memory) -> None:
     with pytest.raises(NotFoundError):
         await memory.store.add_unless_similar(make_fact("nobody"), 0.8)
+
+
+async def test_forget_all_tombstones_every_fact_of_the_user(memory: Memory) -> None:
+    user_id, other_id = await add_user(memory), await add_user(memory)
+    old = make_fact(user_id, "Plays chess with Prafulla")
+    await memory.store.add(old)
+    await memory.store.supersede(old.id, make_fact(user_id, "Plays chess with Prafulla daily"))
+    kept = make_fact(other_id, "Plays chess with Bijay")
+    await memory.store.add(kept)
+
+    await memory.store.forget_all(user_id, at(5))
+    await memory.store.forget_all(await add_user(memory), at(5))  # nothing saved: no-op
+
+    assert await memory.store.active(user_id, 10) == []
+    assert await memory.store.search(user_id, "chess", 5) == []
+    gone = await memory.store.get(old.id)
+    assert gone is not None
+    assert (gone.text, gone.deleted_at) == ("", at(5))
+    assert await memory.store.get(kept.id) == kept

@@ -29,6 +29,21 @@ CANDIDATE_MULTIPLIER = 4
 REINDEX_BATCH = 64
 
 
+async def _drop_vectors(conn: aiosqlite.Connection, pks: list[int]) -> None:
+    """Delete these facts' vectors from every model's index, not only the current one: an
+    index built for an earlier embedder still holds them."""
+    if not pks:
+        return
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+        " AND name LIKE 'facts\\_vec\\_%' ESCAPE '\\' AND sql LIKE 'CREATE VIRTUAL TABLE%'"
+    ) as cursor:
+        tables = [name for (name,) in await cursor.fetchall()]
+    marks = ", ".join("?" * len(pks))
+    for table in tables:
+        await conn.execute(f"DELETE FROM {table} WHERE rowid IN ({marks})", pks)
+
+
 def vec_table_name(model_id: str, dimensions: int) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", model_id.lower()).strip("_")
     return f"facts_vec_{slug}_{dimensions}"
@@ -229,8 +244,20 @@ class SqliteMemoryStore:
                     " WHERE pk = ?",
                     (to_db(at), to_db(at), pk),
                 )
-                await conn.execute(f"DELETE FROM {self._table} WHERE rowid = ?", (pk,))
+                await _drop_vectors(conn, [pk])
         return sorted({session_id for session_id in chain.values() if session_id})
+
+    async def forget_all(self, user_id: str, at: datetime) -> None:
+        async with self._db.transaction() as conn:
+            async with conn.execute("SELECT pk FROM facts WHERE user_id = ?", (user_id,)) as cursor:
+                pks = [pk for (pk,) in await cursor.fetchall()]
+            await conn.execute(
+                "UPDATE facts SET text = '', quote = NULL, about_person_id = NULL,"
+                " deleted_at = COALESCE(deleted_at, ?), retired_at = COALESCE(retired_at, ?)"
+                " WHERE user_id = ?",
+                (to_db(at), to_db(at), user_id),
+            )
+            await _drop_vectors(conn, pks)
 
     async def rebuild_index(self) -> int:
         async with self._db.transaction() as conn:

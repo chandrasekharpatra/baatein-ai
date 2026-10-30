@@ -11,7 +11,9 @@ from baatein.config import Settings
 from baatein.container import build_root
 from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder, SeedFile
+from baatein.memory.service import MemoryService
 from baatein.ports.auth import PasswordHasher
+from baatein.ports.repos import UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.migrate import migrate
@@ -37,6 +39,19 @@ async def finalize(settings: Settings, session_id: str | None) -> str:
             ok = await finalizer.finalize_by_id(session_id)
             return f"summarised {session_id}" if ok else f"summarising {session_id} failed"
         return f"summarised {await finalizer.run_due()} call(s)"
+    finally:
+        await injector.get(Database).close()
+
+
+async def forget_user(settings: Settings, email: str) -> str:
+    """Erase everything Baatein remembers about a user; the account stays."""
+    injector = build_root(settings=settings)
+    try:
+        user = await injector.get(UserRepo).get_by_email(email)  # type: ignore[type-abstract]
+        if user is None:
+            return f"no user {email}"
+        await injector.get(MemoryService).forget_user(user.id)
+        return f"erased everything Baatein remembered about {user.email}; the account stays"
     finally:
         await injector.get(Database).close()
 
@@ -89,11 +104,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "finalize", help="summarise finished calls now (baatein serve also does it)"
     )
     finalize_cmd.add_argument("--session", help="summarise this call again, whatever its state")
+    forget_cmd = commands.add_parser(
+        "forget-user", help="erase everything Baatein remembers about a user (keeps the account)"
+    )
+    forget_cmd.add_argument("email")
+    forget_cmd.add_argument(
+        "--yes", action="store_true", help="confirm; nothing is erased without it"
+    )
     serve = commands.add_parser("serve", help="run the HTTP API and web client")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
 
+    if args.command == "forget-user" and not args.yes:
+        print(f"This erases every memory, call and reminder of {args.email}. Add --yes to do it.")
+        return 1
     settings = Settings()
     path = settings.database.sqlite_path()
     version = migrate(path)
@@ -102,6 +127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(asyncio.run(reembed(settings)))
     elif args.command == "finalize":
         print(asyncio.run(finalize(settings, args.session)))
+    elif args.command == "forget-user":
+        print(asyncio.run(forget_user(settings, args.email)))
     elif args.command == "seed":
         print(asyncio.run(load_seed(settings, read_seed(args.file), args.replace)))
     elif args.command == "serve":

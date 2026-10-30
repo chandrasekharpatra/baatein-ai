@@ -21,6 +21,7 @@ from baatein.domain.errors import (
 from baatein.domain.models import User
 from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder, SeedError, SeedFile, SeedResult
+from baatein.memory.service import MemoryService
 from baatein.ports.auth import CallTokenIssuer
 from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import UnknownLanguageError
@@ -37,6 +38,10 @@ class SignupRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
+    password: str = Field(max_length=256)
+
+
+class ForgetMeRequest(BaseModel):
     password: str = Field(max_length=256)
 
 
@@ -151,6 +156,13 @@ def create_app(injector: Injector) -> FastAPI:
     @app.get("/me")
     async def me(user: CurrentUser) -> UserOut:
         return UserOut.of(user)
+
+    @app.post("/me/forget", status_code=status.HTTP_204_NO_CONTENT)
+    async def forget_me(body: ForgetMeRequest, user: CurrentUser, auth: Auth) -> None:
+        """Erase everything Baatein remembers about the user; the account stays. The password
+        is asked again, so a borrowed, logged-in phone can't wipe someone's memories."""
+        await auth.login(user.email, body.password)
+        await injector.get(MemoryService).forget_user(user.id)
 
     @app.post("/livekit/token")
     async def livekit_token(

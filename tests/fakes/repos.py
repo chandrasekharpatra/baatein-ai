@@ -66,6 +66,21 @@ class InMemoryUserRepo:
             raise NotFoundError("user", user_id)
         self._state.users[user_id] = replace(self._state.users[user_id], persona=persona)
 
+    async def erase_memories(self, user_id: str) -> None:
+        state = self._state
+        sessions = {s for s, session in state.sessions.items() if session.user_id == user_id}
+        threads = {t for t, thread in state.threads.items() if thread.user_id == user_id}
+        reminders = {r for r, reminder in state.reminders.items() if reminder.user_id == user_id}
+        state.sessions = {k: v for k, v in state.sessions.items() if k not in sessions}
+        state.turns = [t for t in state.turns if t.session_id not in sessions]
+        state.threads = {k: v for k, v in state.threads.items() if k not in threads}
+        state.thread_events = [e for e in state.thread_events if e.thread_id not in threads]
+        state.reminders = {k: v for k, v in state.reminders.items() if k not in reminders}
+        state.occurrences = {k: v for k, v in state.occurrences.items() if k[0] not in reminders}
+        state.people = {k: v for k, v in state.people.items() if v.user_id != user_id}
+        state.boundaries = {k: v for k, v in state.boundaries.items() if v.user_id != user_id}
+        state.suggestions = [s for s in state.suggestions if s.user_id != user_id]
+
 
 class InMemorySessionRepo:
     def __init__(self, state: InMemoryState) -> None:

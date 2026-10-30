@@ -111,6 +111,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `uv run baatein migrate` | Create or upgrade the database schema |
 | `uv run baatein reembed` | Rebuild the fact vector index for the current embedding model |
 | `uv run --env-file .env baatein finalize [--session ID]` | Summarise finished calls now (`serve` also does this every 10 s); `--session` re-runs one call |
+| `uv run baatein forget-user EMAIL --yes` | Erase everything Baatein remembers about a user (memories, people, storylines, reminders, calls); the account stays |
 | `uv run baatein seed FILE [--replace]` | Create a test account with artificial memories (see `docs/SEED_DATA.md`) |
 | `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload |
 | `uv run baatein-agent start` | Run the agent worker in production mode |
@@ -127,6 +128,7 @@ Migrations also run automatically when the API or an agent worker starts.
 | `POST` | `/auth/signup` | — | `{email, password, display_name?, language?, persona?}` → access token + user; `language` is `hinglish`, `english`, `odia` or `kannada` |
 | `POST` | `/auth/login` | — | `{email, password}` → access token + user |
 | `GET` | `/me` | Bearer | Current user |
+| `POST` | `/me/forget` | Bearer + `{password}` | "Forget me": erase everything Baatein remembers; the account stays (204) |
 | `POST` | `/livekit/token` | Bearer | `{server_url, participant_token, room_name}` for a new call |
 
 Errors use `409` for a duplicate email, `401` for bad credentials or tokens, and `422` for invalid input (weak password, unknown language, bad email). Interactive docs are at http://127.0.0.1:8000/docs.
