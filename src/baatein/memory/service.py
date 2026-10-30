@@ -108,6 +108,9 @@ class MemoryContext:
     undated_reminders: list[Reminder] = field(default_factory=list)
     later_reminders: list[Reminder] = field(default_factory=list)
     """Active reminders with nothing due in the next week: listed so they can be changed."""
+    earlier_call: Session | None = None
+    """When the last call has no summary (too short, or not summarised yet): the most recent
+    call before it that has one."""
 
 
 @dataclass(frozen=True)
@@ -244,7 +247,8 @@ class CallMemory:
         deps, limits = self._deps, self._deps.settings
         now = deps.clock.now()
         recent, facts, people, threads, boundaries, declined = await asyncio.gather(
-            deps.sessions.recent_for_user(self.user_id, 2),
+            # This call, the last one, and a few before it in case that had no summary.
+            deps.sessions.recent_for_user(self.user_id, 6),
             deps.store.active(self.user_id, limits.context_facts),
             deps.people.list_for_user(self.user_id, CONTEXT_PEOPLE),
             deps.threads.list_active(self.user_id, limits.context_threads),
@@ -252,7 +256,11 @@ class CallMemory:
             deps.suggestions.list_for_user(self.user_id, limits.context_declined),
         )
         reminders = await deps.reminders.list_open(self.user_id, CONTEXT_REMINDERS)
-        last_call = next((s for s in recent if s.id != self.session.id), None)
+        previous = [s for s in recent if s.id != self.session.id]
+        last_call = previous[0] if previous else None
+        earlier_call = None
+        if last_call is not None and not last_call.summary:
+            earlier_call = next((s for s in previous[1:] if s.summary), None)
         since = last_call.started_at if last_call else now - timedelta(days=1)
         due_reminders = await self._due_reminders(reminders, since, now)
         check_in, events = None, []
@@ -276,6 +284,7 @@ class CallMemory:
         return MemoryContext(
             now=now.astimezone(self.timezone),
             last_call=last_call,
+            earlier_call=earlier_call,
             facts=facts,
             people=people,
             threads=threads,

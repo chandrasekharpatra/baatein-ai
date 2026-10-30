@@ -241,7 +241,7 @@ def test_the_api_summarises_finished_calls_in_the_background(tmp_path: Path) -> 
         await injector.get(UserRepo).add(user)  # type: ignore[type-abstract]
         session = make_session(user.id)
         await sessions.add(session)
-        await injector.get(TurnRepo).append(make_turn(session.id, 1, "Bas theek"))  # type: ignore[type-abstract]
+        await injector.get(TurnRepo).append(make_turn(session.id, 1, "Aaj Bapa ki bahut yaad aayi"))  # type: ignore[type-abstract]
         await sessions.end(session.id, at(5), None)
         return session
 

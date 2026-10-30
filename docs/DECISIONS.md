@@ -124,3 +124,51 @@ The decisions taken so far, the options considered, and why. Details live in the
 ### D15. The call ends at hang-up
 - **Problem:** after a hang-up the LiveKit job lingered until the server closed the empty room (about 20 s). Every call's end reason read "parent process shutdown", and summaries waited.
 - **Chosen:** `entrypoint` calls `ctx.shutdown()` from the session's `close` event. The end reason is now e.g. "session closed: participant_disconnected".
+
+## Decision steps in the memory flow (2026-10-30)
+
+An evaluation looked at where a "decision step" (rules, a small classifier, or an LLM call) would make the memory layer more efficient or reliable. It used 252 labelled sentences (live call turns, seeded turns, benchmark questions), the production search path and cached llama vectors. Scripts and results are in the session scratchpad.
+
+### D16. A filler-word list decides whether a turn is searched; no classifier
+- **Problem:** every turn went to Pinecone, including "ठीक है" and "haan", and "Yeah, it's good" keyword-matched "felt good afterwards".
+- **Options measured (useful hits lost out of 134, searches skipped):**
+
+| Option | Skipped | Useful lost | Time | Verdict |
+|---|---|---|---|---|
+| Filler words (Roman and Devanagari) | 30% of live turns | 0 | ~0 | **chosen** |
+| Character n-gram classifier | 16% | 2 | 0.1 ms | no better than the word list |
+| MiniLM classifier (local) | 13–18% | 0–4 | 7 ms | +800 MB per worker |
+| Haiku decides | most small talk | 0 | **1.0 s typical, 3.4 s worst** | slower than the 450 ms search it avoids |
+| Stricter cut-off on results | 0 | 5 | 0 | loses about one answer per noise case removed |
+| Drop the per-turn search | 100% | 23 passing mentions | 0 | Claude can't know a memory exists unless it sees it |
+| A classifier on the llama vector we already have, deciding whether to *use* results | — | — | µs | Looked good in mixed cross-validation (12/19 noise removed, 0 lost). But trained without live calls, it removed 0/7 live noise without losing live hits: too little real data. Revisit once many real calls are logged. |
+
+- **Chosen:** `text.py:FILLERS`. A turn made only of fillers has no search terms and isn't searched. Keyword queries ignore those words too.
+- **Result on the production path:** useful hits 134 → 134; small talk returning memories 19 → 9; live turns sent to Pinecone 80 → 55.
+
+### D17. A keyword match needs a little shared meaning
+- **Problem:** keyword matches skipped the similarity cut-off, so a shared word alone ("sleep", "pine cone") pulled up an unrelated memory at similarity 0.00–0.08.
+- **Chosen:** keep a keyword match only if its similarity is at least 0.10 (`ranking.py:KEYWORD_FLOOR`). Every keyword match that was the right answer scored 0.13 or more. Requiring the full cut-off instead would have lost 5 right answers. A fact without a vector yet (embedder switched, `reembed` not run) keeps its keyword match.
+
+### D18. The per-turn search starts when the turn ends
+- **Why:** starting it on each final transcript gained about 25 ms, and each extra transcript segment cost its own Pinecone call. With the reply no longer waiting for it (D14), the early start bought nothing.
+
+### D19. Don't save a near copy; ask Claude instead
+- **Problem:** a second "yaad rakhna" for the same thing saved a near copy, and Durga's account had both "Ramesh" and "Ramesh (college friend)".
+- **Measured (llama, Ram's account, 11 cases):** rephrased duplicates and updates scored 0.83–0.98 against the saved fact; different but related facts scored at most 0.74.
+- **Chosen:**
+  - `remember` checks for saved memories at or above the model's measured threshold (`config.py:MEASURED_DUPLICATES`, llama 0.80). It reuses the vector it embeds anyway, so there's no extra API call. If one is found, nothing is saved, and Claude is shown the memory and told to say it already remembers, call `correct_memory` if a detail changed, or save again with `different=true` if it really is something else. The user still decides; consent rules hold.
+  - Models with no measured threshold skip the check.
+  - `person()` moves a relation written into the name ("Ramesh (college friend)") into the relation.
+- **Checked on real Pinecone vectors:** a repeat (0.98) and an update (0.93) were caught; a related new fact was saved.
+
+### D20. Trivial calls get no summary, and the next call looks one call further back
+- **Problem:** a call where Ram said only "बढ़िया" and "ठीक" got "A brief, light check-in call…", which then opened the next call in place of a real summary (3 of 25 calls were like this).
+- **Chosen:**
+  - A call where the user said at most 3 search words (fillers don't count) and saved nothing gets no summary and no LLM call (`finalizer.py:TRIVIAL_WORDS`).
+  - When the last call has no summary, the call-start context adds the most recent earlier call that has one ("It was very brief. The call before it…"). Reminder timing still counts from the real last call.
+
+### Later
+- **Wait for the search when a saved person or relation is named** ("मेरे पिताजी…"), with "Hmm…": about +450 ms on roughly 15% of turns. Try it in live calls before deciding.
+- **A clear "yes" check before confirming forget or cancel,** because garbled speech recognition does happen ("साहिब क्यों?" for "save").
+- **Not worth it now:** reranking `recall` results (+500 ms), rewriting queries with an LLM (at most one more hit), choosing the cut-off from the turn's script.

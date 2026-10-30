@@ -180,6 +180,31 @@ async def test_a_call_where_the_user_never_spoke_gets_no_summary() -> None:
     assert (finished.finalize_status, finished.summary) == (FinalizeStatus.DONE, None)
 
 
+async def test_a_call_with_only_fillers_gets_no_summary() -> None:
+    # "बढ़िया" and "ठीक" got a summary that then opened the next call instead of a real one.
+    world = build_world()
+    call = await ended_call(
+        world, (Role.USER, "बढ़िया।"), (Role.ASSISTANT, "Aaj kya kiya?"), (Role.USER, "ठीक।")
+    )
+    analyzer = FakeAnalyzer()
+
+    await Finalizer(world.deps, analyzer, SETTINGS).run_due()
+
+    assert analyzer.calls == []
+    assert (await stored(world, call.id)).summary is None
+
+
+async def test_a_short_call_that_saved_something_is_summarised() -> None:
+    world = build_world()
+    call = await ended_call(world, (Role.USER, "Haan, yaad rakhna"))
+    await world.store.add(make_fact(world.user.id, "Loves masala chai", source_session_id=call.id))
+    analyzer = FakeAnalyzer()
+
+    await Finalizer(world.deps, analyzer, SETTINGS).run_due()
+
+    assert len(analyzer.calls) == 1
+
+
 async def test_the_summary_replaces_the_guess_made_when_the_call_ended() -> None:
     world = build_world()
     session = make_session(world.user.id)

@@ -220,9 +220,23 @@ async def test_context_loads_last_call_memories_boundaries_and_declined(world: W
     context = await memory.context()
 
     assert context.last_call == last
+    assert context.earlier_call == older  # the last call has no summary
     assert [f.text for f in context.facts] == ["Works at Infosys"]
     assert context.boundaries == [boundary]
     assert [d.text for d in context.declined] == ["go for a walk"]
+
+
+async def test_context_needs_no_earlier_call_when_the_last_has_a_summary(world: World) -> None:
+    for minutes, summary in ((-3000, "Talked about exams."), (-2000, "Talked about chai.")):
+        session = make_session(world.user.id, started_at=at(minutes), summary=summary)
+        world.state.sessions[session.id] = session
+    memory = await world.service.open_call(world.user)
+
+    context = await memory.context()
+
+    assert context.last_call is not None
+    assert context.last_call.summary == "Talked about chai."
+    assert context.earlier_call is None
 
 
 async def test_context_picks_one_check_in_and_marks_it_offered(world: World) -> None:

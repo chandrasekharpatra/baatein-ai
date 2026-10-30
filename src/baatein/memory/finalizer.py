@@ -15,6 +15,7 @@ from baatein.domain.models import CallSummary, Role, Sensitivity, Session
 from baatein.memory.redact import redact
 from baatein.memory.service import MemoryDeps
 from baatein.ports.analyzer import CallAnalyzer, CallRecord
+from baatein.text import search_terms
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,11 @@ MAX_SUMMARY_CHARS = 300
 MAX_TOPIC_CHARS = 200
 MAX_NOTES = 2
 MAX_NOTE_CHARS = 200
+TRIVIAL_WORDS = 3
+"""A call where the user said at most this many words worth searching (fillers like "ठीक" and
+"haan" don't count) and kept nothing gets no summary and no LLM call. One where Ram said only
+"बढ़िया" and "ठीक" got "A brief, light check-in call…", which then opened the next call in
+place of a real summary."""
 
 
 def clean(result: CallSummary, user_spoke_last: bool = True) -> CallSummary:
@@ -101,6 +107,10 @@ class Finalizer:
         turns = await self._deps.turns.list_for_session(session.id)
         if not any(turn.role is Role.USER for turn in turns):
             return CallSummary(None)
+        saved = await self._saved(session)
+        said = sum(len(search_terms(turn.text)) for turn in turns if turn.role is Role.USER)
+        if said <= TRIVIAL_WORDS and not saved:
+            return CallSummary(None)
         user = await self._deps.users.get(session.user_id)
         if user is None:
             raise NotFoundError("user", session.user_id)
@@ -110,7 +120,7 @@ class Finalizer:
         call = CallRecord(
             user_name=user.preferences.address_as or user.display_name or "the user",
             turns=turns,
-            saved=await self._saved(session),
+            saved=saved,
             avoid=[boundary.topic for boundary in boundaries],
         )
         result = await asyncio.wait_for(

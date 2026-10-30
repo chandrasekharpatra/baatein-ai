@@ -147,7 +147,9 @@ def ended_call_in(settings: Settings) -> str:
             await injector.get(UserRepo).add(user)  # type: ignore[type-abstract]
             sessions: SessionRepo = injector.get(SessionRepo)  # type: ignore[type-abstract]
             await sessions.add(session)
-            await injector.get(TurnRepo).append(make_turn(session.id, 1, "Bas theek"))  # type: ignore[type-abstract]
+            await injector.get(TurnRepo).append(
+                make_turn(session.id, 1, "Aaj Bapa ki bahut yaad aayi")
+            )  # type: ignore[type-abstract]
             await sessions.end(session.id, at(5), None)
         finally:
             await injector.get(Database).close()

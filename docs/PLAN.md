@@ -158,25 +158,27 @@ class Embedder(Protocol):
 ### Conversation lifecycle
 
 ```
-CALL START  identity → user_id → child injector (CurrentUser, SessionId)
-            load in parallel: profile, last N summaries, open follow-ups,
-                              MemoryStore.active(top importance)
-            context_builder → instructions + initial ChatContext (token budget)
-            generate_reply("greet by name; pick the most relevant follow-up")
+CALL START  identity → user_id → CallMemory (MemoryService.open_call)
+            load in parallel: profile, last call's summary (or the one before it if the
+                              last was trivial), people, storylines + one check-in,
+                              reminders, boundaries, MemoryStore.active(top importance)
+            context_builder → instructions (docs/DECISIONS.md D1–D20)
+            generate_reply(persona greeting)
 
 EACH TURN   on_user_turn_completed:
               search the turn's words, unless they're only fillers (ठीक है, haan…);
               used if already done
               → inject as hidden context; a slower search joins the next turn
             conversation_item_added → append turn to SQLite
-            tools: recall(query) ("Hmm…" if slow), remember, threads, reminders, … (agent/tools.py)
+            tools: recall(query) ("Hmm…" if slow), remember (won't save a near copy),
+                   threads, reminders, … (agent/tools.py)
 
 CALL END    session closes (hang-up) → job shuts down at once
             shutdown callback → flush turns, close session, status=pending
             Finalizer (baatein serve, every 10 s; one Claude call, structured output):
               input: transcript, items saved in this call, active boundaries
               output: summary (saved items only), ended_abruptly + topic, ≤2 notes
-              never creates memories (decision 1)
+              never creates memories (decision 1); trivial calls get no summary, no LLM
             status=done | failed (retried with backoff from the stored transcript)
 ```
 

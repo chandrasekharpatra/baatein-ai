@@ -183,6 +183,11 @@ def render_context(context: MemoryContext) -> str:
         if last.summary:
             line += f" Summary: {last.summary[:MAX_SUMMARY_CHARS]}"
         lines.append(line)
+        if (earlier := context.earlier_call) is not None and earlier.summary:
+            lines.append(
+                f"It was very brief. The call before it, {_local_day(earlier.started_at, tz)}: "
+                f"{earlier.summary[:MAX_SUMMARY_CHARS]}"
+            )
         if last.ended_abruptly and last.unfinished_topic:
             lines.append(
                 f'It cut off in the middle of: "{last.unfinished_topic}". Offer once to '
