@@ -65,11 +65,11 @@ def test_speaks_through_sarvam_bulbul_v4_flash_with_pace_control() -> None:
     }
 
     assert voices == {
-        "hinglish": ("sarvam", "bulbul:v4-flash", "hi-IN", "pace"),
+        "hinglish": ("sarvam", "bulbul:v3", "hi-IN", "pace"),
         "english": ("sarvam", "bulbul:v4-flash", "en-IN", "pace"),
         "kannada": ("sarvam", "bulbul:v4-flash", "kn-IN", "pace"),
     }
-    assert registry.get("hinglish").tts.options["speaker"] == "ishita_enhi_companion"
+    assert registry.get("hinglish").tts.options["speaker"] == "ritu"
     assert registry.get("hinglish").cannot_hear.startswith("Maaf kijiye")
 
 

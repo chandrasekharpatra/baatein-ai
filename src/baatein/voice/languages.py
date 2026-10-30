@@ -52,14 +52,10 @@ class LanguageRegistry:
 HINGLISH = LanguageProfile(
     code="hinglish",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "hi-IN"}),
-    # Sarvam's code-mixed companion voice Ishita, made for Roman-script Hinglish (D32).
+    # Sarvam bulbul:v3, voice Ritu: the steadiest v3 voice across a streamed reply (D33).
     tts=ProviderSpec(
         "sarvam",
-        {
-            "model": "bulbul:v4-flash",
-            "target_language_code": "hi-IN",
-            "speaker": "ishita_enhi_companion",
-        },
+        {"model": "bulbul:v3", "target_language_code": "hi-IN", "speaker": "ritu"},
     ),
     reply_style=(
         "Speak in natural, casual Hinglish the way urban Indians talk: mix Hindi and English "

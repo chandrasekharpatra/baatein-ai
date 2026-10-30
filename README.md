@@ -35,7 +35,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 | Realtime voice | LiveKit Agents 1.8, self-hosted `livekit-server` |
 | Speech-to-text | Sarvam `saaras:v4` in `codemix` mode (Hindi, Odia, Kannada mixed with English) |
 | LLM | Claude Haiku 5.5 (configurable) |
-| Text-to-speech | Sarvam `bulbul:v4-flash` for Hinglish (voice `ishita_enhi_companion`; D32), English and Kannada; `bulbul:v3` for Odia (v4-flash has no Odia voice yet). Any language's voice can be swapped with `BAATEIN_VOICE__TTS`, e.g. to Cartesia `sonic-3.6` |
+| Text-to-speech | Sarvam `bulbul:v3` for Hinglish (voice `ritu`; D33) and Odia (`kavya`; v4-flash has no Odia voice yet); `bulbul:v4-flash` for English and Kannada. Any language's voice can be swapped with `BAATEIN_VOICE__TTS`, e.g. to Cartesia `sonic-3.6` |
 | Storage | SQLite (WAL) via `aiosqlite`, numbered SQL migrations |
 | Memory search | `sqlite-vec` vectors + FTS5 keyword search, fused with reciprocal rank fusion |
 | Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d); FastEmbed local models also work (see [docs/RETRIEVAL_BENCHMARK.md](docs/RETRIEVAL_BENCHMARK.md)) |

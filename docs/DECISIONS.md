@@ -297,3 +297,13 @@ Sarvam's stream still synthesises each piece of a reply separately, so the tone 
 - **A Cartesia voice:** sonic-3.6, which keeps one stream per reply.
 
 Don't lower the temperature: 0.3 caused a long silence (D31).
+
+### D33. Hinglish on Sarvam bulbul:v3 with Ritu (2026-10-30)
+The user chose Sarvam `bulbul:v3`, voice **ritu**, for Hinglish, replacing Ishita on v4-flash (D32).
+
+**From D31's tests:** the same reply was streamed as in a call, two takes per voice.
+- **Steadiest:** Ritu was the steadiest of 8 v3 voices. It came out in 2–3 pieces with pitch within about 17 Hz, every word right, and no pauses mid-sentence; the shortest at 16.3 s; first audio 472–742 ms.
+- **Quieter:** v3 voices play about 4–6 dB quieter than v4-flash. The plugin sends `loudness` only for v2 and v4-flash, so v3 can't be turned up from Baatein.
+- **Same settings:** the elder persona's pace (0.85) is within v3's 0.3–3.0. Temperature stays at Sarvam's default 0.6; don't lower it (D31).
+
+English and Kannada stay on `bulbul:v4-flash`, Odia on `bulbul:v3` (kavya).
