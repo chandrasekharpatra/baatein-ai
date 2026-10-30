@@ -144,3 +144,24 @@ async def test_delete_removes_events_and_boundaries_and_returns_its_calls(repos:
     assert await repos.boundaries.get(fenced.id) is None
     assert await repos.boundaries.get(topic.id) == topic
     assert await repos.threads.delete("missing") == []
+
+
+async def test_touched_in_lists_threads_started_or_updated_in_a_call(repos: Repos) -> None:
+    user_id = await add_user(repos)
+    call, other_call = make_session(user_id), make_session(user_id)
+    for session in (call, other_call):
+        await repos.sessions.add(session)
+    started = make_thread(user_id, source_session_id=call.id, created_at=at(2))
+    updated = make_thread(user_id, source_session_id=other_call.id, created_at=at(1))
+    untouched = make_thread(user_id, source_session_id=other_call.id)
+    for thread in (started, updated, untouched):
+        await repos.threads.add(thread)
+    for n in range(2):
+        await repos.threads.add_event(
+            ThreadEvent(f"e{n}", updated.id, "Called him", at(5), ThreadStatus.DONE, call.id)
+        )
+
+    touched = await repos.threads.touched_in(call.id)
+
+    assert [t.id for t in touched] == [updated.id, started.id]
+    assert await repos.threads.touched_in("no-call") == []

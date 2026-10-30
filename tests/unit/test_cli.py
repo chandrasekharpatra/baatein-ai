@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -9,8 +10,13 @@ from baatein import cli
 from baatein.cli import main
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.embedder import Embedder
+from baatein.ports.repos import SessionRepo, TurnRepo, UserRepo
+from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.migrate import bundled_migrations
+from tests.factories import at, make_session, make_turn, make_user
+from tests.fakes.analyzer import FakeAnalyzer
 from tests.fakes.embedder import FakeEmbedder
 
 
@@ -108,3 +114,65 @@ def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="needs a 'user' section"):
         main(["seed", str(seed)])
+
+
+def ended_call_in(settings: Settings) -> str:
+    """Add a user and a finished call to the database; returns the call's id."""
+
+    async def add() -> str:
+        injector = build_root(settings=settings)
+        user = make_user()
+        session = make_session(user.id)
+        try:
+            await injector.get(UserRepo).add(user)  # type: ignore[type-abstract]
+            sessions: SessionRepo = injector.get(SessionRepo)  # type: ignore[type-abstract]
+            await sessions.add(session)
+            await injector.get(TurnRepo).append(make_turn(session.id, 1, "Bas theek"))  # type: ignore[type-abstract]
+            await sessions.end(session.id, at(5), None)
+        finally:
+            await injector.get(Database).close()
+        return session.id
+
+    return asyncio.run(add())
+
+
+def fake_analyzer(monkeypatch: pytest.MonkeyPatch, analyzer: FakeAnalyzer) -> None:
+    class FakeAnalysis(Module):
+        @singleton
+        @provider
+        def analyzer(self) -> CallAnalyzer:
+            return analyzer
+
+    def build_with_fake(*overrides: Module, settings: Settings | None = None) -> Injector:
+        return build_root(*overrides, FakeAnalysis(), settings=settings)
+
+    monkeypatch.setattr(cli, "build_root", build_with_fake)
+
+
+def test_finalize_summarises_due_calls_or_one_by_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    main(["migrate"])
+    call_id = ended_call_in(Settings())
+    fake_analyzer(monkeypatch, FakeAnalyzer())
+
+    assert main(["finalize"]) == 0
+    assert "summarised 1 call(s)" in capsys.readouterr().out
+    assert main(["finalize", "--session", call_id]) == 0
+    assert f"summarised {call_id}" in capsys.readouterr().out
+    with sqlite3.connect(tmp_path / "app.db") as conn:
+        row = conn.execute("SELECT summary, finalize_status FROM sessions").fetchone()
+    assert row == ("A short, light chat about his day.", "done")
+
+
+def test_finalize_reports_a_failed_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    main(["migrate"])
+    call_id = ended_call_in(Settings())
+    fake_analyzer(monkeypatch, FakeAnalyzer(error=RuntimeError("Claude is down")))
+
+    assert main(["finalize", "--session", call_id]) == 0
+    assert f"summarising {call_id} failed" in capsys.readouterr().out

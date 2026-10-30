@@ -28,6 +28,7 @@ class World:
     embedder: FakeEmbedder
     service: MemoryService
     user: User
+    deps: MemoryDeps
 
 
 def build_world(settings: MemorySettings | None = None) -> World:
@@ -50,4 +51,4 @@ def build_world(settings: MemorySettings | None = None) -> World:
     )
     user = make_user()
     state.users[user.id] = user
-    return World(state, store, clock, embedder, MemoryService(deps, embedder), user)
+    return World(state, store, clock, embedder, MemoryService(deps, embedder), user, deps)

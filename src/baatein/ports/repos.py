@@ -3,6 +3,7 @@ from typing import Protocol
 
 from baatein.domain.models import (
     Boundary,
+    CallSummary,
     DeclinedSuggestion,
     OccurrenceStatus,
     Person,
@@ -35,13 +36,26 @@ class SessionRepo(Protocol):
         reason: str | None,
         ended_abruptly: bool = False,
         unfinished_topic: str | None = None,
+        saving_paused: bool = False,
     ) -> None: ...
     async def set_memory_synced_seq(self, session_id: str, seq: int) -> None: ...
-    async def mark_finalized(self, session_id: str, summary: str | None) -> None: ...
-    async def mark_finalize_failed(self, session_id: str) -> None: ...
-    async def pending_finalization(self, max_attempts: int, limit: int) -> list[Session]: ...
+    async def mark_finalized(self, session_id: str, result: CallSummary) -> None:
+        """Store the end-of-call summary; its abrupt-end verdict replaces the one from `end`."""
+        ...
+
+    async def mark_finalize_failed(self, session_id: str, retry_at: datetime) -> None:
+        """Count a failed attempt; the session is due again at `retry_at`."""
+        ...
+
+    async def pending_finalization(
+        self, max_attempts: int, limit: int, now: datetime
+    ) -> list[Session]:
+        """Ended sessions not yet summarised, with attempts left and due by `now`, oldest
+        first."""
+        ...
+
     async def clear_summary(self, session_id: str) -> None:
-        """Remove what the call left behind for later calls: its summary and unfinished topic."""
+        """Remove what the call left behind for later calls: summary, unfinished topic, notes."""
         ...
 
 
@@ -76,6 +90,10 @@ class ThreadRepo(Protocol):
         """The thread's latest events, oldest first."""
         ...
 
+    async def touched_in(self, session_id: str) -> list[Thread]:
+        """Threads started or updated in this call, oldest first."""
+        ...
+
     async def count_about(self, person_id: str) -> int: ...
     async def delete(self, thread_id: str) -> list[str]:
         """Delete the thread with its events and boundaries. Returns the ids of the calls it
@@ -106,6 +124,10 @@ class ReminderRepo(Protocol):
     async def update(self, reminder: Reminder) -> None: ...
     async def list_open(self, user_id: str, limit: int) -> list[Reminder]:
         """Active and needs-info reminders, oldest first."""
+        ...
+
+    async def created_in(self, session_id: str) -> list[Reminder]:
+        """Open reminders the user asked for in this call, oldest first."""
         ...
 
     async def count_about(self, person_id: str) -> int: ...

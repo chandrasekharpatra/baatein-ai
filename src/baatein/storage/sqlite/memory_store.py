@@ -102,6 +102,18 @@ class SqliteMemoryStore:
             rows = await cursor.fetchall()
         return [_fact(row) for row in rows]
 
+    async def saved_in(self, session_id: str) -> list[Fact]:
+        async with (
+            self._db.read() as conn,
+            conn.execute(
+                "SELECT * FROM facts WHERE source_session_id = ? AND retired_at IS NULL"
+                " ORDER BY created_at, pk",
+                (session_id,),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        return [_fact(row) for row in rows]
+
     async def search(self, user_id: str, query: str, limit: int) -> list[ScoredFact]:
         match = fts_query(query)
         if match is None:

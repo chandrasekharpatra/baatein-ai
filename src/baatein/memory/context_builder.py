@@ -180,10 +180,16 @@ def render_context(context: MemoryContext) -> str:
         lines.append(line)
         if last.ended_abruptly and last.unfinished_topic:
             lines.append(
-                f'It cut off while they were saying: "{last.unfinished_topic}". Offer once to '
+                f'It cut off in the middle of: "{last.unfinished_topic}". Offer once to '
                 'continue from there ("Baat yahin ruk gayi thi..."); if they don\'t want to, '
                 "let it go."
             )
+        if last.notes:
+            lines.append(
+                "They also mentioned these without asking you to keep them. If one comes up "
+                "naturally, you may ask once whether to remember it; if they say no, drop it:"
+            )
+            lines += [f"- {note}" for note in last.notes]
 
     if context.boundaries:
         lines += [

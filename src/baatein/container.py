@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from anthropic import AsyncAnthropic
 from injector import Binder, Injector, Module, provider, singleton
 
 from baatein.auth.livekit import LiveKitCallTokens
@@ -8,9 +9,12 @@ from baatein.auth.service import AuthService
 from baatein.auth.tokens import JwtAccessTokens
 from baatein.config import Settings
 from baatein.domain.errors import ConfigurationError
+from baatein.memory.analyzer import ClaudeAnalyzer
 from baatein.memory.embeddings.registry import EmbedderRegistry, default_embedder_registry
+from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder
 from baatein.memory.service import MemoryDeps, MemoryService
+from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
@@ -168,6 +172,16 @@ class MemoryModule(Module):
     @provider
     def seeder(self, deps: MemoryDeps, personas: PersonaRegistry) -> Seeder:
         return Seeder(deps, personas)
+
+    @singleton
+    @provider
+    def call_analyzer(self, settings: Settings) -> CallAnalyzer:
+        return ClaudeAnalyzer(AsyncAnthropic(), settings.finalize.model, settings.finalize.effort)
+
+    @singleton
+    @provider
+    def finalizer(self, deps: MemoryDeps, analyzer: CallAnalyzer, settings: Settings) -> Finalizer:
+        return Finalizer(deps, analyzer, settings.finalize)
 
 
 class AuthModule(Module):

@@ -98,6 +98,9 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_MEMORY__CONTEXT_SUMMARIES` / `__CONTEXT_FOLLOWUPS` / `__CONTEXT_FACTS` | `3` / `5` / `10` | How much memory goes into the agent's instructions at call start |
 | `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall_memory` tool |
 | `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0.3` | Per-turn recall is skipped if it takes longer |
+| `BAATEIN_FINALIZE__MODEL` / `__EFFORT` | `claude-haiku-5-5` / `low` | The model that writes each call's summary |
+| `BAATEIN_FINALIZE__INTERVAL_SECONDS` | `10` | How often `baatein serve` summarises finished calls; `0` turns it off |
+| `BAATEIN_FINALIZE__MAX_ATTEMPTS` / `__RETRY_BASE_SECONDS` | `5` / `60` | Failed summaries are retried, waiting 1, 2, 4… minutes (up to an hour) |
 
 ## Commands
 
@@ -106,6 +109,8 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `uv run baatein serve [--host] [--port]` | Run the API and web client (migrates first) |
 | `uv run baatein migrate` | Create or upgrade the database schema |
 | `uv run baatein reembed` | Rebuild the fact vector index for the current embedding model |
+| `uv run --env-file .env baatein finalize [--session ID]` | Summarise finished calls now (`serve` also does this every 10 s); `--session` re-runs one call |
+| `uv run baatein seed FILE [--replace]` | Create a test account with artificial memories (see `docs/SEED_DATA.md`) |
 | `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload |
 | `uv run baatein-agent start` | Run the agent worker in production mode |
 | `uv run baatein-agent console` | Talk to the agent in the terminal with local audio |
@@ -195,7 +200,7 @@ Pass `--email someone@example.com` to call as the same user every time (signed u
 | 2 | Fact memory: embeddings, sqlite-vec + FTS5 hybrid search | ✅ |
 | 3 | Email/password auth, LiveKit tokens, web client | ✅ |
 | 4 | Call lifecycle: save transcripts, load context at call start, per-turn memory retrieval, memory tools | ✅ |
-| 5 | End-of-call analyzer: summary, follow-ups, fact updates; proactive opener | Next |
+| 5 | Consent-based memory layer: consent, storylines, persona, reminders, end-of-call summary, scenario evals | In progress (slices 1–5 built) |
 | 6 | "Forget me", observability, evals, demo polish | |
 
 Design decisions, including why the project uses its own memory store instead of Mem0, are in [docs/PLAN.md](docs/PLAN.md).

@@ -65,6 +65,25 @@ class Session:
     memory_synced_seq: int = 0
     ended_abruptly: bool = False
     unfinished_topic: str | None = None
+    notes: tuple[str, ...] = ()
+    """"Maybe ask next time" hints from the end-of-call summary; never memories."""
+    saving_paused: bool = False
+    """The user asked not to save anything ("save mat karna") or switched on privacy mode."""
+    finalize_retry_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class CallSummary:
+    """What the end-of-call analyzer writes for the next call (slice 5).
+
+    The summary names only what the user agreed to keep; anything else worth keeping is a
+    note, offered as a question next time, never saved as a memory.
+    """
+
+    summary: str | None
+    ended_abruptly: bool = False
+    unfinished_topic: str | None = None
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -274,3 +274,21 @@ async def test_count_about_counts_current_facts_only(memory: Memory) -> None:
     assert await memory.store.count_about("p1") == 1
     await memory.store.forget(current.id, at(2))
     assert await memory.store.count_about("p1") == 0
+
+
+async def test_saved_in_lists_current_facts_from_a_call(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    call, other_call = make_session(user_id), make_session(user_id)
+    for session in (call, other_call):
+        await memory.sessions.add(session)
+    second = make_fact(user_id, "Likes chai", source_session_id=call.id, created_at=at(2))
+    first = make_fact(user_id, "Ravi plays cricket", source_session_id=call.id, created_at=at(1))
+    forgotten = make_fact(user_id, "Ravi lives in Pune", source_session_id=call.id)
+    elsewhere = make_fact(user_id, "Has a dog", source_session_id=other_call.id)
+    for fact in (second, first, forgotten, elsewhere):
+        await memory.store.add(fact)
+    await memory.store.forget(forgotten.id, at(3))
+
+    saved = await memory.store.saved_in(call.id)
+
+    assert [f.id for f in saved] == [first.id, second.id]

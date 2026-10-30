@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 
 [[package]]
@@ -238,6 +238,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
+    { name = "anthropic" },
     { name = "argon2-cffi" },
     { name = "email-validator" },
     { name = "fastapi" },
@@ -266,6 +267,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
+    { name = "anthropic", specifier = ">=1.17.0" },
     { name = "argon2-cffi", specifier = ">=25.1.0" },
     { name = "email-validator", specifier = ">=2.3.0" },
     { name = "fastapi", specifier = ">=0.162.0" },

@@ -14,14 +14,16 @@ Slice 3 is built (2026-10-30): a per-user persona (casual or elder, chosen at si
 
 Slice 4 is built (2026-10-30): reminders with repeat rules and "remind me N days before", brought up in the next conversation only, never promised as notifications.
 
-**Not yet:** nothing turns a finished call into a summary (so the last call's summary is empty), and scenario evals (slices 5–6).
+Slice 5 is built (2026-10-30): `baatein serve` summarises each finished call in the background (one Claude request; only what the user agreed to keep is named), records whether it was cut off mid-story, keeps up to two "maybe ask next time" notes, and retries failures with backoff. `baatein finalize` runs it by hand.
+
+**Not yet:** scenario evals (slice 6).
 
 **Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
 1. Memory structure, consent-only saving, correct and forget ✅
 2. Threads, boundaries and the call-start context ✅
 3. Persona and preferences ✅
 4. Reminders (delivered in conversation only) ✅
-5. End-of-call summary and retry
+5. End-of-call summary and retry ✅
 6. Scenario evals
 
 **Phase 4 notes**
@@ -132,7 +134,7 @@ class Embedder(Protocol):
                                                     │   ├─ MemoryStore (facts, hybrid search)
                                                     │   └─ repos (sessions, turns, follow-ups)
                                                     ▼
-                                             Finalizer (Claude: summary, follow-ups, fact ops)
+                     Finalizer, in the API process (Claude: summary, cut-off, notes)
 ```
 
 ### Data ownership (all SQLite)
@@ -160,11 +162,12 @@ EACH TURN   on_user_turn_completed:
             conversation_item_added → append turn to SQLite
             tools: recall_memory(query), add_followup(text, due), resolve_followup(id)
 
-CALL END    shutdown callback → close session, status=pending
-            Finalizer (one Claude call, structured output):
-              input: transcript, open follow-ups, similar existing facts
-              output: summary, follow-ups (new/resolved), fact ops (add/supersede/retire)
-            status=done | failed (retry worker re-runs from stored transcript)
+CALL END    shutdown callback → flush turns, close session, status=pending
+            Finalizer (baatein serve, every 10 s; one Claude call, structured output):
+              input: transcript, items saved in this call, active boundaries
+              output: summary (saved items only), ended_abruptly + topic, ≤2 notes
+              never creates memories (decision 1)
+            status=done | failed (retried with backoff from the stored transcript)
 ```
 
 ## 5. Dependency injection (`injector`)
@@ -374,7 +377,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 **Tests**: recurrence and next-occurrence calculation (first Sunday, yearly birthday, leap years); update never duplicates; complete or skip one occurrence keeps the series. Real-Claude: reads back date, time and repeat before creating; for #36 asks for the date instead of guessing.
 
-### Slice 5: end-of-call summary and retry
+### Slice 5: end-of-call summary and retry ✅ (built; notes in `docs/PHASE5_SLICES.md`)
 
 **Why, in the scenarios**
 - #10: *"Bas theek. Subah chai peeke balcony mein baitha tha."* Most calls produce a short summary and nothing else.

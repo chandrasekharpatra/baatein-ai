@@ -89,9 +89,21 @@ def test_call_cut_off_mid_story_is_offered_once() -> None:
 
     text = render_context(context(last_call=session))
 
-    assert 'It cut off while they were saying: "Gaon ka mela". Offer once' in text
+    assert 'It cut off in the middle of: "Gaon ka mela". Offer once' in text
     abrupt_without_topic = make_session("u", started_at=NOW, ended_abruptly=True)
     assert "cut off" not in render_context(context(last_call=abrupt_without_topic))
+
+
+def test_notes_from_the_last_call_are_offered_only_if_they_come_up() -> None:
+    session = make_session("u", started_at=NOW, notes=("Mentioned a trip to Puri; ask about it",))
+
+    text = render_context(context(last_call=session))
+
+    assert "If one comes up naturally, you may ask once whether to remember it" in text
+    assert "- Mentioned a trip to Puri; ask about it" in text
+    assert "without asking you to keep" not in render_context(
+        context(last_call=make_session("u", started_at=NOW))
+    )
 
 
 def test_boundaries_and_declined_suggestions_are_always_listed() -> None:

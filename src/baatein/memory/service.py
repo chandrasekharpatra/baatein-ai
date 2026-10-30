@@ -698,4 +698,5 @@ class CallMemory:
             reason,
             ended_abruptly=abrupt,
             unfinished_topic=last.text[:MAX_TOPIC_CHARS] if abrupt and last else None,
+            saving_paused=self.saving_paused or self.private,
         )

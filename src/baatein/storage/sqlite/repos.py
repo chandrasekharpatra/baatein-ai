@@ -13,6 +13,7 @@ from baatein.domain.errors import (
 from baatein.domain.models import (
     Boundary,
     BoundaryScope,
+    CallSummary,
     DeclinedSuggestion,
     FinalizeStatus,
     OccurrenceStatus,
@@ -136,8 +137,8 @@ class SqliteSessionRepo:
                 await conn.execute(
                     "INSERT INTO sessions (id, user_id, room_name, started_at, ended_at,"
                     " end_reason, summary, finalize_status, finalize_attempts, memory_synced_seq,"
-                    " ended_abruptly, unfinished_topic)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " ended_abruptly, unfinished_topic, notes, saving_paused, finalize_retry_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session.id,
                         session.user_id,
@@ -151,6 +152,9 @@ class SqliteSessionRepo:
                         session.memory_synced_seq,
                         int(session.ended_abruptly),
                         session.unfinished_topic,
+                        json.dumps(list(session.notes), ensure_ascii=False),
+                        int(session.saving_paused),
+                        to_db(session.finalize_retry_at),
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -175,12 +179,20 @@ class SqliteSessionRepo:
         reason: str | None,
         ended_abruptly: bool = False,
         unfinished_topic: str | None = None,
+        saving_paused: bool = False,
     ) -> None:
         await self._update(
             session_id,
             "UPDATE sessions SET ended_at = ?, end_reason = ?, finalize_status = 'pending',"
-            " ended_abruptly = ?, unfinished_topic = ? WHERE id = ?",
-            (to_db(ended_at), reason, int(ended_abruptly), unfinished_topic, session_id),
+            " ended_abruptly = ?, unfinished_topic = ?, saving_paused = ? WHERE id = ?",
+            (
+                to_db(ended_at),
+                reason,
+                int(ended_abruptly),
+                unfinished_topic,
+                int(saving_paused),
+                session_id,
+            ),
         )
 
     async def set_memory_synced_seq(self, session_id: str, seq: int) -> None:
@@ -190,32 +202,44 @@ class SqliteSessionRepo:
             (seq, session_id),
         )
 
-    async def mark_finalized(self, session_id: str, summary: str | None) -> None:
+    async def mark_finalized(self, session_id: str, result: CallSummary) -> None:
         await self._update(
             session_id,
-            "UPDATE sessions SET finalize_status = 'done', summary = ? WHERE id = ?",
-            (summary, session_id),
+            "UPDATE sessions SET finalize_status = 'done', summary = ?, ended_abruptly = ?,"
+            " unfinished_topic = ?, notes = ?, finalize_retry_at = NULL WHERE id = ?",
+            (
+                result.summary,
+                int(result.ended_abruptly),
+                result.unfinished_topic,
+                json.dumps(list(result.notes), ensure_ascii=False),
+                session_id,
+            ),
         )
 
-    async def mark_finalize_failed(self, session_id: str) -> None:
+    async def mark_finalize_failed(self, session_id: str, retry_at: datetime) -> None:
         await self._update(
             session_id,
             "UPDATE sessions SET finalize_status = 'failed',"
-            " finalize_attempts = finalize_attempts + 1 WHERE id = ?",
-            (session_id,),
+            " finalize_attempts = finalize_attempts + 1, finalize_retry_at = ? WHERE id = ?",
+            (to_db(retry_at), session_id),
         )
 
-    async def pending_finalization(self, max_attempts: int, limit: int) -> list[Session]:
+    async def pending_finalization(
+        self, max_attempts: int, limit: int, now: datetime
+    ) -> list[Session]:
         return await self._many(
             "SELECT * FROM sessions WHERE finalize_status IN ('pending', 'failed')"
-            " AND finalize_attempts < ? ORDER BY ended_at, id LIMIT ?",
-            (max_attempts, limit),
+            " AND finalize_attempts < ?"
+            " AND (finalize_retry_at IS NULL OR finalize_retry_at <= ?)"
+            " ORDER BY ended_at, id LIMIT ?",
+            (max_attempts, to_db(now), limit),
         )
 
     async def clear_summary(self, session_id: str) -> None:
         await self._update(
             session_id,
-            "UPDATE sessions SET summary = NULL, unfinished_topic = NULL WHERE id = ?",
+            "UPDATE sessions SET summary = NULL, unfinished_topic = NULL, notes = '[]'"
+            " WHERE id = ?",
             (session_id,),
         )
 
@@ -463,6 +487,14 @@ class SqliteThreadRepo:
             rows = await cursor.fetchall()
         return [_thread_event(row) for row in rows]
 
+    async def touched_in(self, session_id: str) -> list[Thread]:
+        return await self._many(
+            "SELECT * FROM threads WHERE source_session_id = ? OR id IN"
+            " (SELECT thread_id FROM thread_events WHERE session_id = ?)"
+            " ORDER BY created_at, id",
+            (session_id, session_id),
+        )
+
     async def count_about(self, person_id: str) -> int:
         async with (
             self._db.read() as conn,
@@ -623,6 +655,13 @@ class SqliteReminderRepo:
             "SELECT * FROM reminders WHERE user_id = ? AND status IN ('needs_info', 'active')"
             " ORDER BY created_at, id LIMIT ?",
             (user_id, limit),
+        )
+
+    async def created_in(self, session_id: str) -> list[Reminder]:
+        return await self._many(
+            "SELECT * FROM reminders WHERE source_session_id = ?"
+            " AND status IN ('needs_info', 'active') ORDER BY created_at, id",
+            (session_id,),
         )
 
     async def count_about(self, person_id: str) -> int:
@@ -810,6 +849,9 @@ def _session(row: aiosqlite.Row) -> Session:
         memory_synced_seq=row["memory_synced_seq"],
         ended_abruptly=bool(row["ended_abruptly"]),
         unfinished_topic=row["unfinished_topic"],
+        notes=tuple(json.loads(row["notes"])),
+        saving_paused=bool(row["saving_paused"]),
+        finalize_retry_at=from_db(row["finalize_retry_at"]),
     )
 
 

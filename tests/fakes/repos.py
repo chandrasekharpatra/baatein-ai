@@ -9,6 +9,7 @@ from baatein.domain.errors import (
 )
 from baatein.domain.models import (
     Boundary,
+    CallSummary,
     DeclinedSuggestion,
     FinalizeStatus,
     OccurrenceStatus,
@@ -89,6 +90,7 @@ class InMemorySessionRepo:
         reason: str | None,
         ended_abruptly: bool = False,
         unfinished_topic: str | None = None,
+        saving_paused: bool = False,
     ) -> None:
         self._update(
             session_id,
@@ -97,33 +99,46 @@ class InMemorySessionRepo:
             finalize_status=FinalizeStatus.PENDING,
             ended_abruptly=ended_abruptly,
             unfinished_topic=unfinished_topic,
+            saving_paused=saving_paused,
         )
 
     async def set_memory_synced_seq(self, session_id: str, seq: int) -> None:
         self._update(session_id, memory_synced_seq=seq)
 
-    async def mark_finalized(self, session_id: str, summary: str | None) -> None:
-        self._update(session_id, finalize_status=FinalizeStatus.DONE, summary=summary)
+    async def mark_finalized(self, session_id: str, result: CallSummary) -> None:
+        self._update(
+            session_id,
+            finalize_status=FinalizeStatus.DONE,
+            summary=result.summary,
+            ended_abruptly=result.ended_abruptly,
+            unfinished_topic=result.unfinished_topic,
+            notes=result.notes,
+            finalize_retry_at=None,
+        )
 
-    async def mark_finalize_failed(self, session_id: str) -> None:
+    async def mark_finalize_failed(self, session_id: str, retry_at: datetime) -> None:
         session = self._get(session_id)
         self._update(
             session_id,
             finalize_status=FinalizeStatus.FAILED,
             finalize_attempts=session.finalize_attempts + 1,
+            finalize_retry_at=retry_at,
         )
 
-    async def pending_finalization(self, max_attempts: int, limit: int) -> list[Session]:
+    async def pending_finalization(
+        self, max_attempts: int, limit: int, now: datetime
+    ) -> list[Session]:
         sessions = [
             s
             for s in self._state.sessions.values()
             if s.finalize_status in (FinalizeStatus.PENDING, FinalizeStatus.FAILED)
             and s.finalize_attempts < max_attempts
+            and (s.finalize_retry_at is None or s.finalize_retry_at <= now)
         ]
         return sorted(sessions, key=lambda s: (s.ended_at is not None, s.ended_at, s.id))[:limit]
 
     async def clear_summary(self, session_id: str) -> None:
-        self._update(session_id, summary=None, unfinished_topic=None)
+        self._update(session_id, summary=None, unfinished_topic=None, notes=())
 
     def _get(self, session_id: str) -> Session:
         try:
@@ -244,6 +259,15 @@ class InMemoryThreadRepo:
         events.sort(key=lambda e: (e.created_at, e.id))
         return events[-limit:] if limit else []
 
+    async def touched_in(self, session_id: str) -> list[Thread]:
+        updated = {e.thread_id for e in self._state.thread_events if e.session_id == session_id}
+        threads = [
+            t
+            for t in self._state.threads.values()
+            if t.source_session_id == session_id or t.id in updated
+        ]
+        return sorted(threads, key=lambda t: (t.created_at, t.id))
+
     async def count_about(self, person_id: str) -> int:
         return sum(1 for t in self._state.threads.values() if t.about_person_id == person_id)
 
@@ -319,6 +343,14 @@ class InMemoryReminderRepo:
     async def list_open(self, user_id: str, limit: int) -> list[Reminder]:
         found = [r for r in self._state.reminders.values() if r.user_id == user_id and r.is_open]
         return sorted(found, key=lambda r: (r.created_at, r.id))[:limit]
+
+    async def created_in(self, session_id: str) -> list[Reminder]:
+        found = [
+            r
+            for r in self._state.reminders.values()
+            if r.source_session_id == session_id and r.is_open
+        ]
+        return sorted(found, key=lambda r: (r.created_at, r.id))
 
     async def count_about(self, person_id: str) -> int:
         return sum(1 for r in self._state.reminders.values() if r.about_person_id == person_id)

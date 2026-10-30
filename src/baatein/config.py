@@ -52,6 +52,21 @@ class MemorySettings(BaseModel):
     recall_timeout_seconds: float = 0.3
 
 
+class FinalizeSettings(BaseModel):
+    """The summary written after each call (slice 5)."""
+
+    model: str = "claude-haiku-5-5"
+    effort: str = "low"
+    timeout_seconds: float = 60.0
+    max_attempts: int = 5
+    retry_base_seconds: float = 60.0
+    """The first retry waits this long, then each one twice as long, up to `retry_max_seconds`."""
+    retry_max_seconds: float = 3600.0
+    interval_seconds: float = 10.0
+    """How often `baatein serve` looks for finished calls; 0 turns the background loop off."""
+    batch_size: int = 20
+
+
 class DevSettings(BaseModel):
     seed_enabled: bool = False
     """Expose POST /dev/seed to load artificial memories. Never enable in production."""
@@ -105,6 +120,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    finalize: FinalizeSettings = Field(default_factory=FinalizeSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     livekit: LiveKitSettings = Field(default_factory=LiveKitSettings)
     dev: DevSettings = Field(default_factory=DevSettings)

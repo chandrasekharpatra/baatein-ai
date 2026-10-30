@@ -9,8 +9,10 @@ from baatein.auth.service import AuthService
 from baatein.config import Settings
 from baatein.container import build_root
 from baatein.domain.errors import ConfigurationError
+from baatein.memory.analyzer import ClaudeAnalyzer
 from baatein.memory.embeddings.fastembed import FastEmbedEmbedder
 from baatein.memory.service import MemoryService
+from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import CallTokenIssuer, PasswordHasher
 from baatein.ports.clock import Clock, SystemClock
 from baatein.ports.embedder import Embedder
@@ -78,6 +80,7 @@ def test_extra_modules_override_defaults() -> None:
         (BoundaryRepo, SqliteBoundaryRepo),
         (SuggestionRepo, SqliteSuggestionRepo),
         (Clock, SystemClock),
+        (CallAnalyzer, ClaudeAnalyzer),
     ],
 )
 def test_ports_resolve_to_default_adapters(port: type, adapter: type) -> None:

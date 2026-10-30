@@ -8,6 +8,7 @@ import uvicorn
 from baatein.api.app import create_app
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder, SeedFile
 from baatein.ports.auth import PasswordHasher
 from baatein.storage.sqlite.db import Database
@@ -24,6 +25,19 @@ async def reembed(settings: Settings) -> str:
     finally:
         await injector.get(Database).close()
     return f"re-embedded {count} facts into {store.vec_table}"
+
+
+async def finalize(settings: Settings, session_id: str | None) -> str:
+    """Summarise finished calls now: every one that is due, or one call (again) by id."""
+    injector = build_root(settings=settings)
+    finalizer = injector.get(Finalizer)
+    try:
+        if session_id is not None:
+            ok = await finalizer.finalize_by_id(session_id)
+            return f"summarised {session_id}" if ok else f"summarising {session_id} failed"
+        return f"summarised {await finalizer.run_due()} call(s)"
+    finally:
+        await injector.get(Database).close()
 
 
 def read_seed(path: Path) -> SeedFile:
@@ -63,6 +77,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     seed_cmd.add_argument(
         "--replace", action="store_true", help="delete that user and their data first"
     )
+    finalize_cmd = commands.add_parser(
+        "finalize", help="summarise finished calls now (baatein serve also does it)"
+    )
+    finalize_cmd.add_argument("--session", help="summarise this call again, whatever its state")
     serve = commands.add_parser("serve", help="run the HTTP API and web client")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
@@ -74,6 +92,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"{path}: schema version {version}")
     if args.command == "reembed":
         print(asyncio.run(reembed(settings)))
+    elif args.command == "finalize":
+        print(asyncio.run(finalize(settings, args.session)))
     elif args.command == "seed":
         print(asyncio.run(load_seed(settings, read_seed(args.file), args.replace)))
     elif args.command == "serve":

@@ -104,3 +104,23 @@ async def test_settle_marks_one_occurrence_and_can_change_it(repos: Repos) -> No
     }
     with pytest.raises(NotFoundError):
         await repos.reminders.settle("missing", date(2026, 1, 1), OccurrenceStatus.DONE, at(0))
+
+
+async def test_created_in_lists_open_reminders_from_a_call(repos: Repos) -> None:
+    user_id = await add_user(repos)
+    call, other_call = make_session(user_id), make_session(user_id)
+    for session in (call, other_call):
+        await repos.sessions.add(session)
+    for rid, session_id, status, minute in (
+        ("later", call.id, ReminderStatus.NEEDS_INFO, 2),
+        ("first", call.id, ReminderStatus.ACTIVE, 1),
+        ("cancelled", call.id, ReminderStatus.CANCELLED, 3),
+        ("elsewhere", other_call.id, ReminderStatus.ACTIVE, 4),
+    ):
+        await repos.reminders.add(
+            make_reminder(
+                user_id, id=rid, status=status, source_session_id=session_id, created_at=at(minute)
+            )
+        )
+
+    assert [r.id for r in await repos.reminders.created_in(call.id)] == ["first", "later"]

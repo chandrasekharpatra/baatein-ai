@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -11,9 +12,14 @@ from baatein.api.app import create_app
 from baatein.auth.passwords import Argon2PasswordHasher
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.domain.models import Session
+from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import PasswordHasher
 from baatein.ports.embedder import Embedder
+from baatein.ports.repos import SessionRepo, TurnRepo, UserRepo
 from baatein.storage.sqlite.migrate import migrate
+from tests.factories import at, make_session, make_turn, make_user
+from tests.fakes.analyzer import FakeAnalyzer
 from tests.fakes.embedder import FakeEmbedder
 
 LIVEKIT_SECRET = "livekit-test-secret-of-sufficient-length"
@@ -33,6 +39,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         database={"url": f"sqlite:///{tmp_path}/api.db"},
         auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
         livekit={"url": "ws://lk.test", "api_key": "devkey", "api_secret": LIVEKIT_SECRET},
+        finalize={"interval_seconds": 0},
     )
     migrate(settings.database.sqlite_path())
     with TestClient(create_app(build_root(CheapHashing(), settings=settings))) as test_client:
@@ -154,6 +161,7 @@ def seeding_client(tmp_path: Path, enabled: bool) -> TestClient:
         database={"url": f"sqlite:///{tmp_path}/seed.db"},
         auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
         dev={"seed_enabled": enabled},
+        finalize={"interval_seconds": 0},
     )
     migrate(settings.database.sqlite_path())
     return TestClient(create_app(build_root(CheapHashing(), FakeEmbedding(), settings=settings)))
@@ -207,3 +215,45 @@ def test_seed_loads_into_the_current_user(tmp_path: Path) -> None:
         bad_call = {"memories": [{"text": "x", "call": "nope"}]}
         assert on.post("/dev/seed", json=bad_call, headers=auth).status_code == 422
         assert on.post("/dev/seed", json={}).status_code == 401
+
+
+def test_the_api_summarises_finished_calls_in_the_background(tmp_path: Path) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        database={"url": f"sqlite:///{tmp_path}/summaries.db"},
+        auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
+        finalize={"interval_seconds": 0.01},
+    )
+    migrate(settings.database.sqlite_path())
+    analyzer = FakeAnalyzer()
+
+    class FakeAnalysis(Module):
+        @singleton
+        @provider
+        def analyzer(self) -> CallAnalyzer:
+            return analyzer
+
+    injector = build_root(CheapHashing(), FakeEmbedding(), FakeAnalysis(), settings=settings)
+    sessions: SessionRepo = injector.get(SessionRepo)  # type: ignore[type-abstract]
+
+    async def ended_call() -> Session:
+        user = make_user()
+        await injector.get(UserRepo).add(user)  # type: ignore[type-abstract]
+        session = make_session(user.id)
+        await sessions.add(session)
+        await injector.get(TurnRepo).append(make_turn(session.id, 1, "Bas theek"))  # type: ignore[type-abstract]
+        await sessions.end(session.id, at(5), None)
+        return session
+
+    async def summary(session_id: str) -> str | None:
+        stored = await sessions.get(session_id)
+        assert stored is not None
+        return stored.summary
+
+    with TestClient(create_app(injector)) as client:
+        session = client.portal.call(ended_call)  # type: ignore[union-attr]
+        for _ in range(200):
+            if client.portal.call(summary, session.id):  # type: ignore[union-attr]
+                break
+            time.sleep(0.01)
+        assert client.portal.call(summary, session.id) == "A short, light chat about his day."  # type: ignore[union-attr]

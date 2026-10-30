@@ -50,6 +50,12 @@ class InMemoryMemoryStore:
         facts.sort(key=lambda f: (-f.importance, -f.created_at.timestamp()))
         return facts[:limit]
 
+    async def saved_in(self, session_id: str) -> list[Fact]:
+        facts = [
+            f for f in self._facts.values() if f.source_session_id == session_id and f.is_active
+        ]
+        return sorted(facts, key=lambda f: f.created_at)
+
     async def search(self, user_id: str, query: str, limit: int) -> list[ScoredFact]:
         terms = set(search_terms(query))
         if not terms:

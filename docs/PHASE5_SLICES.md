@@ -230,7 +230,16 @@ A live sequence creates, reschedules and completes Asha's reminder (#34), checke
 
 ---
 
-## Slice 5: summary after each call, with retry
+## Slice 5: summary after each call, with retry ✅ built
+
+**Status:** built on 2026-10-30, with offline and real-Claude tests, and run once over the 14 real calls in the dev database; a live call is still to do. As built:
+- **Where it runs:** `baatein serve` runs `Finalizer.run_forever` in the background (every `BAATEIN_FINALIZE__INTERVAL_SECONDS`, default 10 s), so a call is summarised seconds after it ends. `baatein finalize` runs it once; `--session ID` re-runs one call. The agent doesn't summarise in its shutdown step: LiveKit gives that only 10 s, and one process doing it avoids races. `CallMemory.close` writes the last turns before marking the call pending, so no grace period is needed.
+- **What Claude sees** (`memory/analyzer.py`, `messages.parse` with a pydantic schema, Haiku at effort `low`): the transcript, the items saved in that call (`MemoryStore.saved_in`, `ThreadRepo.touched_in`, `ReminderRepo.created_in`; health, grief and personal items are left out so the summary can't raise them) and the active boundaries as "Don't mention".
+- **No Claude request** when the user said "save mat karna" or switched on privacy mode (`sessions.saving_paused`; the summary is a fixed line), or never spoke (no summary).
+- **Cut off:** the analyzer's verdict replaces the rough rule from slice 2, but only counts if the user had the last word; hanging up while Baatein talks is a normal end.
+- **Notes** (`sessions.notes`, at most 2) show under the last call in the next context: "If one comes up naturally, you may ask once whether to remember it". Forgetting a memory clears its call's summary, topic and notes.
+- **Retry:** a failure waits `retry_base_seconds` (60 s), then twice as long each time, up to an hour, for `max_attempts` (5) tries (`sessions.finalize_retry_at`). After that the call keeps the rough cut-off guess and no summary.
+- **Gotcha found while testing:** with a looser prompt, Haiku leaked unsaved details in softened form ("his son's new job in Pune", "some knee discomfort", "touched on his health") and marked calls as cut off when the user hung up mid-reply. The prompt now names those examples as forbidden; `tests/agent/test_call_analyzer.py` checks both (5 tests, passed 3 runs in a row).
 
 ### Example (#31)
 ```
@@ -251,8 +260,8 @@ User: Kal main apne bachpan ka ek kissa bata raha tha…   [call drops]
 ### Building blocks
 | Kind | What |
 |---|---|
-| Database | Uses existing `sessions.summary`, `finalize_status`, `finalize_attempts`, plus slice 2's `ended_abruptly`, `unfinished_topic` |
-| Code | `memory/analyzer.py` (new), `workers/finalizer.py` (new), `baatein finalize` command |
+| Database | Uses existing `sessions.summary`, `finalize_status`, `finalize_attempts`, plus slice 2's `ended_abruptly`, `unfinished_topic`; migration `0007` adds `notes`, `saving_paused`, `finalize_retry_at` |
+| Code | `memory/analyzer.py` and `memory/finalizer.py` (new), `ports/analyzer.py`, `baatein finalize` command, background loop in `api/app.py` |
 
 ### Tests
 - Finalizer states: pending → done, failed → retried, gives up after max attempts.

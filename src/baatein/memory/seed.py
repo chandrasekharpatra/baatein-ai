@@ -111,6 +111,8 @@ class SeedCall(_Seed):
     summary: str | None = None
     ended_abruptly: bool = False
     unfinished_topic: str | None = None
+    notes: list[str] = []
+    """"Maybe ask next time" hints, as the end-of-call summary writes them."""
     turns: list[SeedTurn] = []
 
     _time = field_validator("at")(_check_time)
@@ -366,6 +368,7 @@ class _Loader:
             memory_synced_seq=len(call.turns),
             ended_abruptly=call.ended_abruptly,
             unfinished_topic=call.unfinished_topic,
+            notes=tuple(call.notes),
         )
         await self._deps.sessions.add(session)
         if call.key:

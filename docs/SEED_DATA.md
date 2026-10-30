@@ -69,6 +69,7 @@ Every section is optional.
     "summary": "Spoke about the village fair.",
     "ended_abruptly": true,               // with unfinished_topic: offered once next call
     "unfinished_topic": "Phir hum gaon ke mele mein gaye...",
+    "notes": ["Mentioned his grandson's school play; ask if he'd like it remembered"],  // as the end-of-call summary writes them
     "turns": [{ "role": "user", "text": "..." }, { "role": "assistant", "text": "..." }]
   }],                                     // turns are the internal log; Claude never sees them
   "memories": [{
@@ -175,5 +176,7 @@ Ram's 34 memories are more than the call-start context holds (the top 10 by impo
 | *"Ghutne mein phir dard hai"* | Picks up the knee storyline and the AIIMS checkup | Health thread, only because he raised it |
 
 Checked on 2026-10-30 in a text call against the seeded account: 9 of 10 recall questions answered right. Two things to listen for: for "Somvaar ko kahan jaata hoon?" it may answer with Monday's AIIMS checkup instead of the weekly Lingaraj visit, and it once called Lipsa's baby a *naati* (grandson), which nobody knows yet.
+
+Seeded calls are stored as already summarised, so the background summary never rewrites them.
 
 Things a seed can't express: `this_call` boundaries (they belong to a live call) and done or skipped reminder occurrences.

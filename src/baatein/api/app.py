@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib import resources
 from typing import Annotated
 
@@ -18,6 +19,7 @@ from baatein.domain.errors import (
     WeakPasswordError,
 )
 from baatein.domain.models import User
+from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder, SeedError, SeedFile, SeedResult
 from baatein.ports.auth import CallTokenIssuer
 from baatein.storage.sqlite.db import Database
@@ -109,7 +111,15 @@ CurrentUser = Annotated[User, Depends(current_user)]
 def create_app(injector: Injector) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        # Summaries of finished calls are written here, in the long-running API process.
+        summaries = None
+        if injector.get(Settings).finalize.interval_seconds > 0:
+            summaries = asyncio.create_task(injector.get(Finalizer).run_forever())
         yield
+        if summaries is not None:
+            summaries.cancel()
+            with suppress(asyncio.CancelledError):
+                await summaries
         await injector.get(Database).close()
 
     app = FastAPI(title="Baatein API", lifespan=lifespan)
