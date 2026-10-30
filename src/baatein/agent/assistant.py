@@ -2,7 +2,6 @@ import asyncio
 import logging
 
 from livekit.agents import Agent, llm
-from livekit.agents.voice import UserInputTranscribedEvent
 
 from baatein.agent.tools import memory_tools
 from baatein.domain.models import Preferences, ScoredFact
@@ -106,10 +105,6 @@ def build_instructions(
     return instructions
 
 
-def _same_words(a: str, b: str) -> bool:
-    return a.split() == b.split()
-
-
 class Assistant(Agent):
     def __init__(
         self,
@@ -132,8 +127,6 @@ class Assistant(Agent):
         self._memory = memory
         self._recalled: set[str] = set()
         self._check_in_noted = False
-        self._heard = ""
-        self._early: asyncio.Task[list[ScoredFact]] | None = None
         self._late_notes: set[asyncio.Task[None]] = set()
 
     def _compose(self, preferences: Preferences | None) -> str:
@@ -149,39 +142,18 @@ class Assistant(Agent):
         if self._profile.pace_option and update is not None:
             update(**{self._profile.pace_option: effective_pace(self._persona, preferences)})
 
-    async def on_enter(self) -> None:
-        if self._memory is not None:
-            self.session.on("user_input_transcribed", self.heard)
-
-    def heard(self, event: UserInputTranscribedEvent) -> None:
-        """Start the per-turn search on each final transcript, a moment before LiveKit decides
-        the turn is over. In live calls that moment was only about 25 ms, so a hosted search
-        still finishes after the reply starts (see `_arrived_late`)."""
-        words = event.transcript.strip()
-        if self._memory is None or self._memory.private or not event.is_final or not words:
-            return
-        self._heard = f"{self._heard} {words}".strip()
-        if self._early is not None:
-            self._early.cancel()
-        self._early = self._memory.start_recall(self._heard)
-
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
         if self._memory is None:
             return
-        early, heard = self._early, self._heard
-        self._early, self._heard = None, ""
         await self._note_check_in_asked(turn_ctx)
         text = new_message.text_content
         if self._memory.private or not text:
-            if early is not None:
-                early.cancel()
             return
-        if early is not None and not _same_words(heard, text):
-            early.cancel()
-            early = None
-        search = early or self._memory.start_recall(text)
+        # Started here, not on the final transcript: that came only ~25 ms earlier in live
+        # calls, and each extra transcript segment cost another Pinecone call.
+        search = self._memory.start_recall(text)
         found = await self._memory.recall(search)
         if found is None:  # still searching: what it finds joins the next turn
             search.add_done_callback(self._arrived_late)

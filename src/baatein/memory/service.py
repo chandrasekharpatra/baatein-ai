@@ -321,8 +321,8 @@ class CallMemory:
             await self._pending
 
     def start_recall(self, query: str) -> "asyncio.Task[list[ScoredFact]]":
-        """Start searching for memories that match the user's words. The agent starts it on
-        the final transcript, a moment before the turn ends."""
+        """Start searching for memories that match the user's words; `recall` decides how long
+        the reply waits for it."""
         started = time_module.perf_counter()
         task = asyncio.ensure_future(
             self._deps.store.search(

@@ -118,7 +118,7 @@ class Embedder(Protocol):
 - `FastEmbedEmbedder` loads the model lazily (first call, in a worker thread), routes `kind` to FastEmbed's `query_embed`/`passage_embed`, and validates dimensions.
 - `EmbedderRegistry` selects the adapter from `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` / `__CACHE_DIR`.
 - **Default since 2026-10-30: Pinecone `llama-text-embed-v2` at 2048 dimensions** (`PineconeEmbedder`, official `pinecone` SDK, `PINECONE_API_KEY`). Chosen from `docs/RETRIEVAL_BENCHMARK.md` for English, Hindi and Hinglish (the languages in focus); Odia and Kannada are hidden from signup until their retrieval is better. Through the real hybrid search on Ram's account, the right memory came back for 30/31 English, 29/31 Hindi (Devanagari, as Sarvam returns it) and 26/31 typed-Hinglish questions.
-- **Latency:** a hosted search takes about 450 ms from India (p50 453 ms, p90 665 ms over 15 searches). `Assistant.heard` starts the search on each final transcript (`CallMemory.start_recall`), but in live calls that came only about 25 ms before LiveKit ended the turn, so every search missed the old 0.3 s wait and the reply went out with nothing. Since 2026-10-30:
+- **Latency:** a hosted search takes about 450 ms from India (p50 453 ms, p90 665 ms over 15 searches). Starting the search on each final transcript gained only about 25 ms in live calls (the turn ends right after it), so every search missed the old 0.3 s wait and the reply went out with nothing; that early start was removed, and the search now starts when the turn ends (`CallMemory.start_recall`). Since 2026-10-30:
   - The reply doesn't wait for it (`recall_timeout_seconds`, 0 by default: Pinecone would miss any short wait; set 0.1 s for a local embedder, which finishes in 5–35 ms). A search still running carries on, and what it finds is added to the call history for the next turn (`Assistant._arrived_late`), once per memory.
   - A memory needed right away comes from Claude's `recall` tool. If that search takes longer than `thinking_after_seconds` (0.3 s), Baatein says the language profile's `thinking` line ("Hmm…", about 0.7 s of audio) meanwhile. It is kept out of the chat history, transcript and summary.
   - Logs: "the search took N ms", "the reply waited N ms", "still searching; replying without it".
@@ -165,7 +165,8 @@ CALL START  identity → user_id → child injector (CurrentUser, SessionId)
             generate_reply("greet by name; pick the most relevant follow-up")
 
 EACH TURN   on_user_turn_completed:
-              search started on the final transcript; used if already done
+              search the turn's words, unless they're only fillers (ठीक है, haan…);
+              used if already done
               → inject as hidden context; a slower search joins the next turn
             conversation_item_added → append turn to SQLite
             tools: recall(query) ("Hmm…" if slow), remember, threads, reminders, … (agent/tools.py)

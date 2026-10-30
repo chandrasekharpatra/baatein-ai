@@ -307,81 +307,18 @@ class RecordingStore:
         return list(await self._search(user_id, query, limit, min_similarity))
 
 
-def transcript(text: str, final: bool = True) -> Any:
-    from livekit.agents.voice import UserInputTranscribedEvent
-
-    return UserInputTranscribedEvent(transcript=text, is_final=final)
-
-
-async def early_call() -> tuple[Assistant, RecordingStore]:
+async def test_a_turn_searches_once_with_its_own_words() -> None:
     world = build_world()
     await world.store.add(make_fact(world.user.id, "Has an interview at Google on Friday"))
     store = RecordingStore(world)
     memory = await world.service.open_call(world.user)
-    return Assistant(PROFILE, memory=memory, memory_context=""), store
+    assistant = Assistant(PROFILE, memory=memory, memory_context="")
 
-
-async def test_recall_starts_on_the_final_transcript_and_the_turn_reuses_it() -> None:
-    assistant, store = await early_call()
-
-    assistant.heard(transcript("Google", final=False))  # interim: ignored
-    assistant.heard(transcript("Google interview ki"))
-    await asyncio.sleep(0)  # let the search start
-    assistant.heard(transcript("  tayari  "))
-    await asyncio.sleep(0)
-    turn_ctx = llm.ChatContext()
-    await assistant.on_user_turn_completed(
-        turn_ctx, llm.ChatMessage(role="user", content=["Google interview ki tayari"])
-    )
-
-    # The first final search was replaced by the fuller one, which the turn waited for.
-    assert [query for query, _ in store.searches] == [
-        "Google interview ki",
-        "Google interview ki tayari",
-    ]
-    assert "Has an interview at Google on Friday" in (turn_ctx.items[0].text_content or "")  # type: ignore[union-attr]
-
-
-async def test_a_turn_with_other_words_searches_again() -> None:
-    assistant, store = await early_call()
-
-    assistant.heard(transcript("Google interview"))
-    await asyncio.sleep(0)
     await assistant.on_user_turn_completed(
         llm.ChatContext(), llm.ChatMessage(role="user", content=["Google interview kal hai"])
     )
 
-    assert [query for query, _ in store.searches] == [
-        "Google interview",
-        "Google interview kal hai",
-    ]
-
-
-async def test_nothing_is_searched_early_in_privacy_mode() -> None:
-    assistant, store = await early_call()
-    assert assistant._memory is not None
-    assistant.heard(transcript("Google interview"))
-    await asyncio.sleep(0)
-    assistant._memory.enable_privacy_mode()
-
-    assistant.heard(transcript("Google interview kal hai"))
-    await assistant.on_user_turn_completed(
-        llm.ChatContext(), llm.ChatMessage(role="user", content=["Google interview kal hai"])
-    )
-
-    assert [query for query, _ in store.searches] == ["Google interview"]  # then cancelled
-
-
-async def test_on_enter_listens_for_transcripts(monkeypatch: Any) -> None:
-    assistant, _ = await early_call()
-    handlers: list[tuple[str, Any]] = []
-    session = SimpleNamespace(on=lambda event, handler: handlers.append((event, handler)))
-    monkeypatch.setattr(Assistant, "session", property(lambda self: session))
-
-    await assistant.on_enter()
-    await Assistant(PROFILE).on_enter()  # no memory: nothing to listen for
-
-    assert handlers == [("user_input_transcribed", assistant.heard)]
+    assert [query for query, _ in store.searches] == ["Google interview kal hai"]
 
 
 async def slow_call(delay: float = 0.05) -> Assistant:
