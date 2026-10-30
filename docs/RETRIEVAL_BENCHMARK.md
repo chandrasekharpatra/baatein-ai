@@ -41,7 +41,7 @@ This measures the model alone (dense similarity). Production adds keyword search
 
 ## Results (2026-10-30, Apple Silicon Mac, CPU)
 
-Models tried: 6 embedding models, and 2 multilingual rerankers on top of two of them. Not tried yet: Pinecone `llama-text-embed-v2` (needs a `PINECONE_API_KEY`), BGE-M3 as an embedding model (not in FastEmbed), `jina-embeddings-v3` and full-size Qwen3 (about 2.3 GB each).
+Models tried: 6 local embedding models and 2 local rerankers (below), then Pinecone's hosted models (see [Hosted models on Pinecone](#hosted-models-on-pinecone-2026-10-30)). Not tried: BGE-M3 as an embedding model (not in FastEmbed), `jina-embeddings-v3` and full-size Qwen3 (about 2.3 GB each), and Pinecone's Cohere rerankers (not enabled for this Pinecone project).
 
 **Right memory first / in the top 5, out of 31**
 
@@ -97,7 +97,46 @@ Models tried: 6 embedding models, and 2 multilingual rerankers on top of two of 
 - Move `min_similarity` into each `LanguageProfile`, starting from these cut-offs, and re-measure with a larger set of small talk before trusting them (6 lines per language is too few to tune on).
 - Optionally rerank `recall` tool results with `bge-reranker-v2-m3-int8` (0.57 GB).
 - For deployment: at 1.7 GB per process, the embedder should run once per machine (a small embedding service, or one process shared by LiveKit jobs) rather than in every call's job process.
-- Add Pinecone `llama-text-embed-v2` once there's a key: a hosted model removes the memory cost, but adds a network round trip from India to every turn, which this benchmark should measure.
+- Don't use a hosted embedder for per-turn recall: Pinecone's round trip from here is 380 to 480 ms, more than the whole budget (see below).
+
+## Hosted models on Pinecone (2026-10-30)
+
+Run with `uv run --env-file .env python -m bench.retrieval.run --models pinecone/llama-text-embed-v2:1024` (and `--rerank pinecone/<model>`), using `PINECONE_API_KEY`. Query times include the network round trip from India, as a call would see it.
+
+**Right memory first / in the top 5, out of 31**, with local e5-large for comparison
+
+| Model | hindi | hinglish | odia | kannada | keywords |
+|---|---|---|---|---|---|
+| local multilingual-e5-large | 26 / 30 | 16 / 25 | 24 / 28 | 25 / 29 | 28 / 30 |
+| llama-text-embed-v2, 384 dims | 25 / 31 | 20 / 29 | 12 / 21 | 15 / 21 | 27 / 31 |
+| llama-text-embed-v2, 1024 dims | 26 / 31 | 23 / 30 | 14 / 24 | 16 / 25 | 29 / 31 |
+| llama-text-embed-v2, 2048 dims | 28 / 31 | **24 / 31** | 15 / 24 | 17 / 25 | 29 / 31 |
+| hosted multilingual-e5-large | 25 / 30 | 15 / 21 | 23 / 28 | 24 / 29 | 26 / 31 |
+| local e5-large + hosted bge-reranker-v2-m3 | 30 / 30 | 19 / 25 | 29 / 29 | 29 / 30 | 29 / 30 |
+| local e5-large + hosted pinecone-rerank-v0 | 28 / 29 | 22 / 28 | 9 / 18 | 13 / 25 | 29 / 30 |
+
+**Questions vs small talk: AUC (answered / small talk let through)**
+
+| Model | hindi | hinglish | odia | kannada |
+|---|---|---|---|---|
+| local multilingual-e5-large | 0.96 (90% / 0%) | 0.59 (42% / 0%) | 0.87 (81% / 0%) | 0.94 (90% / 0%) |
+| llama-text-embed-v2, 384 dims | 0.83 (77% / 17%) | 0.73 (77% / 17%) | 0.41 (29% / 0%) | 0.47 (61% / 50%) |
+| llama-text-embed-v2, 1024 dims | 0.83 (94% / 17%) | 0.68 (48% / 0%) | 0.45 (16% / 0%) | 0.58 (81% / 50%) |
+| llama-text-embed-v2, 2048 dims | 0.89 (97% / 17%) | **0.80** (77% / 17%) | 0.53 (26% / 0%) | 0.61 (77% / 50%) |
+| hosted multilingual-e5-large | 0.92 (77% / 0%) | 0.50 (19% / 0%) | 0.88 (87% / 0%) | 0.91 (87% / 0%) |
+| local e5-large + hosted bge-reranker-v2-m3 | 0.94 (87% / 0%) | 0.48 (35% / 0%) | 0.90 (77% / 0%) | 0.94 (84% / 0%) |
+| local e5-large + hosted pinecone-rerank-v0 | 0.90 (81% / 0%) | 0.69 (58% / 0%) | 0.56 (16% / 0%) | 0.66 (58% / 0%) |
+
+**Cost:** every hosted call took 380 to 480 ms at the median (590 to 660 ms p95) for embedding, and about 500 ms (1.9 s p95) for a rerank, against 30 ms for local e5-large. A process using hosted models needs about 100 MB instead of 1.7 GB.
+
+**What this adds:**
+1. **llama-text-embed-v2 is the best model for Roman Hinglish** (24 of 31 first at 2048 dimensions), and more dimensions help it steadily. It is **weak for Odia and Kannada** (15 to 17 first, and it lets half of Kannada small talk through), so it doesn't fit Baatein's languages.
+2. **Hosted e5-large matches local e5-large** in quality; the difference is only where it runs.
+3. **Hosted calls are too slow for per-turn recall**: one round trip is longer than the 0.3 s budget. They could serve the `recall` tool, where Claude already waits, but local e5-large plus a local reranker does that faster.
+4. **pinecone-rerank-v0 is English-centric** (9 of 31 first for Odia); bge-reranker-v2-m3 is the multilingual reranker to use, local or hosted.
+5. The Cohere rerankers (`cohere-rerank-3.5`, `cohere-rerank-4-fast`) returned 403 "Project is not authorized to use model"; they need enabling on the Pinecone project.
+
+The recommendation stands: local `multilingual-e5-large`. A hosted model is worth it only if per-process memory becomes the deciding constraint, and then only with a provider and region close enough to fit the budget.
 
 ### Caveats
 

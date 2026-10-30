@@ -3,6 +3,7 @@
     uv run python -m bench.retrieval.run                      # the default candidates
     uv run python -m bench.retrieval.run --models a,b         # FastEmbed model names
     uv run python -m bench.retrieval.run --models a --rerank r   # a's top 10, re-scored by r
+    uv run --env-file .env python -m bench.retrieval.run --models pinecone/llama-text-embed-v2:1024
 
 Each model runs in its own process (so memory use is its own) through Baatein's real
 `FastEmbedEmbedder`, with query and passage prefixes as in production. Dense similarity only:
@@ -18,6 +19,7 @@ import statistics
 import subprocess
 import sys
 import time
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -26,6 +28,13 @@ from fastembed import TextEmbedding
 from fastembed.rerank.cross_encoder import TextCrossEncoder
 
 from baatein.memory.embeddings.fastembed import FastEmbedEmbedder
+from bench.retrieval.pinecone import (
+    Client,
+    PineconeEmbedder,
+    PineconeReranker,
+    is_hosted,
+    parse,
+)
 
 HERE = Path(__file__).parent
 ROOT = HERE.parents[1]
@@ -54,6 +63,8 @@ def corpus() -> list[str]:
 
 
 def dimensions(model: str) -> int:
+    if is_hosted(model):
+        return parse(model)[1] or 1024
     for described in TextEmbedding.list_supported_models():
         if described["model"] == model:
             return int(described["dim"])
@@ -83,12 +94,27 @@ async def measure(model: str, reranker: str | None = None) -> Result:
     data = DATA
     memories = corpus()
     cache = str(ROOT / "data/models")
+    client = Client() if is_hosted(model) or (reranker and is_hosted(reranker)) else None
     started = time.perf_counter()
-    embedder = FastEmbedEmbedder(model, dimensions(model), cache_dir=cache)
+    embedder: FastEmbedEmbedder | PineconeEmbedder = (
+        PineconeEmbedder(model, client)
+        if client and is_hosted(model)
+        else FastEmbedEmbedder(model, dimensions(model), cache_dir=cache)
+    )
     passages = unit(await embedder.embed(memories, "passage"))
-    cross = TextCrossEncoder(reranker, cache_dir=cache) if reranker else None
-    if cross is not None:
-        list(cross.rerank("warm up", memories[:2]))
+    rerank: Callable[[str, Sequence[str]], Awaitable[list[float]]] | None = None
+    if reranker and client and is_hosted(reranker):
+        rerank = PineconeReranker(reranker, client).rerank
+    elif reranker:
+        cross = TextCrossEncoder(reranker, cache_dir=cache)
+
+        async def rerank_locally(query: str, documents: Sequence[str]) -> list[float]:
+            return [float(s) for s in cross.rerank(query, list(documents))]
+
+        rerank = rerank_locally
+
+    if rerank is not None:
+        await rerank("warm up", memories[:2])
     load_seconds = time.perf_counter() - started
 
     async def search(text: str) -> tuple[np.ndarray, float]:
@@ -96,10 +122,10 @@ async def measure(model: str, reranker: str | None = None) -> Result:
         started = time.perf_counter()
         [vector] = await embedder.embed([text], "query")
         scores = passages @ unit([vector])[0]
-        if cross is not None:
+        if rerank is not None:
             pool = np.argsort(-scores)[:RERANK_POOL]
             reranked = np.full(len(memories), -np.inf, dtype=np.float32)
-            reranked[pool] = list(cross.rerank(text, [memories[i] for i in pool]))
+            reranked[pool] = await rerank(text, [memories[i] for i in pool])
             scores = reranked
         return scores, time.perf_counter() - started
 
