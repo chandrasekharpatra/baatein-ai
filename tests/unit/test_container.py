@@ -11,10 +11,10 @@ from baatein.container import build_root
 from baatein.domain.errors import ConfigurationError
 from baatein.memory.analyzer import ClaudeAnalyzer
 from baatein.memory.embeddings.pinecone import PineconeEmbedder
-from baatein.memory.service import MemoryService
+from baatein.memory.service import MemoryDeps, MemoryService
 from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import CallTokenIssuer, PasswordHasher
-from baatein.ports.clock import Clock, SystemClock
+from baatein.ports.clock import Clock, DemoClock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
 from baatein.ports.repos import (
@@ -137,3 +137,16 @@ def test_auth_components_resolve_when_configured(monkeypatch: pytest.MonkeyPatch
     assert isinstance(injector.get(AuthService), AuthService)
     assert isinstance(injector.get(CallTokenIssuer), LiveKitCallTokens)  # type: ignore[type-abstract]
     assert isinstance(injector.get(PasswordHasher), Argon2PasswordHasher)  # type: ignore[type-abstract]
+
+
+def test_a_demo_clock_moves_memory_time_but_not_logins(tmp_path: Path) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        database={"url": f"sqlite:///{tmp_path}/app.db"},
+        auth={"jwt_secret": "jwt-test-secret-of-sufficient-length"},
+        dev={"clock_file": str(tmp_path / "clock.json")},
+    )
+    injector = build_root(settings=settings)
+
+    assert isinstance(injector.get(MemoryDeps).clock, DemoClock)
+    assert isinstance(injector.get(Clock), SystemClock)  # type: ignore[type-abstract]

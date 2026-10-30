@@ -115,6 +115,9 @@ class FinalizeSettings(BaseModel):
 class DevSettings(BaseModel):
     seed_enabled: bool = False
     """Expose POST /dev/seed to load artificial memories. Never enable in production."""
+    clock_file: str | None = None
+    """For recording demos across days: memory, reminders and summaries take "now" from this
+    file, set with `baatein demo-date`. Logins keep real time. Never set in production."""
 
 
 AGENT_NAME = "baatein"

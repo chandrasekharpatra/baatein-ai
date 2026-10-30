@@ -186,6 +186,23 @@ def test_metrics_reports_recent_calls_for_everyone_or_one_user(
     assert "no user nobody@example.com" in capsys.readouterr().out
 
 
+def test_demo_date_sets_and_clears_the_demo_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    assert main(["demo-date", "2026-11-02"]) == 0
+    assert "Set BAATEIN_DEV__CLOCK_FILE" in capsys.readouterr().out
+
+    monkeypatch.setenv("BAATEIN_DEV__CLOCK_FILE", str(tmp_path / "clock.json"))
+    assert main(["demo-date", "2026-11-02", "--time", "18:30"]) == 0
+    assert "it is now Mon 02 Nov 2026, 18:30 (Asia/Kolkata)" in capsys.readouterr().out
+    assert (tmp_path / "clock.json").exists()
+    assert main(["demo-date", "--clear"]) == 0
+    assert "demo clock cleared" in capsys.readouterr().out
+    assert main(["demo-date"]) == 0
+    assert "demo clock was not set" in capsys.readouterr().out
+
+
 def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:
     seed = tmp_path / "no-user.json"
     seed.write_text('{"memories": []}')

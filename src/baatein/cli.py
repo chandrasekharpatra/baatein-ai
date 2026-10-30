@@ -1,8 +1,9 @@
 import argparse
 import asyncio
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
@@ -15,7 +16,7 @@ from baatein.memory.seed import Seeder, SeedFile
 from baatein.memory.service import MemoryService
 from baatein.metrics import CallMetrics, report
 from baatein.ports.auth import PasswordHasher
-from baatein.ports.clock import Clock
+from baatein.ports.clock import Clock, DemoClock
 from baatein.ports.repos import SessionRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
@@ -78,6 +79,18 @@ async def show_metrics(settings: Settings, days: float, email: str | None) -> st
     return f"Last {days:g} day(s){scope}\n" + report(CallMetrics.from_json(c) for c in calls)
 
 
+def demo_date(settings: Settings, day: str | None, at: str, tz: str, clear: bool) -> str:
+    """Set (or clear) the moment the demo clock starts from."""
+    if not settings.dev.clock_file:
+        return "Set BAATEIN_DEV__CLOCK_FILE (e.g. data/demo-clock.json) first, then restart."
+    clock = DemoClock(Path(settings.dev.clock_file))
+    if clear or day is None:
+        return "demo clock cleared: real time" if clock.clear() else "demo clock was not set"
+    moment = datetime.combine(date.fromisoformat(day), time.fromisoformat(at), ZoneInfo(tz))
+    clock.set(moment)
+    return f"demo clock: it is now {moment:%a %d %b %Y, %H:%M} ({tz}), and time runs on"
+
+
 def read_seed(path: Path) -> SeedFile:
     seed = SeedFile.model_validate_json(path.read_text(encoding="utf-8"))
     if seed.user is None:
@@ -138,6 +151,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     metrics_cmd.add_argument("--days", type=float, default=7, help="how far back (default 7)")
     metrics_cmd.add_argument("--email", help="only this user's calls")
+    demo_cmd = commands.add_parser(
+        "demo-date",
+        help="for recording demos: make it a chosen day (needs BAATEIN_DEV__CLOCK_FILE)",
+    )
+    demo_cmd.add_argument("day", nargs="?", help="YYYY-MM-DD; leave out with --clear")
+    demo_cmd.add_argument("--time", default="10:00", help="time of day (default 10:00)")
+    demo_cmd.add_argument("--tz", default="Asia/Kolkata", help="time zone (default Asia/Kolkata)")
+    demo_cmd.add_argument("--clear", action="store_true", help="back to real time")
     serve = commands.add_parser("serve", help="run the HTTP API and web client")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
@@ -158,6 +179,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(asyncio.run(forget_user(settings, args.email)))
     elif args.command == "metrics":
         print(asyncio.run(show_metrics(settings, args.days, args.email)))
+    elif args.command == "demo-date":
+        print(demo_date(settings, args.day, args.time, args.tz, args.clear))
     elif args.command == "seed":
         print(asyncio.run(load_seed(settings, read_seed(args.file), args.replace)))
     elif args.command == "serve":

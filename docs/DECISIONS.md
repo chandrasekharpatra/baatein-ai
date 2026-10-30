@@ -195,3 +195,7 @@ An evaluation looked at where a "decision step" (rules, a small classifier, or a
   - **Memory:** searches sent and skipped (fillers), search time, memories that reached their reply against those that joined the next turn, `recall` tool calls, "Hmm…" said, saves and saves turned down as already saved.
   - **Usage:** Claude tokens (in, cached, out), speech-to-text minutes, TTS characters.
 - **Saved when the call ends;** a failure to save is logged and never fails the call's end.
+
+### D23. A demo clock, so one recording session can show several days
+- **Why:** the demo shows Baatein reminding the day before an event and following up after it, which needs calls on different days.
+- **Chosen:** `DemoClock` (`BAATEIN_DEV__CLOCK_FILE`, development only). `baatein demo-date 2026-11-02 --time 10:00` sets the moment, and time runs on from it. Memory, reminders, the seeder and summaries use it; logins and LiveKit tokens keep the real clock, because the LiveKit server checks real time. The file is read on every call, so the worker, API and CLI follow a change without restarting.

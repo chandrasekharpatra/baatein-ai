@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 
 from anthropic import AsyncAnthropic
 from injector import Binder, Injector, Module, provider, singleton
@@ -16,7 +17,7 @@ from baatein.memory.seed import Seeder
 from baatein.memory.service import MemoryDeps, MemoryService
 from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import AccessTokens, CallTokenIssuer, PasswordHasher
-from baatein.ports.clock import Clock, SystemClock
+from baatein.ports.clock import Clock, DemoClock, SystemClock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
 from baatein.ports.repos import (
@@ -149,6 +150,8 @@ class MemoryModule(Module):
         store: MemoryStore,
         clock: Clock,
     ) -> MemoryDeps:
+        if settings.dev.clock_file:  # demos only; tokens and logins keep the real clock
+            clock = DemoClock(Path(settings.dev.clock_file))
         return MemoryDeps(
             users,
             sessions,
