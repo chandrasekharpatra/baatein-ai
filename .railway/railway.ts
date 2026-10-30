@@ -2,11 +2,11 @@
 // database on a volume. Audio goes through LiveKit Cloud, not Railway. docs/DEPLOY.md
 //
 // Preview with `railway config plan`, then `railway config apply`. Set the secrets marked
-// preserve() in the Railway dashboard first (sealed); they never go in this file.
+// preserve() in the Railway dashboard first (sealed); they never go in this file. The custom
+// domain (baatein.experiship.com) can't be set here: `railway domain baatein.experiship.com`.
 import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
 
 const REGION = "asia-southeast1-eqsg3a"; // Singapore, nearest to India
-const DOMAIN = "baatein.example.com"; // your Cloudflare subdomain
 const PORT = "8000";
 
 export default defineRailway(() => {
@@ -20,7 +20,6 @@ export default defineRailway(() => {
     // One copy only: a volume can't be shared, and calls need the one database.
     replicas: { [REGION]: 1 },
     volumeMounts: { "/app/data": data },
-    domains: [{ domain: DOMAIN, port: Number(PORT) }],
     env: {
       PORT,
       // On a redeploy, live calls get a minute to finish before the old copy stops.

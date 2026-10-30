@@ -69,12 +69,15 @@ The agent runs on Railway and only connects out, so there's nothing to deploy on
    | `BAATEIN_AUTH__SEED_PASSWORD` | the password for accounts seeded at deploy |
    | `BAATEIN_AUTH__ADMIN_EMAILS` | `a@x.com,b@y.com,c@z.com` (the 3 admins) |
 
-4. In `.railway/railway.ts`, set `DOMAIN` to your subdomain (e.g. `baatein.yourdomain.com`).
-5. Preview, then apply:
+4. Preview, then apply:
    ```bash
    npm install --no-save railway   # the authoring package railway.ts imports
    railway config plan             # shows what will be created; nothing changes yet
-   railway config apply            # creates the service, the 1 GB volume and the domain
+   railway config apply            # creates the service and the 1 GB volume
+   ```
+5. Add the custom domain. Railway's config file can't register one, so it's a CLI command:
+   ```bash
+   railway domain baatein.experiship.com
    ```
    `railway.ts` builds `main` from GitHub, so merge this branch first. To deploy what's on your disk instead, run `railway up`.
 
@@ -83,15 +86,15 @@ What `railway.ts` sets up:
 - one copy of the service;
 - a 1 GB volume at `/app/data`;
 - a health check on `/health`, with 120 s for the first start;
-- the port: 8000;
+- the port: 8000 (the custom domain is added separately, step 5);
 - 60 s for live calls to finish on a redeploy (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`);
 - signup off;
 - the four demo seed files.
 
-The volume's `region` and the `replicas` map follow Railway's documented forms; if `config plan` disagrees, its message names the right key.
+`railway config plan` accepted this file on 2026-10-30 with CLI 5.71.0 and the `railway` package 3.16.0: 2 to add (the service and the volume).
 
 ### 3. Cloudflare domain
-1. After `apply`, the Railway dashboard (service → Settings → Networking) shows two records for your domain: a **CNAME** and a **TXT**. Add both in Cloudflare DNS; the domain won't verify with only the CNAME.
+1. After `railway domain`, the Railway dashboard (service → Settings → Networking) shows two records for your domain: a **CNAME** and a **TXT**. Add both in Cloudflare DNS; the domain won't verify with only the CNAME.
 2. Set Cloudflare **SSL/TLS** to **Full**. Railway's docs say Full (Strict) won't work through the proxy, and Flexible causes redirect loops.
 3. With the proxy on (orange cloud), use a first-level subdomain like `baatein.yourdomain.com`; deeper ones need Cloudflare's Advanced Certificate Manager.
 4. Recommended: add a Cloudflare **rate-limiting rule** for `/auth/login` (the free plan includes one rule), e.g. 10 requests a minute per IP.
