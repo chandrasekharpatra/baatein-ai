@@ -2,29 +2,31 @@
 
 Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, SQLite + `sqlite-vec`, FastEmbed, `injector`. No Docker. Coverage-first testing.
 
-## Status (2026-10-29)
+## Status (2026-10-30)
 
-**Done:** Phases 0–4. You can sign up in the web client, start a call and have a live Hinglish voice conversation (Sarvam STT → Claude Haiku 5.5 → Sarvam TTS). Each call now has a `sessions` row, every message is saved as a turn while the call runs, the agent starts with memory context (recent summaries, open follow-ups, top facts), searches facts on every user turn, and has `recall_memory`, `add_followup` and `resolve_followup` tools. Verified end to end on 2026-10-29: in one call the user mentioned an interview and the agent saved a dated follow-up; in the next call it remembered the interview and resolved the follow-up.
+**All six phases are built** on the `memory-layer` branch. What each one added:
+- **Phases 0–4:** web client, auth, LiveKit calls, turns saved live, the call-start context, and per-turn memory search.
+- **Phase 5:** the consent-based memory layer, in six slices (§13, `docs/PHASE5_SLICES.md`, design in `docs/MEMORY_DESIGN.md`):
+  - consent-only saving, with correct and forget;
+  - storylines, boundaries and the one check-in per call;
+  - persona and preferences;
+  - reminders delivered in conversation;
+  - an end-of-call summary with retry;
+  - real-Claude scenario evals.
+- **Phase 6:**
+  - "Forget me" (erase memories, keep the account);
+  - per-call metrics with `baatein metrics`;
+  - a redesigned web client without the transcript;
+  - a demo clock and a voice override for demos;
+  - the multi-day demo recorder (`demo/days/`, untracked).
 
-**Phase 5 progress:** slice 1 is done (2026-10-29): memories are saved only after the user agrees, can be corrected, and can be forgotten (tombstone). Verified live: Baatein asked "Kya main yeh yaad rakhun?", saved only after "Haan, yaad rakhna", and on "bhool jao" deleted the memory, redacted the call it came from and removed the person.
+**Retrieval:** Pinecone `llama-text-embed-v2` with per-language cut-offs. Replies don't wait for the search, and a slow `recall` says "Hmm…". Filler-only turns aren't searched. Keyword matches need a little shared meaning, and near-duplicate saves are caught. Every decision, with the options and measurements, is in `docs/DECISIONS.md`.
 
-Slice 2 is built (2026-10-29): follow-ups became storylines (threads) with events, the user can set and lift boundaries, decline suggestions and switch on privacy mode, and the call-start context offers at most one check-in. Details in `docs/PHASE5_SLICES.md`.
-
-Slice 3 is built (2026-10-30): a per-user persona (casual or elder, chosen at signup) and preferences set by voice (pace, verbosity, fewer questions, how to be addressed) that apply immediately and in later calls.
-
-Slice 4 is built (2026-10-30): reminders with repeat rules and "remind me N days before", brought up in the next conversation only, never promised as notifications.
-
-Slice 5 is built (2026-10-30): `baatein serve` summarises each finished call in the background (one Claude request; only what the user agreed to keep is named), records whether it was cut off mid-story, keeps up to two "maybe ask next time" notes, and retries failures with backoff. `baatein finalize` runs it by hand.
-
-Slice 6 is built (2026-10-30): real-Claude scenario evals for every scenario in §13, including #1 and #34 replayed over three calls from a real database with summaries in between. All 35 real-Claude tests pass. Still to do for Phase 5: a live voice run of those two sequences.
-
-**Next: Phase 5, the consent-based memory layer** (full plan in §13, design in `docs/MEMORY_DESIGN.md`). It replaces the original "silent analyzer" Phase 5 after reviewing the 45 Voice Buddy scenarios. Built in six slices on the `memory-layer` branch:
-1. Memory structure, consent-only saving, correct and forget ✅
-2. Threads, boundaries and the call-start context ✅
-3. Persona and preferences ✅
-4. Reminders (delivered in conversation only) ✅
-5. End-of-call summary and retry ✅
-6. Scenario evals ✅
+**Still to do:**
+- live voice runs of the multi-call scenarios (#1, #34);
+- recording the demo video;
+- the deferred items in `docs/DECISIONS.md` ("Later");
+- the Hinglish voice choice, if a Sarvam voice measures better than Cartesia (D24).
 
 **Phase 4 notes**
 - Per-call state is a `CallMemory` object created by the process-wide `MemoryService` (`memory/service.py`), not a child injector: it only needs the session and the repos, and a plain object is easier to test.
@@ -305,7 +307,7 @@ Tests don't have to be written before the code, but every change ships with test
 | 3 ✅ | auth service, Argon2, JWT expiry via clock, LiveKit token claims, API routes, identity → agent | `AuthService`, `/auth/signup`, `/auth/login`, `/me`, `/livekit/token`, `AuthModule`, `baatein serve`, web client at `/` with live transcripts; agent resolves the user from dispatch metadata. Verified live end to end |
 | 4 ✅ | MemoryService unit tests, lifecycle tests, entrypoint wiring, memory tool behaviour against real Claude | Session lifecycle, transcript persistence, call-start context, per-turn retrieval, memory tools. Verified live across two calls |
 | 5 | slice tests per §13, scenario evals against real Claude | Consent-based memory layer (§13): memories with consent and tombstones, people, threads, boundaries, persona and preferences, conversation-only reminders, ranked call-start context, end-of-call summary with retry |
-| 6 | evals, deletion tests | "Forget me", logging/metrics, demo polish |
+| 6 ✅ | forget-me contracts (SQLite + fakes), API and CLI, metrics, demo clock | "Forget me", per-call metrics and `baatein metrics`, web client redesign, demo clock, voice override, multi-day demo |
 
 ## 11. Risks
 

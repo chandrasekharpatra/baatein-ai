@@ -7,6 +7,7 @@ from baatein.domain.models import (
     BoundaryScope,
     Certainty,
     Fact,
+    FinalizeStatus,
     MemoryKind,
     Person,
     Reminder,
@@ -184,8 +185,14 @@ def render_context(context: MemoryContext) -> str:
             line += f" Summary: {last.summary[:MAX_SUMMARY_CHARS]}"
         lines.append(line)
         if (earlier := context.earlier_call) is not None and earlier.summary:
+            # No summary: either a call too short to summarise, or one not summarised yet.
+            why = (
+                "It was very brief."
+                if last.finalize_status is FinalizeStatus.DONE
+                else "Its summary isn't ready."
+            )
             lines.append(
-                f"It was very brief. The call before it, {_local_day(earlier.started_at, tz)}: "
+                f"{why} The call before it, {_local_day(earlier.started_at, tz)}: "
                 f"{earlier.summary[:MAX_SUMMARY_CHARS]}"
             )
         if last.ended_abruptly and last.unfinished_topic:

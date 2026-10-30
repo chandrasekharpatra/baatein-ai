@@ -31,6 +31,7 @@ class CallMetrics:
     searches_skipped: int = 0
     """Turns with nothing to search for (only fillers like "ठीक है")."""
     search_ms: list[float] = field(default_factory=list)
+    search_failures: int = 0
     memories_now: int = 0
     """Memories that reached the reply they were searched for."""
     memories_late: int = 0
@@ -101,7 +102,7 @@ def report(calls: Iterable[CallMetrics]) -> str:
         "Memory:",
         f"  turns searched   {_share(total('searches'), turns)}"
         f" (skipped as fillers: {total('searches_skipped')})",
-        f"  search time      {_ms(joined('search_ms'))}",
+        f"  search time      {_ms(joined('search_ms'))}, failed {total('search_failures')}",
         f"  memories late    {_share(total('memories_late'), memories)} (joined the next turn)",
         f'  recall tool      {total("recall_calls")} calls, "Hmm…" said {total("thinking_said")}',
         f"  saved            {total('saved')}, already saved {total('already_saved')}",

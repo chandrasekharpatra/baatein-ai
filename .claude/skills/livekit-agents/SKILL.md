@@ -19,7 +19,7 @@ LiveKit's API changes between minor versions. Before writing LiveKit code:
 |---|---|
 | Worker, prewarm, per-call entrypoint | `src/baatein/agent/entrypoint.py` |
 | Agent instructions, per-turn recall (`on_user_turn_completed`) | `src/baatein/agent/assistant.py` |
-| Memory tools (`recall_memory`, `add_followup`, `resolve_followup`) | `src/baatein/agent/tools.py` |
+| Memory tools (`recall` with its "Hmm…", `remember`, storylines, boundaries, reminders, preferences) | `src/baatein/agent/tools.py` |
 | STT/TTS/LLM registries + `VoicePipelineFactory` | `src/baatein/voice/providers.py` |
 | Language profiles (which STT/TTS per language) | `src/baatein/voice/languages.py` |
 | Room tokens with agent dispatch | `src/baatein/auth/livekit.py` |

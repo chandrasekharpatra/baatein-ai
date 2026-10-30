@@ -185,7 +185,7 @@ An evaluation looked at where a "decision step" (rules, a small classifier, or a
   - the web app (the password is asked again, so a borrowed, logged-in phone can't wipe memories): `POST /me/forget`
   - `baatein forget-user EMAIL --yes`
   - **Not by voice:** asked to forget everything, Baatein points to the app and offers to forget one named thing now. A misheard sentence shouldn't be able to wipe everything.
-- **Known gap:** a call in progress while erasing can still save a turn or memory afterwards.
+- **During a call:** the web client blocks erasing until the call ends. If a call's session is erased anyway (for example from the CLI), the call ends quietly; turns or saves after the erase fail and are logged.
 
 ### D22. Each call keeps its numbers; `baatein metrics` reports them
 - **Why:** tuning choices (how long to wait for a search, whether to add a "wait when a person is named" step, whether a classifier is worth it) should use real calls, not guesses.
@@ -206,3 +206,12 @@ An evaluation looked at where a "decision step" (rules, a small classifier, or a
   - `BAATEIN_VOICE__TTS` (`VoiceSettings.tts`) replaces a profile's text-to-speech and its pace option, by language code.
   - An override for a language with no profile is refused at startup. A voice name the plugin doesn't know fails when the pipeline is built.
 - **Before making a Sarvam voice the Hinglish default:** measure time to first audio and how well it reads Roman-script Hinglish (round-trip through speech-to-text) against Cartesia.
+
+### D25. Review fixes before the demo (2026-10-30)
+An independent review of D14–D24 found these, all fixed:
+- **A failing per-turn search was silent.** With replies no longer waiting, every search finished "late", and its error was swallowed and counted as a normal search time. It is now logged at ERROR where the search finishes, and counted as `search_failures` in the metrics.
+- **"It was very brief"** was said of any last call without a summary, including one whose summary wasn't written yet. Now that wording is used only when the summary was written and came out empty.
+- **`baatein metrics`** dated its window by the real clock while demo calls use the demo clock. It now uses the memory clock.
+- **Demo clock:** a moment without a time zone is rejected, the warning is logged once, and a warning at startup says the demo clock is on.
+- **Web client:** erasing is blocked during a call; the mute label resets; a hang-up while connecting no longer leaves the timer running; an expired login no longer reads as a wrong password.
+- **Erasing is logged** (`erased everything Baatein remembered about user <id>`).

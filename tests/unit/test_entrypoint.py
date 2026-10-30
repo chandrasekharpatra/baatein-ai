@@ -14,7 +14,6 @@ from baatein.agent import entrypoint
 from baatein.agent.assistant import Assistant
 from baatein.config import Settings
 from baatein.container import build_root
-from baatein.domain.errors import NotFoundError
 from baatein.domain.models import Pace, Preferences, Role
 from baatein.memory.service import MemoryService
 from baatein.metrics import CallMetrics
@@ -286,12 +285,16 @@ def test_resolve_persona_falls_back_to_casual(caplog: pytest.LogCaptureFixture) 
 async def test_end_call_closes_database_even_if_session_end_fails() -> None:
     world = build_world()
     memory = await world.service.open_call(world.user)
-    world.state.sessions.clear()
+
+    async def locked(*_: object, **__: object) -> None:
+        raise RuntimeError("database is locked")
+
+    world.deps.sessions.end = locked  # type: ignore[method-assign]
     injector = Injector()
     database = FakeDatabase()
     injector.binder.bind(Database, to=database)  # type: ignore[arg-type]
 
-    with pytest.raises(NotFoundError):
+    with pytest.raises(RuntimeError):
         await entrypoint.end_call(injector, memory, "error")
 
     assert database.closed

@@ -9,6 +9,7 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from baatein.config import MemorySettings
+from baatein.domain.errors import NotFoundError
 from baatein.domain.ids import new_id
 from baatein.domain.models import (
     REMINDER_TIME,
@@ -143,7 +144,7 @@ class MemoryDeps:
 
 
 def _consume_error(task: "asyncio.Task[list[ScoredFact]]") -> None:
-    """Mark a search's error as seen; `recall` logs the ones anyone waits for."""
+    """Mark a search's error as seen (it is logged where the search started)."""
     if not task.cancelled():
         task.exception()
 
@@ -178,6 +179,7 @@ class MemoryService:
         deleted; if the second step fails, running it again finishes the job."""
         await self._deps.store.forget_all(user_id, self._deps.clock.now())
         await self._deps.users.erase_memories(user_id)
+        logger.info("erased everything Baatein remembered about user %s", user_id)
 
     async def warm_up(self) -> None:
         """Load the embedding model so the first per-turn recall fits its timeout."""
@@ -225,9 +227,9 @@ class CallMemory:
         self._turn_cut_off = turn_cut_off
         """Similarity cut-off for the user's own words (it depends on their language)."""
         self._tool_cut_off = tool_cut_off
+        """Similarity cut-off for the recall tool's English keywords."""
         self._duplicate_at = duplicate_at
         """Similarity at which a new memory repeats a saved one; None skips the check."""
-        """Similarity cut-off for the recall tool's English keywords."""
         self.preferences = preferences or Preferences()
         self.session = session
         self._language = language
@@ -378,7 +380,14 @@ class CallMemory:
         task.add_done_callback(_consume_error)
 
         def log_duration(done: "asyncio.Task[list[ScoredFact]]") -> None:
-            if searched and not done.cancelled():
+            # Most searches finish after the reply has started, so failures are logged here,
+            # whether or not anyone waited (a Pinecone outage must not look like a quiet call).
+            if done.cancelled():
+                return
+            if (error := done.exception()) is not None:
+                self.metrics.search_failures += 1
+                logger.error("memory recall failed", exc_info=error)
+            elif searched:
                 took = (time_module.perf_counter() - started) * 1000
                 self.metrics.search_ms.append(round(took))
                 logger.info("memory recall: the search took %.0f ms", took)
@@ -405,8 +414,7 @@ class CallMemory:
             return None
         if task.cancelled():
             return []
-        if (error := task.exception()) is not None:
-            logger.error("memory recall failed", exc_info=error)
+        if task.exception() is not None:  # logged when the search finished
             return []
         logger.info(
             "memory recall: the reply waited %.0f ms", (time_module.perf_counter() - started) * 1000
@@ -842,14 +850,18 @@ class CallMemory:
             and last.role is Role.USER
             and len(words(last.text)) >= ABRUPT_MIN_WORDS
         )
-        await self._deps.sessions.end(
-            self.session.id,
-            self._deps.clock.now(),
-            reason,
-            ended_abruptly=abrupt,
-            unfinished_topic=last.text[:MAX_TOPIC_CHARS] if abrupt and last else None,
-            saving_paused=self.saving_paused or self.private,
-        )
+        try:
+            await self._deps.sessions.end(
+                self.session.id,
+                self._deps.clock.now(),
+                reason,
+                ended_abruptly=abrupt,
+                unfinished_topic=last.text[:MAX_TOPIC_CHARS] if abrupt and last else None,
+                saving_paused=self.saving_paused or self.private,
+            )
+        except NotFoundError:  # "Forget me" during the call erased it; nothing left to end
+            logger.info("session %s was erased during the call", self.session.id)
+            return
         try:
             await self._deps.sessions.save_metrics(self.session.id, self.metrics.to_json())
         except Exception:  # the numbers are for tuning; never fail a call's end over them

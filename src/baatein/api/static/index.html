@@ -457,6 +457,7 @@
       await room.startAudio();
       $("enable-audio").hidden = room.canPlaybackAudio;
       await room.localParticipant.setMicrophoneEnabled(true);
+      if (!room) return; // the call ended while connecting
       setState("connecting", "Waiting for Baatein…");
       startTimer();
       $("talk").classList.add("live");
@@ -481,6 +482,7 @@
     $("enable-audio").hidden = true;
     $("mute").hidden = true;
     $("mute").setAttribute("aria-pressed", "false");
+    $("mute").setAttribute("aria-label", "Mute microphone");
     $("talk").classList.remove("live");
     $("talk").setAttribute("aria-label", "Start talking");
     setState("idle", "Ready when you are", "Tap the green button to start");
@@ -499,7 +501,10 @@
   $("open-settings").onclick = () => {
     $("erase-form").hidden = true;
     $("erase-start").hidden = false;
-    $("erase-note").textContent = "";
+    // Erasing during a call would pull the call's own records out from under it.
+    $("erase-start").disabled = Boolean(room);
+    $("erase-note").className = "note";
+    $("erase-note").textContent = room ? "End the call first to erase memories." : "";
     $("settings").showModal();
   };
   $("settings").onclick = (event) => { if (event.target === $("settings")) $("settings").close(); };
@@ -520,7 +525,14 @@
       $("erase-note").textContent = "Done. Baatein no longer remembers anything about you.";
     } catch (error) {
       $("erase-note").className = "note bad";
-      $("erase-note").textContent = error.status === 401 ? "That password didn't match." : error.message;
+      if (error.status === 401) {
+        // Either the password is wrong or the login has expired; /me tells them apart.
+        const loggedIn = await request("/me", null, storedToken()).then(() => true, () => false);
+        $("erase-note").textContent = loggedIn ? "That password didn't match." : "Please log in again.";
+        if (!loggedIn) { storeToken(null); $("settings").close(); show(false); }
+      } else {
+        $("erase-note").textContent = error.message;
+      }
     } finally {
       $("erase-password").value = "";
       $("erase").disabled = false;

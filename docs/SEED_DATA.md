@@ -21,7 +21,7 @@ uv run baatein seed seeds/ram_mohapatra.json --replace
    BAATEIN_DEV__SEED_ENABLED=true
    ```
 2. Sign up a **new** account (uploading only adds, never deletes, so a fresh account gives a clean test).
-3. Under the call button, **Load test memories (dev only)** appears. Pick a seed file. It shows what was added.
+3. Open **Settings** (the gear); a **Test memories** section appears. Pick a seed file. It shows what was added.
 
 Or with curl, using the `access_token` from `/auth/login`:
 ```bash

@@ -3,7 +3,7 @@
 > **Decision (2026-10-30):** Baatein uses Pinecone `llama-text-embed-v2` at 2048 dimensions, focusing on English, Hindi and Hinglish for now. It is the strongest model here for those three (English 29/31 first, AUC 0.98; Hindi 28/31, 0.89; Hinglish 24/31, 0.80). Its round trip (about 450 ms) is too slow to hold each reply for, so per-turn results join the next turn and the `recall` tool says "Hmm…" while it searches (`docs/DECISIONS.md`, D14); similarity cut-offs are set per language from these results. Odia and Kannada stay in the code but off the signup form until their retrieval is better (local `multilingual-e5-large` is the strongest for them). Details in `docs/PLAN.md` §3 Embeddings.
 
 Baatein looks up saved memories in two ways:
-- **Per-turn recall**: on every user turn it searches with the user's own words, as Sarvam transcribes them (`Assistant.on_user_turn_completed`, 0.3 s budget). Results are added as a hidden note.
+- **Per-turn recall**: on every user turn it searches with the user's own words, as Sarvam transcribes them (`Assistant.on_user_turn_completed`). Results are added as a hidden note; since D14 the reply no longer waits for them, and a slower search's results join the next turn.
 - **The `recall` tool**: Claude searches with a few English keywords when it needs something it doesn't have.
 
 Memories are stored as short English sentences. Spoken questions arrive in another language and script, so retrieval has to work across languages. This benchmark measures how well each embedding model, and optionally a reranker, does that. It is the basis for choosing a model rather than patching prompts.
@@ -88,7 +88,7 @@ Models tried: 6 local embedding models and 2 local rerankers (below), then Pinec
 ### What this says
 
 1. **The current model is the weak point for Odia and Kannada**, not the prompt: 21 of 31 in the top 5, and it can barely tell a Kannada question from small talk (AUC 0.54). It is fine for Hindi.
-2. **multilingual-e5-large is the best all-round choice for Baatein's four languages**: top-5 recall of 28 to 30 for the scripts Sarvam returns, the best Odia and Kannada separation, 34 ms a query (well inside the 0.3 s per-turn budget), about 1.7 GB.
+2. **multilingual-e5-large is the best all-round choice for Baatein's four languages**: top-5 recall of 28 to 30 for the scripts Sarvam returns, the best Odia and Kannada separation, 34 ms a query (well inside the 0.3 s per-turn budget this benchmark assumed), about 1.7 GB.
 3. **embeddinggemma-300m is the light alternative**: best for Hindi and Hinglish at half the memory and 16 ms, but weak for Odia (AUC 0.46, no better than chance). Not suitable while Odia is a supported language.
 4. **Rerankers rank almost perfectly but cost 260 to 330 ms on CPU**, the whole per-turn budget. They fit the `recall` tool (Claude is already waiting on a tool call), not per-turn recall.
 5. **One similarity cut-off can't serve every language.** With e5-large, each language separates cleanly at its own cut-off (0.78 to 0.82), but one cut-off for all lets 25% of small talk through. The cut-off belongs in the language profile. Today's single 0.3, set for MiniLM, already lets some Kannada small talk through.
@@ -136,7 +136,7 @@ Run with `uv run --env-file .env python -m bench.retrieval.run --models pinecone
 **What this adds:**
 1. **llama-text-embed-v2 is the best model for Roman Hinglish** (24 of 31 first at 2048 dimensions), and more dimensions help it steadily. It is **weak for Odia and Kannada** (15 to 17 first, and it lets half of Kannada small talk through), so it doesn't fit Baatein's languages.
 2. **Hosted e5-large matches local e5-large** in quality; the difference is only where it runs.
-3. **Hosted calls are too slow for per-turn recall**: one round trip is longer than the 0.3 s budget. They could serve the `recall` tool, where Claude already waits, but local e5-large plus a local reranker does that faster.
+3. **Hosted calls are too slow for per-turn recall**: one round trip is longer than the 0.3 s budget. (Baatein later chose Pinecone anyway and stopped holding the reply for the search; see D11 and D14 in `docs/DECISIONS.md`.) They could serve the `recall` tool, where Claude already waits, but local e5-large plus a local reranker does that faster.
 4. **pinecone-rerank-v0 is English-centric** (9 of 31 first for Odia); bge-reranker-v2-m3 is the multilingual reranker to use, local or hosted.
 5. The Cohere rerankers (`cohere-rerank-3.5`, `cohere-rerank-4-fast`) returned 403 "Project is not authorized to use model"; they need enabling on the Pinecone project.
 

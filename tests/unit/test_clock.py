@@ -46,5 +46,8 @@ def test_demo_clock_ignores_an_unreadable_file(
     path.write_text('{"now": "not a date"}')
     real = Ticking(datetime(2026, 10, 30, 9, 0, tzinfo=UTC))
 
-    assert DemoClock(path, real).now() == real.at
-    assert "unreadable demo clock" in caplog.text
+    clock = DemoClock(path, real)
+    assert clock.now() == real.at
+    path.write_text('{"now": "2026-11-02T10:00:00", "set_at": "2026-10-30T09:00:00+00:00"}')
+    assert clock.now() == real.at  # no time zone: can't be compared with real time
+    assert caplog.text.count("unreadable demo clock") == 1  # warned once

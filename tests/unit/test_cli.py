@@ -199,8 +199,10 @@ def test_demo_date_sets_and_clears_the_demo_clock(
     assert (tmp_path / "clock.json").exists()
     assert main(["demo-date", "--clear"]) == 0
     assert "demo clock cleared" in capsys.readouterr().out
-    assert main(["demo-date"]) == 0
+    assert main(["demo-date", "--clear"]) == 0
     assert "demo clock was not set" in capsys.readouterr().out
+    assert main(["demo-date"]) == 0
+    assert "Give a day" in capsys.readouterr().out
 
 
 def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:

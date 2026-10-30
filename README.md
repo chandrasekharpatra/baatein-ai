@@ -4,22 +4,29 @@ A Hinglish voice companion that remembers you. Talk to it in the browser in the 
 
 Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam and SQLite. Python 3.12, no Docker.
 
-> **Status:** Phases 0–4 of 6 are done. You can sign up, start a call and have a live Hinglish voice conversation. Calls are saved turn by turn, the agent starts with what it remembers, looks up relevant memories on every turn, and saves follow-ups ("ask how Friday's interview went") for the next call. Phase 5 is in progress: memories are now saved only after the user agrees ("Kya main yeh yaad rakhun?"), and can be corrected or forgotten. See [docs/PHASE5_SLICES.md](docs/PHASE5_SLICES.md). See [Roadmap](#roadmap) and [docs/PLAN.md](docs/PLAN.md).
+> **Status:** All six phases are built. Talk to it live in Hinglish or English:
+> - **Memory with consent:** it saves only with your agreement ("Kya main yeh yaad rakhun?").
+> - **Follow-ups:** it keeps storylines to check in on later, and dated reminders it brings up in the next call.
+> - **Summaries:** it writes a short summary after each call for the next one.
+> - **Your control:** memories can be corrected or forgotten, and "Forget me" erases everything.
+> - **Metrics:** every call keeps its latency, memory and usage numbers (`baatein metrics`).
+>
+> See [Roadmap](#roadmap), [docs/DECISIONS.md](docs/DECISIONS.md) and [docs/PLAN.md](docs/PLAN.md).
 
 ## How it works
 
 ```
- Browser ──1. sign up / log in──▶ FastAPI ──▶ SQLite (users, sessions, turns,
-   │      ◀── access token ────                         follow-ups, facts + vectors)
+ Browser ──1. sign up / log in──▶ FastAPI ──▶ SQLite (users, calls, turns, facts + vectors,
+   │      ◀── access token ────                         people, storylines, reminders)
    │──2. POST /livekit/token ─▶  room token + agent dispatch {"user_id": ...}
    │
    └──3. WebRTC audio ─▶ LiveKit server ──dispatches──▶ Agent worker
-                                                      Sarvam STT → Claude → Sarvam TTS
+                                                      Sarvam STT → Claude → Cartesia/Sarvam TTS
 ```
 
 1. The web client signs you up or logs you in and gets an access token.
 2. `/livekit/token` creates a fresh room and a LiveKit token that dispatches the `baatein` agent, signed with your user id.
-3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens (with codes and long numbers redacted); on each of your turns it searches your saved memories. It asks before saving anything, and can correct or forget a memory when you ask.
+3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens (with codes and long numbers redacted); on each of your turns it searches your saved memories, and what it finds is ready by its next reply. It asks before saving anything, can correct or forget a memory when you ask, and after the call `baatein serve` writes a short summary for next time.
 
 ## Tech stack
 
@@ -70,7 +77,7 @@ uv run baatein-agent dev      # agent worker (hot reload)
 uv run baatein serve          # API + web client on http://127.0.0.1:8000
 ```
 
-Open http://localhost:8000, sign up, allow the microphone and press **Start talking**. The page shows live transcripts of both sides.
+Open http://localhost:8000, sign up, allow the microphone and tap the green call button. The orb follows whoever is speaking; the gear opens settings (erase memories, log out).
 
 To try the agent without a server or browser, run `uv run baatein-agent console`. It uses your local mic and speakers and the default language.
 
@@ -94,12 +101,14 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_DATABASE__URL` | `sqlite:///data/baatein.db` | Database file (relative to the working directory) |
 | `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` | `pinecone` / `llama-text-embed-v2` / `2048` | Fact embeddings (needs `PINECONE_API_KEY`); run `baatein reembed` after changing |
 | `BAATEIN_EMBEDDING__MIN_SIMILARITY` | measured per model | Similarity cut-offs by language, e.g. `{"english": 0.2, "default": 0.12}`; by default the values measured for the model in `config.py:MEASURED_CUT_OFFS` |
+| `BAATEIN_EMBEDDING__DUPLICATE_SIMILARITY` | measured per model | Similarity at which a new memory counts as already saved (llama: 0.80); unmeasured models skip the check |
 | `BAATEIN_EMBEDDING__CACHE_DIR` | `data/models` | Where FastEmbed downloads a local model |
-| `BAATEIN_MEMORY__CONTEXT_SUMMARIES` / `__CONTEXT_FOLLOWUPS` / `__CONTEXT_FACTS` | `3` / `5` / `10` | How much memory goes into the agent's instructions at call start |
-| `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall_memory` tool |
+| `BAATEIN_MEMORY__CONTEXT_FACTS` / `__CONTEXT_THREADS` / `__CONTEXT_DECLINED` | `10` / `10` / `10` | How much memory goes into the agent's instructions at call start |
+| `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall` tool |
 | `BAATEIN_VOICE__TTS` | unset | Another voice for a language, as JSON by language code (e.g. a Sarvam `bulbul:v4-flash` expressive voice for a demo); unset keeps each profile's own |
 | `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0` | How long a reply waits for per-turn recall; a slower search's memories join the next turn. Set `0.1` with a local FastEmbed model |
 | `BAATEIN_MEMORY__THINKING_AFTER_SECONDS` | `0.3` | If the `recall` tool takes longer, Baatein says "Hmm…" meanwhile |
+| `BAATEIN_DEV__CLOCK_FILE` | unset | Demos only: memory and reminders take "now" from this file (`baatein demo-date`); never set in production |
 | `BAATEIN_FINALIZE__MODEL` / `__EFFORT` | `claude-haiku-5-5` / `low` | The model that writes each call's summary |
 | `BAATEIN_FINALIZE__INTERVAL_SECONDS` | `10` | How often `baatein serve` summarises finished calls; `0` turns it off |
 | `BAATEIN_FINALIZE__MAX_ATTEMPTS` / `__RETRY_BASE_SECONDS` | `5` / `60` | Failed summaries are retried, waiting 1, 2, 4… minutes (up to an hour) |
@@ -207,7 +216,7 @@ Pass `--email someone@example.com` to call as the same user every time (signed u
 | 2 | Fact memory: embeddings, sqlite-vec + FTS5 hybrid search | ✅ |
 | 3 | Email/password auth, LiveKit tokens, web client | ✅ |
 | 4 | Call lifecycle: save transcripts, load context at call start, per-turn memory retrieval, memory tools | ✅ |
-| 5 | Consent-based memory layer: consent, storylines, persona, reminders, end-of-call summary, scenario evals | All six slices built; live voice check pending |
-| 6 | "Forget me", observability, evals, demo polish | |
+| 5 | Consent-based memory layer: consent, storylines, persona, reminders, end-of-call summary, scenario evals | ✅ |
+| 6 | "Forget me", per-call metrics, web client redesign, demo clock and multi-day demo | ✅ built; demo video to record |
 
 Design decisions, with the options considered and why, are in [docs/DECISIONS.md](docs/DECISIONS.md); the architecture is in [docs/PLAN.md](docs/PLAN.md).

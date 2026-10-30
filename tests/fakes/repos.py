@@ -74,6 +74,7 @@ class InMemoryUserRepo:
         threads = {t for t, thread in state.threads.items() if thread.user_id == user_id}
         reminders = {r for r, reminder in state.reminders.items() if reminder.user_id == user_id}
         state.sessions = {k: v for k, v in state.sessions.items() if k not in sessions}
+        state.metrics = {k: v for k, v in state.metrics.items() if k not in sessions}
         state.turns = [t for t in state.turns if t.session_id not in sessions]
         state.threads = {k: v for k, v in state.threads.items() if k not in threads}
         state.thread_events = [e for e in state.thread_events if e.thread_id not in threads]

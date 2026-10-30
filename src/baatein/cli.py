@@ -13,10 +13,10 @@ from baatein.config import Settings
 from baatein.container import build_root
 from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder, SeedFile
-from baatein.memory.service import MemoryService
+from baatein.memory.service import MemoryDeps, MemoryService
 from baatein.metrics import CallMetrics, report
 from baatein.ports.auth import PasswordHasher
-from baatein.ports.clock import Clock, DemoClock
+from baatein.ports.clock import DemoClock
 from baatein.ports.repos import SessionRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
@@ -70,7 +70,8 @@ async def show_metrics(settings: Settings, days: float, email: str | None) -> st
             if user is None:
                 return f"no user {email}"
             user_id = user.id
-        since = injector.get(Clock).now() - timedelta(days=days)  # type: ignore[type-abstract]
+        # Calls are dated by the memory clock, which is the demo clock when one is set.
+        since = injector.get(MemoryDeps).clock.now() - timedelta(days=days)
         sessions: SessionRepo = injector.get(SessionRepo)  # type: ignore[type-abstract]
         calls = await sessions.metrics_since(since, user_id)
     finally:
@@ -84,8 +85,10 @@ def demo_date(settings: Settings, day: str | None, at: str, tz: str, clear: bool
     if not settings.dev.clock_file:
         return "Set BAATEIN_DEV__CLOCK_FILE (e.g. data/demo-clock.json) first, then restart."
     clock = DemoClock(Path(settings.dev.clock_file))
-    if clear or day is None:
+    if clear:
         return "demo clock cleared: real time" if clock.clear() else "demo clock was not set"
+    if day is None:
+        return "Give a day (YYYY-MM-DD), or --clear to go back to real time."
     moment = datetime.combine(date.fromisoformat(day), time.fromisoformat(at), ZoneInfo(tz))
     clock.set(moment)
     return f"demo clock: it is now {moment:%a %d %b %Y, %H:%M} ({tz}), and time runs on"

@@ -5,6 +5,7 @@ from baatein.domain.models import (
     BoundaryScope,
     Certainty,
     DeclinedSuggestion,
+    FinalizeStatus,
     MemoryKind,
     Person,
     Repeat,
@@ -80,13 +81,16 @@ def test_last_call_shows_how_long_ago_and_its_summary() -> None:
 
 
 def test_a_brief_last_call_brings_the_one_before_it() -> None:
-    brief = make_session("u", started_at=NOW)
+    brief = make_session("u", started_at=NOW, finalize_status=FinalizeStatus.DONE)
+    pending = make_session("u", started_at=NOW)
     earlier = make_session("u", started_at=NOW - timedelta(days=2), summary="Talked about Bapa.")
 
     lines = render_context(context(last_call=brief, earlier_call=earlier)).splitlines()
+    waiting = render_context(context(last_call=pending, earlier_call=earlier)).splitlines()
 
     assert lines[1] == "Your last call was earlier today (Thu 29 Oct 2026)."
     assert lines[2] == "It was very brief. The call before it, Tue 27 Oct 2026: Talked about Bapa."
+    assert waiting[2].startswith("Its summary isn't ready. The call before it,")
 
 
 def test_call_cut_off_mid_story_is_offered_once() -> None:

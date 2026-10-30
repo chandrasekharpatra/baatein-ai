@@ -1021,3 +1021,31 @@ async def test_failing_to_save_metrics_doesnt_fail_the_end_of_a_call(
 
     assert (await world.deps.sessions.get(memory.session.id)).ended_at is not None  # type: ignore[union-attr]
     assert "saving metrics of session" in caplog.text
+
+
+async def test_a_search_that_fails_after_the_reply_started_is_logged_and_counted(
+    world: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def down(*_: object) -> list[ScoredFact]:
+        await asyncio.sleep(0.02)
+        raise RuntimeError("pinecone down")
+
+    world.store.search = down  # type: ignore[method-assign]
+    memory = await world.service.open_call(world.user)
+    task = memory.start_recall("google interview")
+
+    assert await memory.recall(task) is None  # the reply didn't wait
+    await asyncio.sleep(0.05)
+
+    assert "memory recall failed" in caplog.text
+    assert (memory.metrics.search_failures, memory.metrics.search_ms) == (1, [])
+
+
+async def test_a_call_whose_memories_were_erased_meanwhile_ends_quietly(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    await world.service.forget_user(world.user.id)
+
+    await memory.close("done")
+
+    assert world.state.sessions == {}
+    assert world.state.metrics == {}

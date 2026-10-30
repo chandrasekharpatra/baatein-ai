@@ -26,19 +26,25 @@ class DemoClock:
     def __init__(self, path: Path, real: Clock | None = None) -> None:
         self._path = path
         self._real = real or SystemClock()
+        self._warned = False
+        logger.warning("demo clock on: memory time comes from %s when it exists", path)
 
     def now(self) -> datetime:
         real = self._real.now()
         try:
             data = json.loads(self._path.read_text())
             moment = datetime.fromisoformat(data["now"])
-            set_at = datetime.fromisoformat(data["set_at"])
+            if moment.tzinfo is None:
+                raise ValueError("the demo moment needs a time zone")
+            shifted = moment + (real - datetime.fromisoformat(data["set_at"]))
         except FileNotFoundError:
             return real
         except (ValueError, KeyError, TypeError):
-            logger.warning("ignoring unreadable demo clock file %s", self._path)
+            if not self._warned:
+                logger.warning("ignoring unreadable demo clock file %s", self._path)
+                self._warned = True
             return real
-        return (moment + (real - set_at)).astimezone(UTC)
+        return shifted.astimezone(UTC)
 
     def set(self, moment: datetime) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
