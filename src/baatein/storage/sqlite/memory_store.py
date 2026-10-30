@@ -49,6 +49,36 @@ class SqliteMemoryStore:
     async def add(self, fact: Fact) -> None:
         vector = await self._embed_passage(fact.text)
         await self._ensure_index()
+        await self._add(fact, vector)
+
+    async def add_unless_similar(self, fact: Fact, min_similarity: float) -> list[ScoredFact]:
+        vector = await self._embed_passage(fact.text)  # embedded once, for both steps
+        await self._ensure_index()
+        async with self._db.read() as conn:
+            async with conn.execute(
+                f"SELECT rowid, distance FROM {self._table}"
+                " WHERE embedding MATCH ? AND k = 3 AND user_id = ? ORDER BY distance",
+                (serialize_float32(vector), fact.user_id),
+            ) as cursor:
+                close = {
+                    pk: 1.0 - d for pk, d in await cursor.fetchall() if 1.0 - d >= min_similarity
+                }
+            similar: list[ScoredFact] = []
+            if close:
+                async with conn.execute(
+                    f"SELECT * FROM facts WHERE pk IN ({', '.join('?' * len(close))})",
+                    tuple(close),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                similar = sorted(
+                    (ScoredFact(_fact(row), close[row["pk"]]) for row in rows),
+                    key=lambda s: -s.score,
+                )
+        if not similar:
+            await self._add(fact, vector)
+        return similar
+
+    async def _add(self, fact: Fact, vector: list[float]) -> None:
         try:
             async with self._db.transaction() as conn:
                 await self._insert(conn, fact, vector)

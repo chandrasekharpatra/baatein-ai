@@ -37,6 +37,14 @@ MEASURED_CUT_OFFS: dict[str, dict[str | None, float]] = {
 }
 
 
+MEASURED_DUPLICATES: dict[str, float] = {
+    # Similarity between two saved facts at which the new one repeats or updates the old
+    # (2026-10-30, Ram's account): rephrased duplicates and updates scored 0.83-0.98, different
+    # but related facts at most 0.74. Models not measured here skip the check.
+    "llama-text-embed-v2": 0.80,
+}
+
+
 class EmbeddingSettings(BaseModel):
     provider: str = "pinecone"
     model: str = "llama-text-embed-v2"
@@ -45,6 +53,8 @@ class EmbeddingSettings(BaseModel):
     """Where FastEmbed downloads local models."""
     min_similarity: dict[str, float] = Field(default_factory=dict)
     """Cut-offs to use instead of the measured ones, by language ("default" for the rest)."""
+    duplicate_similarity: float | None = None
+    """Use instead of the measured value in `MEASURED_DUPLICATES`."""
 
     def spec(self) -> ProviderSpec:
         options: dict[str, object] = {"model_id": self.model, "dimensions": self.dimensions}
@@ -63,6 +73,13 @@ class EmbeddingSettings(BaseModel):
             return explicit
         measured = MEASURED_CUT_OFFS.get(self.model, {})
         return measured.get(language, measured.get(None, 0.3))
+
+    def duplicate_at(self) -> float | None:
+        """How similar a new memory must be to a saved one to count as the same; None skips
+        the check (no measured value for this model)."""
+        if self.duplicate_similarity is not None:
+            return self.duplicate_similarity
+        return MEASURED_DUPLICATES.get(self.model)
 
 
 class MemorySettings(BaseModel):

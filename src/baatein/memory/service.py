@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time as time_module
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -109,6 +110,13 @@ class MemoryContext:
     """Active reminders with nothing due in the next week: listed so they can be changed."""
 
 
+@dataclass(frozen=True)
+class AlreadySaved:
+    """`remember` found current memories that say the same thing, so it saved nothing."""
+
+    similar: list[Fact]
+
+
 class ForgetOutcome(StrEnum):
     DELETED = "deleted"
     NEEDS_CONFIRMATION = "needs_confirmation"
@@ -136,6 +144,15 @@ def _consume_error(task: "asyncio.Task[list[ScoredFact]]") -> None:
         task.exception()
 
 
+def split_relation(name: str, relation: str | None) -> tuple[str, str | None]:
+    """ "Ramesh (college friend)" -> ("Ramesh", "college friend"). Claude sometimes put the
+    relation in the name, which made a second person ("Ramesh" and "Ramesh (college friend)")."""
+    match = re.fullmatch(r"\s*(.+?)\s*\((.+)\)\s*", name)
+    if match is None:
+        return name.strip(), relation
+    return match[1], relation or match[2].strip()
+
+
 class MemoryService:
     """Opens per-call memory. One instance per process."""
 
@@ -144,10 +161,12 @@ class MemoryService:
         deps: MemoryDeps,
         embedder: Embedder,
         cut_off: Callable[[str | None], float] | None = None,
+        duplicate_at: float | None = None,
     ) -> None:
         self._deps = deps
         self._embedder = embedder
         self._cut_off = cut_off
+        self._duplicate_at = duplicate_at
 
     async def warm_up(self) -> None:
         """Load the embedding model so the first per-turn recall fits its timeout."""
@@ -172,6 +191,7 @@ class MemoryService:
             user.preferences,
             turn_cut_off=cut_off(language or user.language) if cut_off else None,
             tool_cut_off=cut_off(None) if cut_off else None,
+            duplicate_at=self._duplicate_at,
         )
 
 
@@ -188,11 +208,14 @@ class CallMemory:
         preferences: Preferences | None = None,
         turn_cut_off: float | None = None,
         tool_cut_off: float | None = None,
+        duplicate_at: float | None = None,
     ) -> None:
         self._deps = deps
         self._turn_cut_off = turn_cut_off
         """Similarity cut-off for the user's own words (it depends on their language)."""
         self._tool_cut_off = tool_cut_off
+        self._duplicate_at = duplicate_at
+        """Similarity at which a new memory repeats a saved one; None skips the check."""
         """Similarity cut-off for the recall tool's English keywords."""
         self.preferences = preferences or Preferences()
         self.session = session
@@ -386,8 +409,12 @@ class CallMemory:
         relation: str | None = None,
         sensitivity: Sensitivity = Sensitivity.NORMAL,
         certainty: Certainty = Certainty.SURE,
-    ) -> Fact | None:
-        """Save a memory the user has just agreed to. Returns None while saving is paused."""
+        different: bool = False,
+    ) -> Fact | AlreadySaved | None:
+        """Save a memory the user has just agreed to. Returns None while saving is paused, and
+        `AlreadySaved` if current memories already say much the same, unless `different`
+        (Claude checked them and this is new). Without the check, a second "yaad rakhna"
+        saved a near copy."""
         if self.saving_paused:
             return None
         person = await self.person(about, relation) if about else None
@@ -403,8 +430,11 @@ class CallMemory:
             certainty=certainty,
             sensitivity=sensitivity,
         )
-        await self._deps.store.add(fact)
-        return fact
+        if self._duplicate_at is None or different:
+            await self._deps.store.add(fact)
+            return fact
+        similar = await self._deps.store.add_unless_similar(fact, self._duplicate_at)
+        return AlreadySaved([s.fact for s in similar]) if similar else fact
 
     async def correct(self, fact_id: str, text: str, quote: str | None = None) -> Fact | None:
         """Replace one of the user's current memories. Returns None if there is no such memory."""
@@ -485,6 +515,7 @@ class CallMemory:
 
     async def person(self, name: str, relation: str | None = None) -> Person:
         """The user's person with this name, created on first mention."""
+        name, relation = split_relation(name, relation)
         people = self._deps.people
         found = await people.find_by_name(self.user_id, name)
         if found is not None:

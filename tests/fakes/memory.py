@@ -26,6 +26,24 @@ class InMemoryMemoryStore:
         [self._vectors[fact.id]] = await self._embedder.embed([fact.text], "passage")
         self._facts[fact.id] = fact
 
+    async def add_unless_similar(self, fact: Fact, min_similarity: float) -> list[ScoredFact]:
+        if fact.user_id not in self._state.users:
+            raise NotFoundError("user or session", fact.user_id)
+        [vector] = await self._embedder.embed([fact.text], "passage")
+        similar = sorted(
+            (
+                ScoredFact(f, _cosine(vector, self._vectors[f.id]))
+                for f in self._facts.values()
+                if f.user_id == fact.user_id and f.is_active
+            ),
+            key=lambda s: -s.score,
+        )
+        similar = [s for s in similar[:3] if s.score >= min_similarity]
+        if not similar:
+            self._vectors[fact.id] = vector
+            self._facts[fact.id] = fact
+        return similar
+
     async def get(self, fact_id: str) -> Fact | None:
         return self._facts.get(fact_id)
 

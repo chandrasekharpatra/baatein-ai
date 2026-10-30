@@ -11,6 +11,7 @@ from baatein.config import MemorySettings
 from baatein.domain.models import (
     BoundaryScope,
     Certainty,
+    Fact,
     FinalizeStatus,
     MemoryKind,
     OccurrenceStatus,
@@ -25,7 +26,15 @@ from baatein.domain.models import (
     ThreadStatus,
     Verbosity,
 )
-from baatein.memory.service import FORGOTTEN_TURN, CallMemory, ForgetOutcome, MemoryService, zone
+from baatein.memory.service import (
+    FORGOTTEN_TURN,
+    AlreadySaved,
+    CallMemory,
+    ForgetOutcome,
+    MemoryService,
+    split_relation,
+    zone,
+)
 from tests.factories import (
     at,
     make_boundary,
@@ -918,3 +927,51 @@ async def test_a_call_searches_with_its_languages_cut_off() -> None:
     await hinglish_call.recall("mera interview")
 
     assert seen == [0.2, 0.12, 0.3]
+
+
+async def duplicate_call(world: World) -> CallMemory:
+    service = MemoryService(world.deps, world.embedder, duplicate_at=0.8)
+    return await service.open_call(world.user)
+
+
+async def test_remember_doesnt_save_a_near_copy(world: World) -> None:
+    memory = await duplicate_call(world)
+    first = await memory.remember("Wife Sabitri is 54")
+
+    again = await memory.remember("Wife Sabitri is 54 years old")
+
+    assert isinstance(first, Fact)
+    assert again == AlreadySaved([first])
+    assert len(await world.store.active(world.user.id, 10)) == 1
+
+
+async def test_remember_saves_a_close_but_different_memory_when_told(world: World) -> None:
+    memory = await duplicate_call(world)
+    await memory.remember("Wife Sabitri is 54")
+
+    saved = await memory.remember("Wife Sabitri is 54 years old", different=True)
+
+    assert isinstance(saved, Fact)
+    assert len(await world.store.active(world.user.id, 10)) == 2
+
+
+@pytest.mark.parametrize(
+    ("name", "relation", "expected"),
+    [
+        ("Ramesh (college friend)", None, ("Ramesh", "college friend")),
+        (" Ramesh ( college friend ) ", "friend", ("Ramesh", "friend")),
+        ("Ramesh", "college friend", ("Ramesh", "college friend")),
+        ("  Ramesh  ", None, ("Ramesh", None)),
+    ],
+)
+def test_split_relation(name: str, relation: str | None, expected: tuple[str, str | None]) -> None:
+    assert split_relation(name, relation) == expected
+
+
+async def test_a_relation_in_the_name_doesnt_make_a_second_person(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+
+    first = await memory.person("Ramesh", "college friend")
+    second = await memory.person("Ramesh (college friend)")
+
+    assert second.id == first.id

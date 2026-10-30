@@ -338,3 +338,35 @@ async def test_a_keyword_match_needs_a_little_shared_meaning(kind: str, tmp_path
     assert [r.fact.text for r in found] == ["gave away the old guitar"]
     if kind == "sqlite":
         await db.close()
+
+
+async def test_add_unless_similar_returns_the_close_facts_instead_of_saving(
+    memory: Memory,
+) -> None:
+    user_id = await add_user(memory)
+    saved = make_fact(user_id, "Wife Sabitri is 54")
+    await memory.store.add(saved)
+    await memory.store.add(make_fact(user_id, "Loves masala chai"))
+    repeat = make_fact(user_id, "Wife Sabitri is 54 years old")  # bag-of-words similarity 0.82
+
+    similar = await memory.store.add_unless_similar(repeat, 0.8)
+
+    assert [s.fact.id for s in similar] == [saved.id]
+    assert similar[0].score >= 0.8
+    assert await memory.store.get(repeat.id) is None
+
+
+async def test_add_unless_similar_saves_a_new_fact(memory: Memory) -> None:
+    user_id = await add_user(memory)
+    await memory.store.add(make_fact(user_id, "Wife Sabitri is 54"))
+    new = make_fact(user_id, "Plays chess with Prafulla every evening")
+
+    assert await memory.store.add_unless_similar(new, 0.8) == []
+
+    assert await memory.store.get(new.id) == new
+    assert [r.fact.id for r in await memory.store.search(user_id, "chess", 5)] == [new.id]
+
+
+async def test_add_unless_similar_for_unknown_user_raises(memory: Memory) -> None:
+    with pytest.raises(NotFoundError):
+        await memory.store.add_unless_similar(make_fact("nobody"), 0.8)

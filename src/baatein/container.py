@@ -168,7 +168,9 @@ class MemoryModule(Module):
     def memory_service(
         self, deps: MemoryDeps, embedder: Embedder, settings: Settings
     ) -> MemoryService:
-        return MemoryService(deps, embedder, settings.embedding.cut_off)
+        return MemoryService(
+            deps, embedder, settings.embedding.cut_off, settings.embedding.duplicate_at()
+        )
 
     @singleton
     @provider

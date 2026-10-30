@@ -87,3 +87,11 @@ def test_cut_offs_can_be_set_by_hand() -> None:
         0.1,
         0.1,
     )
+
+
+def test_the_duplicate_threshold_is_measured_per_model_or_set_by_hand() -> None:
+    from baatein.config import EmbeddingSettings
+
+    assert EmbeddingSettings().duplicate_at() == 0.80
+    assert EmbeddingSettings(model="unmeasured").duplicate_at() is None
+    assert EmbeddingSettings(duplicate_similarity=0.9).duplicate_at() == 0.9

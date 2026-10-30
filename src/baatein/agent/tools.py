@@ -19,10 +19,15 @@ from baatein.domain.models import (
     ThreadStatus,
     Verbosity,
 )
-from baatein.memory.context_builder import render_search
-from baatein.memory.service import CallMemory, ForgetOutcome
+from baatein.memory.context_builder import render_memory, render_search
+from baatein.memory.service import AlreadySaved, CallMemory, ForgetOutcome
 
 PAUSED = "Not saved: the user asked you not to save anything in this call."
+ALREADY_SAVED = """Not saved: this is already saved much the same way:
+{saved}
+If it's the same, just tell them you already remember it. If a detail changed, call \
+correct_memory with that id. Only if it's about something else, call remember again with \
+different=true."""
 FORGET_REPLIES = {
     ForgetOutcome.DELETED: "Deleted.",
     ForgetOutcome.NEEDS_CONFIRMATION: (
@@ -150,6 +155,7 @@ def memory_tools(
         relation: str | None = None,
         sensitivity: str | None = None,
         uncertain: bool | None = None,
+        different: bool | None = None,
     ) -> str:
         """Save something about the user. Call it when the user asks you to remember something,
         or after you asked "Kya main yeh yaad rakhun?" and they clearly said yes. Never save
@@ -169,6 +175,8 @@ def memory_tools(
                 "grief" or "crisis" for those topics. Everyday feelings, like missing a friend,
                 are "normal".
             uncertain: True if the user wasn't sure about the details.
+            different: Only after this tool said a similar memory is saved and you're sure
+                this one is about something else.
         """
         fact = await memory.remember(
             text,
@@ -178,7 +186,10 @@ def memory_tools(
             relation=relation,
             sensitivity=choice(Sensitivity, sensitivity, Sensitivity.NORMAL),
             certainty=Certainty.UNCERTAIN if uncertain else Certainty.SURE,
+            different=bool(different),
         )
+        if isinstance(fact, AlreadySaved):
+            return ALREADY_SAVED.format(saved="\n".join(render_memory(f) for f in fact.similar))
         return PAUSED if fact is None else f"Saved as [{fact.id}]."
 
     @function_tool

@@ -30,7 +30,7 @@ from baatein.domain.models import (
     ThreadKind,
     ThreadStatus,
 )
-from baatein.memory.service import CallMemory
+from baatein.memory.service import CallMemory, MemoryService
 from tests.factories import make_reminder, make_thread
 from tests.fakes.world import World, build_world
 
@@ -142,6 +142,22 @@ async def test_a_slow_recall_says_hmm_meanwhile(delay: float, said: list[Any]) -
 
     # Kept out of the chat history: Claude never sees it.
     assert context.session.said == said
+
+
+async def test_remember_says_when_it_is_already_saved() -> None:
+    world = build_world()
+    memory = await MemoryService(world.deps, world.embedder, duplicate_at=0.8).open_call(world.user)
+    [remember] = [t for t in memory_tools(memory) if t.info.name == "remember"]  # type: ignore[union-attr]
+    saved = await remember("Wife Sabitri is 54")  # type: ignore[operator]
+
+    again = await remember("Wife Sabitri is 54 years old")  # type: ignore[operator]
+    told = await remember("Wife Sabitri is 54 years old", different=True)  # type: ignore[operator]
+
+    fact_id = saved.removeprefix("Saved as [").removesuffix("].")
+    assert again.startswith("Not saved: this is already saved much the same way:")
+    assert f"[{fact_id}] Wife Sabitri is 54" in again
+    assert "correct_memory" in again
+    assert told.startswith("Saved as [")
 
 
 async def test_remember_saves_with_kind_sensitivity_and_uncertainty() -> None:
