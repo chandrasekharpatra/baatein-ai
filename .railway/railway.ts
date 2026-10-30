@@ -1,4 +1,4 @@
-// Baatein on Railway: one service (web page, API and voice agent) in Singapore, with the SQLite
+// Baatein on Railway: one service, "baatein-ai" (web page, API and voice agent) in Singapore, with the SQLite
 // database on a volume. Audio goes through LiveKit Cloud, not Railway. docs/DEPLOY.md
 //
 // Preview with `railway config plan`, then `railway config apply`. Set the secrets marked
@@ -12,7 +12,7 @@ const PORT = "8000";
 export default defineRailway(() => {
   const data = volume("baatein-data", { region: REGION, sizeMB: 1024 });
 
-  const app = service("baatein", {
+  const app = service("baatein-ai", {
     // Built from the Dockerfile at the repo root.
     source: github("durga811/baatein-ai", { branch: "main" }),
     healthcheck: "/health",
@@ -28,12 +28,13 @@ export default defineRailway(() => {
       LIVEKIT_AGENT_NAME: "baatein",
       BAATEIN_LLM__MODEL: "claude-haiku-5-5",
       BAATEIN_FINALIZE__MODEL: "claude-haiku-5-5",
+      BAATEIN_FINALIZE__INTERVAL_SECONDS: "10",
       BAATEIN_VOICE__DEFAULT_LANGUAGE: "hinglish",
       BAATEIN_EMBEDDING__PROVIDER: "pinecone",
       BAATEIN_EMBEDDING__MODEL: "llama-text-embed-v2",
       BAATEIN_EMBEDDING__DIMENSIONS: "2048",
       BAATEIN_AUTH__SIGNUP_ENABLED: "false",
-      // Loaded on start when missing; never replaced by a redeploy.
+      // Loaded on start when missing (needs BAATEIN_AUTH__SEED_PASSWORD); never replaced.
       BAATEIN_SEED_FILES: [
         "seeds/demo/asha_new.json",
         "seeds/demo/meera_interview.json",
@@ -43,6 +44,7 @@ export default defineRailway(() => {
       // Secrets, set (sealed) in the dashboard.
       ANTHROPIC_API_KEY: preserve(),
       SARVAM_API_KEY: preserve(),
+      CARTESIA_API_KEY: preserve(), // optional: only for a Cartesia voice (BAATEIN_VOICE__TTS)
       PINECONE_API_KEY: preserve(),
       LIVEKIT_URL: preserve(),
       LIVEKIT_API_KEY: preserve(),

@@ -6,10 +6,14 @@ set -euo pipefail
 baatein migrate
 
 if [[ -n "${BAATEIN_SEED_FILES:-}" ]]; then
-  # The files' own passwords are public in the repo; a deploy gives them a secret one.
-  : "${BAATEIN_AUTH__SEED_PASSWORD:?must be set to load BAATEIN_SEED_FILES}"
-  # shellcheck disable=SC2086  # a space-separated list of paths
-  baatein seed $BAATEIN_SEED_FILES --if-missing
+  # The files' own passwords are public in the repo, so seeding needs a secret one. Without
+  # it the app still starts; admins can load the files from Settings instead.
+  if [[ -n "${BAATEIN_AUTH__SEED_PASSWORD:-}" ]]; then
+    # shellcheck disable=SC2086  # a space-separated list of paths
+    baatein seed $BAATEIN_SEED_FILES --if-missing
+  else
+    echo "BAATEIN_AUTH__SEED_PASSWORD is not set: not loading BAATEIN_SEED_FILES" >&2
+  fi
 fi
 
 baatein serve --host 0.0.0.0 --port "${PORT:-8000}" &
