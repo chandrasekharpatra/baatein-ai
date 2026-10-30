@@ -52,13 +52,16 @@ class LanguageRegistry:
 HINGLISH = LanguageProfile(
     code="hinglish",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "hi-IN"}),
-    # Sarvam's code-mixed companion voice, made for Roman-script Hinglish (D29).
+    # Cartesia sonic-3.6, voice "Siya - Bright Conversationalist" (D31). Sonic 3.6 reads
+    # Roman-script Hindi, and keeps one stream per reply, so its tone doesn't jump between
+    # sentences as Sarvam's did. No word timestamps for Hindi: LiveKit times the transcript.
     tts=ProviderSpec(
-        "sarvam",
+        "cartesia",
         {
-            "model": "bulbul:v4-flash",
-            "target_language_code": "hi-IN",
-            "speaker": "simran_enhi_companion",
+            "model": "sonic-3.6",
+            "language": "hi",
+            "voice": "4459a9a5-69d6-4680-b970-e13dc51845b6",
+            "word_timestamps": False,
         },
     ),
     reply_style=(
@@ -67,7 +70,7 @@ HINGLISH = LanguageProfile(
         "balance of Hindi and English. Always write in Roman script, never Devanagari, even "
         "when the user's words reach you in Devanagari."
     ),
-    pace_option="pace",
+    pace_option="speed",
     cannot_hear=(
         "Maaf kijiye, aapki awaaz mujh tak nahi pahunch rahi. Thodi der mein phir baat karte hain."
     ),

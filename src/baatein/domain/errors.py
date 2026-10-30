@@ -43,5 +43,15 @@ class WeakPasswordError(BaateinError):
         self.min_length = min_length
 
 
+class SignupClosedError(BaateinError):
+    def __init__(self) -> None:
+        super().__init__("signup is closed; ask an admin for an account")
+
+
+class NotAdminError(BaateinError):
+    def __init__(self) -> None:
+        super().__init__("only admins can do this")
+
+
 class ConfigurationError(BaateinError):
     pass

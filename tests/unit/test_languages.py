@@ -52,7 +52,20 @@ def test_default_registry_includes_hinglish_with_codemix_stt() -> None:
     assert "Hinglish" in hinglish.reply_style
 
 
-def test_speaks_through_sarvam_bulbul_v4_flash_with_pace_control() -> None:
+def test_hinglish_speaks_through_cartesia_sonic_3_6_with_speed_control() -> None:
+    hinglish = default_language_registry().get("hinglish")
+
+    assert (hinglish.tts.provider, hinglish.pace_option) == ("cartesia", "speed")
+    assert hinglish.tts.options == {
+        "model": "sonic-3.6",
+        "language": "hi",
+        "voice": "4459a9a5-69d6-4680-b970-e13dc51845b6",  # Siya
+        "word_timestamps": False,
+    }
+    assert hinglish.cannot_hear.startswith("Maaf kijiye")
+
+
+def test_english_and_kannada_speak_through_sarvam_bulbul_v4_flash_with_pace_control() -> None:
     registry = default_language_registry()
     voices = {
         code: (
@@ -61,16 +74,13 @@ def test_speaks_through_sarvam_bulbul_v4_flash_with_pace_control() -> None:
             registry.get(code).tts.options["target_language_code"],
             registry.get(code).pace_option,
         )
-        for code in ("hinglish", "english", "kannada")
+        for code in ("english", "kannada")
     }
 
     assert voices == {
-        "hinglish": ("sarvam", "bulbul:v4-flash", "hi-IN", "pace"),
         "english": ("sarvam", "bulbul:v4-flash", "en-IN", "pace"),
         "kannada": ("sarvam", "bulbul:v4-flash", "kn-IN", "pace"),
     }
-    assert registry.get("hinglish").tts.options["speaker"] == "simran_enhi_companion"
-    assert registry.get("hinglish").cannot_hear.startswith("Maaf kijiye")
 
 
 def test_odia_and_kannada_have_their_own_script_and_respect() -> None:

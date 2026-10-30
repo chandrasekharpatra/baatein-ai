@@ -16,6 +16,7 @@ from livekit.agents.voice import (
     ConversationItemAddedEvent,
     FunctionToolsExecutedEvent,
 )
+from livekit.agents.worker import ServerEnvOption
 from livekit.plugins import silero
 
 from baatein.agent.assistant import Assistant
@@ -169,7 +170,14 @@ def note_tools(metrics: CallMetrics, event: FunctionToolsExecutedEvent) -> None:
 
 # INFO by default, also in `dev` (LiveKit's dev default is DEBUG: every SQLite call and STT
 # frame). `baatein-agent dev --log-level debug` brings it back.
-server = AgentServer(setup_fnc=prewarm, log_level="INFO")
+# Each warm call process holds ~250 MB (measured: LiveKit, plugins, Silero). LiveKit's `start`
+# default keeps one per CPU core, about 2 GB on an 8-core machine; two keep a demo server near
+# 1 GB and still answer two calls at once without a cold start.
+server = AgentServer(
+    setup_fnc=prewarm,
+    log_level="INFO",
+    num_idle_processes=ServerEnvOption(dev_default=0, prod_default=2),
+)
 
 
 @server.rtc_session(agent_name=LiveKitSettings().agent_name)

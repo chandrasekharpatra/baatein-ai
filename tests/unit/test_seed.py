@@ -179,20 +179,41 @@ async def test_details_are_stored_as_given() -> None:
     assert world.state.users[world.user.id].preferences.pace is Pace.SLOW
 
 
-async def test_unknown_call_key_duplicate_keys_and_persona_are_refused() -> None:
+@pytest.mark.parametrize(
+    ("data", "problem"),
+    [
+        ({"memories": [{"text": "x", "call": "nope"}]}, "unknown call 'nope'"),
+        ({"calls": [{"key": "a", "days_ago": 1}] * 2}, "call keys must be unique"),
+        ({"threads": [{"key": "t", "title": "x"}] * 2}, "storyline keys must be unique"),
+        ({"memories": [{"text": "y", "corrects": "x"}]}, "unknown memory 'x'"),
+        ({"memories": [{"key": "a", "text": "x"}] * 2}, "memory key 'a' is used twice"),
+        ({"boundaries": [{"topic": "x", "thread": "t"}]}, "unknown storyline 't'"),
+        ({"reminders": [{"title": "x", "settled": [{"date": "soon", "status": "done"}]}]}, "soon"),
+    ],
+)
+def test_a_file_with_broken_references_is_refused_before_loading(
+    data: dict[str, object], problem: str
+) -> None:
+    with pytest.raises(ValidationError, match=problem):
+        SeedFile.model_validate(data)
+
+
+async def test_an_unknown_persona_is_refused() -> None:
     world = build_world()
 
-    with pytest.raises(SeedError, match="unknown call 'nope'"):
-        await seeder(world).load(
-            world.user, SeedFile.model_validate({"memories": [{"text": "x", "call": "nope"}]})
-        )
-    with pytest.raises(SeedError, match="unique"):
-        await seeder(world).load(
-            world.user,
-            SeedFile.model_validate({"calls": [{"key": "a", "days_ago": 1}] * 2}),
-        )
     with pytest.raises(UnknownPersonaError):
         await seeder(world).load(world.user, SeedFile(persona="pirate"))
+
+
+async def test_a_call_later_today_than_now_ends_now() -> None:
+    world = build_world()
+
+    await seeder(world).load(
+        world.user, SeedFile.model_validate({"calls": [{"days_ago": 0, "at": "23:59"}]})
+    )
+
+    [call] = world.state.sessions.values()
+    assert call.ended_at == world.clock.now()
 
 
 async def test_corrections_call_links_offers_and_declined_objects() -> None:
@@ -243,15 +264,6 @@ async def test_corrections_call_links_offers_and_declined_objects() -> None:
     ]
     [video] = world.state.reminders.values()
     assert (video.on, video.source_session_id) == (date(2026, 1, 4), second.id)
-
-
-async def test_unknown_correction_is_refused() -> None:
-    world = build_world()
-
-    with pytest.raises(SeedError, match="unknown memory 'x'"):
-        await seeder(world).load(
-            world.user, SeedFile.model_validate({"memories": [{"text": "y", "corrects": "x"}]})
-        )
 
 
 async def test_create_user_from_the_user_section() -> None:

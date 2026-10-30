@@ -1,4 +1,5 @@
 {
+  "user": { "email": "mohan@example.com", "display_name": "Mohan", "language": "hinglish" },
   "persona": "elder",
   "preferences": { "fewer_questions": true },
   "people": [

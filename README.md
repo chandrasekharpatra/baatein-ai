@@ -21,7 +21,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
    │──2. POST /livekit/token ─▶  room token + agent dispatch {"user_id": ...}
    │
    └──3. WebRTC audio ─▶ LiveKit server ──dispatches──▶ Agent worker
-                                                      Sarvam STT → Claude → Sarvam TTS
+                                                      Sarvam STT → Claude → Cartesia TTS
 ```
 
 1. The web client signs you up or logs you in and gets an access token.
@@ -35,7 +35,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 | Realtime voice | LiveKit Agents 1.8, self-hosted `livekit-server` |
 | Speech-to-text | Sarvam `saaras:v4` in `codemix` mode (Hindi, Odia, Kannada mixed with English) |
 | LLM | Claude Haiku 5.5 (configurable) |
-| Text-to-speech | Sarvam `bulbul:v4-flash` for Hinglish (voice `simran_enhi_companion`), English and Kannada; `bulbul:v3` for Odia (v4-flash has no Odia voice yet). Cartesia `sonic-3` still works per language via `BAATEIN_VOICE__TTS` |
+| Text-to-speech | Cartesia `sonic-3.6` for Hinglish (voice Siya; D31); Sarvam `bulbul:v4-flash` for English and Kannada, `bulbul:v3` for Odia (v4-flash has no Odia voice yet). Any language's voice can be swapped with `BAATEIN_VOICE__TTS` |
 | Storage | SQLite (WAL) via `aiosqlite`, numbered SQL migrations |
 | Memory search | `sqlite-vec` vectors + FTS5 keyword search, fused with reciprocal rank fusion |
 | Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d); FastEmbed local models also work (see [docs/RETRIEVAL_BENCHMARK.md](docs/RETRIEVAL_BENCHMARK.md)) |
@@ -51,7 +51,7 @@ For a step-by-step walkthrough from a fresh machine, including installing LiveKi
 
 - Python 3.12 and [`uv`](https://docs.astral.sh/uv/)
 - `livekit-server`: see the [LiveKit install instructions](https://github.com/livekit/livekit#linux) (Linux: `curl -sSL https://get.livekit.io | bash`, macOS: `brew install livekit`)
-- API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/) (speech-to-text and the voices) and [Pinecone](https://app.pinecone.io/) (memory embeddings). A [Cartesia](https://play.cartesia.ai/) key is only needed if you switch a language to a Cartesia voice
+- API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/) (speech-to-text, and the English and Kannada voices), [Cartesia](https://play.cartesia.ai/) (the Hinglish voice) and [Pinecone](https://app.pinecone.io/) (memory embeddings)
 
 ### Install
 
@@ -63,9 +63,10 @@ uv run pre-commit install
 
 Fill in `.env`:
 
-- `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `PINECONE_API_KEY` (and `CARTESIA_API_KEY` only for a Cartesia voice)
+- `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `PINECONE_API_KEY`
 - `BAATEIN_AUTH__JWT_SECRET`: a long random string, e.g. `openssl rand -hex 32`
 - Keep the `LIVEKIT_*` defaults; they match `livekit-server --dev`.
+- `BAATEIN_AUTH__SIGNUP_ENABLED=true` to sign up from the page locally, and your email in `BAATEIN_AUTH__ADMIN_EMAILS` to load and download test accounts. Signup is off by default; `uv run baatein create-user EMAIL` makes an account without it.
 
 ### Run
 
@@ -77,7 +78,9 @@ uv run baatein-agent dev      # agent worker (hot reload)
 uv run baatein serve          # API + web client on http://127.0.0.1:8000
 ```
 
-Open http://localhost:8000, sign up, allow the microphone and tap the green call button. The orb follows whoever is speaking; the gear opens settings (erase memories, log out).
+Open http://localhost:8000, sign up (or log in), allow the microphone and tap the green call button. The orb follows whoever is speaking; the gear opens settings (erase memories, log out, and for admins, test accounts).
+
+To put it online (Railway, LiveKit Cloud and a Cloudflare domain), see `docs/DEPLOY.md`.
 
 To try the agent without a server or browser, run `uv run baatein-agent console`. It uses your local mic and speakers and the default language.
 
@@ -89,7 +92,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Claude (read by the LiveKit plugin) |
 | `SARVAM_API_KEY` | — | Sarvam STT and TTS (every language) |
-| `CARTESIA_API_KEY` | — | Only if `BAATEIN_VOICE__TTS` switches a language to Cartesia |
+| `CARTESIA_API_KEY` | — | Cartesia TTS: the Hinglish voice |
 | `PINECONE_API_KEY` | — | Hosted memory embeddings (the default embedder) |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server the agent and tokens point to |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | — | Sign room tokens; register the worker |
@@ -97,6 +100,9 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `LIVEKIT_TOKEN_TTL_MINUTES` | `15` | Lifetime of a room token |
 | `BAATEIN_AUTH__JWT_SECRET` | — | Required by the API to issue access tokens |
 | `BAATEIN_AUTH__TOKEN_TTL_MINUTES` | `10080` (7 days) | Access token lifetime |
+| `BAATEIN_AUTH__SIGNUP_ENABLED` | `false` | Anyone can make an account from the page; off, accounts come from admins and `baatein create-user` |
+| `BAATEIN_AUTH__ADMIN_EMAILS` | empty | Comma-separated admins, who load, list and download test accounts (Settings → Test accounts) |
+| `BAATEIN_AUTH__SEED_PASSWORD` | unset | Password for accounts `baatein seed` creates, instead of the files' own (they're public); needed for `BAATEIN_SEED_FILES` on a deploy |
 | `BAATEIN_LLM__PROVIDER` / `__MODEL` | `anthropic` / `claude-haiku-5-5` | Conversation LLM |
 | `BAATEIN_LLM__TEMPERATURE` | unset | Only sent when set; Claude 5.5 models reject it |
 | `BAATEIN_VOICE__DEFAULT_LANGUAGE` / `__DEFAULT_PERSONA` | `hinglish` / `casual` | Used when a call has no known user (e.g. `console`) |
@@ -112,7 +118,6 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_VOICE__TTS` | unset | Another voice for a language, as JSON by language code (e.g. a Sarvam `bulbul:v4-flash` expressive voice for a demo); unset keeps each profile's own |
 | `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0` | How long a reply waits for per-turn recall; a slower search's memories join the next turn. Set `0.1` with a local FastEmbed model |
 | `BAATEIN_MEMORY__THINKING_AFTER_SECONDS` | `0.3` | If the `recall` tool takes longer, Baatein says "Hmm…" meanwhile |
-| `BAATEIN_DEV__SEED_ENABLED` | `false` | Development only: `/dev/seed` and Settings → "Test memories" in the web client |
 | `BAATEIN_DEV__CLOCK_FILE` | unset | Demos only: memory and reminders take "now" from this file (`baatein demo-date`); never set in production |
 | `BAATEIN_FINALIZE__MODEL` / `__EFFORT` | `claude-haiku-5-5` / `low` | The model that writes each call's summary |
 | `BAATEIN_FINALIZE__INTERVAL_SECONDS` | `10` | How often `baatein serve` summarises finished calls; `0` turns it off |
@@ -129,7 +134,8 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `uv run baatein metrics [--days 7] [--email E]` | Reply latency (and where it goes), memory search and usage of recent calls |
 | `uv run baatein demo-date YYYY-MM-DD [--time 10:00] [--tz Asia/Kolkata] \| --clear` | Demos only (needs `BAATEIN_DEV__CLOCK_FILE`): make it a chosen day for memory, reminders and summaries, so one recording session can show several days |
 | `uv run baatein forget-user EMAIL --yes` | Erase everything Baatein remembers about a user (memories, people, storylines, reminders, calls); the account stays |
-| `uv run baatein seed FILE [--replace]` | Create a test account with artificial memories (see `docs/SEED_DATA.md`) |
+| `uv run baatein seed FILE... [--replace \| --if-missing]` | Create test accounts from seed files (see `docs/SEED_DATA.md`); `--replace` loads an existing one again, `--if-missing` skips it |
+| `uv run baatein create-user EMAIL [--name] [--language] [--persona]` | Make an account by hand (asks for the password), e.g. an admin's while signup is closed |
 | `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload. Logs at INFO: each call's start, tool calls, memory searches and a one-line summary at the end; add `--log-level debug` for library detail |
 | `uv run baatein-agent start` | Run the agent worker in production mode |
 | `uv run baatein-agent console` | Talk to the agent in the terminal with local audio |
@@ -142,14 +148,17 @@ Migrations also run automatically when the API or an agent worker starts.
 |---|---|---|---|
 | `GET` | `/` | — | Web client |
 | `GET` | `/health` | — | Liveness check |
-| `POST` | `/auth/signup` | — | `{email, password, display_name?, language?, persona?}` → access token + user; `language` is `hinglish`, `english`, `odia` or `kannada` |
+| `GET` | `/auth/signup` | — | `{enabled}`: whether signup is open |
+| `POST` | `/auth/signup` | — | `{email, password, display_name?, language?, persona?}` → access token + user; `language` is `hinglish`, `english`, `odia` or `kannada`. 403 when signup is closed |
 | `POST` | `/auth/login` | — | `{email, password}` → access token + user |
-| `GET` | `/me` | Bearer | Current user |
+| `GET` | `/me` | Bearer | Current user, with `is_admin` |
 | `POST` | `/me/forget` | Bearer + `{password}` | "Forget me": erase everything Baatein remembers; the account stays (204) |
 | `POST` | `/livekit/token` | Bearer | `{server_url, participant_token, room_name}` for a new call |
-| `GET` / `POST` | `/dev/seed` | — / Bearer | Development only (`BAATEIN_DEV__SEED_ENABLED`): check it's on / load a seed file into your account |
+| `GET` | `/admin/accounts` | Bearer (admin) | Every account, with its memory and call counts |
+| `POST` | `/admin/accounts` | Bearer (admin) | `{seed, replace?, password?}`: create the account in a seed file, or load it again with `replace` (up to 1 MB) |
+| `GET` | `/admin/accounts/{id}/seed` | Bearer (admin) | The account as a seed file, which loads back as the same account |
 
-Errors use `409` for a duplicate email, `401` for bad credentials or tokens, and `422` for invalid input (weak password, unknown language, bad email). Interactive docs are at http://127.0.0.1:8000/docs.
+Errors use `409` for a duplicate email or account, `401` for bad credentials or tokens, `403` for closed signup or a non-admin on an admin route, `413` for an upload over 1 MB, and `422` for invalid input (weak password, unknown language, bad email, a broken seed file). Interactive docs are at http://127.0.0.1:8000/docs.
 
 ## Project layout
 

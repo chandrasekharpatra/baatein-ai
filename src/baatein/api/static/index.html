@@ -66,6 +66,7 @@
       border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
     .tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 14px;
       background: var(--line); margin-bottom: 18px; position: relative; }
+    .tabs[hidden] { display: none; }
     .tabs button { padding: 9px; border-radius: 11px; font-weight: 600; color: var(--muted);
       transition: color 0.25s var(--ease), background 0.25s var(--ease); }
     .tabs button[aria-selected="true"] { background: var(--surface-solid); color: var(--text);
@@ -154,6 +155,7 @@
     dialog.sheet[open] .panel { animation: rise 0.4s var(--ease); }
     @keyframes rise { from { transform: translateY(40px); opacity: 0; } }
     .panel { background: var(--surface-solid); border-radius: 26px 26px 0 0; padding: 10px 20px 28px;
+      max-height: 92vh; overflow-y: auto;
       padding-bottom: max(28px, env(safe-area-inset-bottom)); box-shadow: var(--shadow); }
     .grabber { width: 40px; height: 5px; border-radius: 99px; background: var(--line); margin: 4px auto 14px; }
     .panel h2 { margin: 0 0 4px; font-size: 1.2rem; }
@@ -167,6 +169,14 @@
     .note { font-size: 0.88rem; min-height: 1.3em; margin-top: 8px; color: var(--muted); }
     .note.bad { color: var(--error); }
     input[type="file"] { font-size: 0.85rem; color: var(--muted); }
+    .check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; margin: 2px 0 10px 4px; }
+    .accounts { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
+    .accounts li { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 12px; border-radius: 14px; background: var(--line); }
+    .accounts div { min-width: 0; overflow-wrap: anywhere; font-size: 0.92rem; font-weight: 600; }
+    .accounts small { display: block; color: var(--muted); font-weight: 500; font-size: 0.8rem; }
+    .mini { padding: 8px 12px; border-radius: 12px; font-weight: 600; font-size: 0.85rem;
+      background: var(--surface-solid); white-space: nowrap; }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -185,7 +195,8 @@
       </div>
     </div>
     <form class="card" id="auth" novalidate>
-      <div class="tabs" role="tablist">
+      <!-- Shown only while signup is open (BAATEIN_AUTH__SIGNUP_ENABLED). -->
+      <div class="tabs" role="tablist" id="auth-tabs" hidden>
         <button type="button" role="tab" id="tab-login" aria-selected="true">Log in</button>
         <button type="button" role="tab" id="tab-signup" aria-selected="false">Sign up</button>
       </div>
@@ -263,11 +274,17 @@
       <div class="note" id="erase-note" role="status"></div>
     </div>
 
-    <div class="group" id="seed" hidden>
-      <h3>Test memories</h3>
-      <p>Development only: load a seed file into this account.</p>
-      <input id="seed-file" type="file" accept="application/json,.json">
-      <div class="note" id="seed-result"></div>
+    <div class="group" id="admin" hidden>
+      <h3>Test accounts</h3>
+      <p>Admins only. Load an account from a seed file, or download one to edit and load again.</p>
+      <form id="load-form">
+        <div class="field"><label for="load-file">Seed file</label><input id="load-file" type="file" accept="application/json,.json" required></div>
+        <div class="field"><label for="load-password">Password for the account</label><input id="load-password" type="password" autocomplete="new-password" minlength="8" placeholder="Empty: the file's, or the current one"></div>
+        <label class="check"><input id="load-replace" type="checkbox"> Replace it if it already exists</label>
+        <button class="row-btn" id="load" type="submit">Load account</button>
+      </form>
+      <div class="note" id="load-note" role="status"></div>
+      <ul class="accounts" id="accounts"></ul>
     </div>
 
     <button class="row-btn" id="logout" type="button">Log out</button>
@@ -317,11 +334,12 @@
       const name = me.display_name || me.email.split("@")[0];
       $("hello").textContent = `Namaste, ${name}`;
       $("who").textContent = me.email;
+      $("admin").hidden = !me.is_admin;
     } catch (error) {
       if (error.status === 401) { storeToken(null); show(false); return; }
     }
-    request("/dev/seed").then(() => { $("seed").hidden = false; }, () => {});
   }
+  request("/auth/signup").then(({ enabled }) => { $("auth-tabs").hidden = !enabled; }, () => {});
 
   function setMode(next) {
     mode = next;
@@ -513,6 +531,9 @@
     $("erase-start").disabled = Boolean(room);
     $("erase-note").className = "note";
     $("erase-note").textContent = room ? "End the call first to erase memories." : "";
+    $("load-note").className = "note";
+    $("load-note").textContent = "";
+    if (!$("admin").hidden) listAccounts();
     $("settings").showModal();
   };
   $("settings").onclick = (event) => { if (event.target === $("settings")) $("settings").close(); };
@@ -547,17 +568,90 @@
     }
   };
 
-  $("seed-file").onchange = async (event) => {
-    const [file] = event.target.files;
-    if (!file) return;
-    $("seed-result").textContent = "Loading…";
+  // ---- Test accounts (admins) ----
+  const NOUNS = {
+    people: ["person", "people"], calls: ["call", "calls"], memories: ["memory", "memories"],
+    threads: ["storyline", "storylines"], boundaries: ["topic to avoid", "topics to avoid"],
+    declined_suggestions: ["declined suggestion", "declined suggestions"], reminders: ["reminder", "reminders"],
+  };
+  const count = (n, noun) => `${n} ${NOUNS[noun][n === 1 ? 0 : 1]}`;
+
+  async function listAccounts() {
+    const list = $("accounts");
     try {
-      const counts = await request("/dev/seed", JSON.parse(await file.text()), storedToken());
-      $("seed-result").textContent = "Added " + Object.entries(counts).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
+      const accounts = await request("/admin/accounts", null, storedToken());
+      list.replaceChildren(...accounts.map((account) => {
+        const item = document.createElement("li");
+        const who = document.createElement("div");
+        const details = document.createElement("small");
+        who.textContent = account.display_name ? `${account.display_name} · ${account.email}` : account.email;
+        details.textContent = account.is_admin ? "admin"
+          : `${account.persona} · ${count(account.memories, "memories")} · ${count(account.calls, "calls")}`;
+        who.append(details);
+        item.append(who);
+        if (!account.is_admin) {
+          const download = document.createElement("button");
+          download.type = "button";
+          download.className = "mini";
+          download.textContent = "Download";
+          download.onclick = () => downloadAccount(account.id);
+          item.append(download);
+        }
+        return item;
+      }));
     } catch (error) {
-      $("seed-result").textContent = `Seed failed: ${error.message}`;
+      list.replaceChildren();
+      $("load-note").className = "note bad";
+      $("load-note").textContent = error.message;
     }
-    event.target.value = "";
+  }
+
+  async function downloadAccount(id) {
+    const response = await fetch(`/admin/accounts/${id}/seed`, { headers: { Authorization: `Bearer ${storedToken()}` } });
+    if (!response.ok) {
+      $("load-note").className = "note bad";
+      $("load-note").textContent = `Download failed (${response.status})`;
+      return;
+    }
+    const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "")?.[1] || "account.json";
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(await response.json(), null, 2)], { type: "application/json" }));
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  $("load-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const [file] = $("load-file").files;
+    if (!file) return;
+    const note = $("load-note");
+    note.className = "note";
+    let seed;
+    try {
+      seed = JSON.parse(await file.text());
+    } catch {
+      note.className = "note bad";
+      note.textContent = "That file isn't valid JSON.";
+      return;
+    }
+    const replace = $("load-replace").checked;
+    const email = seed.user && seed.user.email;
+    if (replace && !confirm(`Load ${email || "this account"} again from the file? Everything in it now is replaced.`)) return;
+    $("load").disabled = true;
+    note.textContent = "Loading…";
+    try {
+      const loaded = await request("/admin/accounts", { seed, replace, password: $("load-password").value || null }, storedToken());
+      const added = Object.entries(loaded.added).filter(([, n]) => n).map(([noun, n]) => count(n, noun));
+      note.textContent = `${loaded.replaced ? "Replaced" : "Created"} ${loaded.account.email}` + (added.length ? `: ${added.join(", ")}` : "");
+      $("load-form").reset();
+      listAccounts();
+    } catch (error) {
+      note.className = "note bad";
+      note.textContent = error.message;
+    } finally {
+      $("load").disabled = false;
+    }
   };
 
   $("logout").onclick = () => {

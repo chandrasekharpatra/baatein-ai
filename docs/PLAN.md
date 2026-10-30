@@ -38,7 +38,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam, SQLite + `
 **Gotchas found so far**
 - Anthropic rejects a tool parameter that has an enum and a nullable type (`Enum value 'fact' does not match declared type ['string', 'null']`). The LiveKit plugin makes every defaulted parameter nullable in strict mode, so optional parameters with fixed choices are plain `str | None` and mapped with `agent/tools.py:choice`. `tests/unit/test_tools.py` checks the generated schemas.
 - A Sarvam STT outage (websocket connects timing out, 2026-10-30) closed the LiveKit session about 20 s in, silently, with the default retry limits. `agent/resilience.py` retries longer (`BAATEIN_VOICE__STT_MAX_ERRORS`, default 6 failures of ~10 s each) and, past that, says the profile's `cannot_hear` line over TTS before ending the call.
-- TTS is Sarvam `bulbul:v4-flash` (D29; until then Cartesia `sonic-3`). Its pace option is `pace`, limited to 0.5–2.0 on v4-flash (the elder persona uses 0.85), and temperature to 0.01–1.0.
+- TTS for Hinglish is Cartesia `sonic-3.6`, voice Siya (D31); its pace option is `speed` (0.6–1.5; the elder persona uses 0.85). English and Kannada use Sarvam `bulbul:v4-flash` (D29), pace option `pace` (0.5–2.0).
 - Anthropic's strict tool schemas allow at most 16 nullable (optional) parameters across all tools (`Schemas contains too many parameters with union types`). Baatein sends non-strict schemas; see `voice/providers.py:anthropic_llm`.
 - `Agent.on_user_turn_completed` is not called in LiveKit's text-mode tests (`session.run(user_input=...)`). Logic that must count user turns reads `RunContext.session.history` in the tool instead.
 - Claude 5.5 rejects `temperature`; `BAATEIN_LLM__TEMPERATURE` is unset by default and only sent when set.
@@ -63,7 +63,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam, SQLite + `
 | LLM (conversation) | Claude via `livekit-plugins-anthropic` | Default `claude-haiku-5-5` for latency; `claude-sonnet-5-5` via env |
 | LLM (memory/analysis) | Claude `claude-haiku-5-5` | One structured call per finished session: summary, whether it ended mid-story (and the topic), up to 2 "maybe ask next time" notes. It never creates memories |
 | STT | Sarvam `STT(mode="codemix")` | Code-mixed Hinglish |
-| TTS | Sarvam `bulbul:v4-flash` (Odia `bulbul:v3`) | Chosen per language profile; Cartesia still registered |
+| TTS | Cartesia `sonic-3.6` for Hinglish; Sarvam `bulbul:v4-flash` (Odia `bulbul:v3`) for the rest | Chosen per language profile |
 | Long-term memory | **Own `MemoryStore`** on SQLite: `facts` table + `sqlite-vec` + FTS5 | Replaces Mem0 (see §3) |
 | Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d) | Behind the `Embedder` port; FastEmbed local models still work (see §3 Embeddings, D11) |
 | App DB | SQLite via `aiosqlite`, raw SQL, repository pattern | WAL, FK on, busy_timeout; migrations via `PRAGMA user_version` |
@@ -289,7 +289,7 @@ Later migrations (Phase 5–6): `0003_memory_consent` (people; memory kind, quot
 
 | Code | TTS | Claude writes | Elder persona's respect |
 |---|---|---|---|
-| `hinglish` | Sarvam `bulbul:v4-flash`, `hi-IN`, `simran_enhi_companion` | Roman-script Hinglish | "Mohan ji", "aap" |
+| `hinglish` | Cartesia `sonic-3.6`, `hi`, Siya | Roman-script Hinglish | "Mohan ji", "aap" |
 | `english` | Sarvam `bulbul:v4-flash`, `en-IN`, `sanchita_en_companion` | Indian English | "Mohan ji" |
 | `odia` (2026-10-30) | Sarvam `bulbul:v3`, `od-IN`, speaker kavya (v4-flash has no Odia voice; Cartesia rejects `or`) | Odia script | "ଆପଣ"; no name suffix, since Odia's (babu, apa) depend on gender |
 | `kannada` (2026-10-30) | Sarvam `bulbul:v4-flash`, `kn-IN`, `chaitra_kn_conversation` | Kannada script | "Mohan avare", "ನೀವು" |

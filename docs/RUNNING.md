@@ -15,7 +15,7 @@ Commands are for Linux, macOS or WSL2 (Ubuntu). On Windows, use WSL2 and run eve
         ▼
 ┌───────────────┐    dispatch job   ┌─────────────────────────┐
 │ livekit-server│ ────────────────▶ │ baatein-agent dev       │  Sarvam STT → Claude
-│    --dev      │ ◀──── audio ───── │ (agent worker)          │  → Sarvam TTS
+│    --dev      │ ◀──── audio ───── │ (agent worker)          │  → Cartesia TTS
 └───────────────┘                   └─────────────────────────┘
 ```
 
@@ -73,11 +73,11 @@ uv run pre-commit install    # optional: lint, type-check and test before each c
 | Service | Used for | Where |
 |---|---|---|
 | Anthropic | Claude, the conversation LLM | https://console.anthropic.com/ → API Keys |
-| Sarvam | Speech-to-text and the voices, for every language | https://dashboard.sarvam.ai/ → API Keys |
+| Sarvam | Speech-to-text, and the English and Kannada voices | https://dashboard.sarvam.ai/ → API Keys |
 | Pinecone | Memory embeddings (the default embedder) | https://app.pinecone.io/ → API Keys |
-| Cartesia (optional) | Only if you switch a language to a Cartesia voice (`BAATEIN_VOICE__TTS`) | https://play.cartesia.ai/ → API Keys |
+| Cartesia | The Hinglish voice (sonic-3.6, Siya) | https://play.cartesia.ai/ → API Keys |
 
-Anthropic, Sarvam and Pinecone are needed for the default setup.
+Anthropic, Sarvam, Cartesia and Pinecone are needed for the default setup.
 
 ## 4. Configure `.env`
 
@@ -91,7 +91,7 @@ Edit `.env`:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 SARVAM_API_KEY=sk_...
-# CARTESIA_API_KEY=sk_car_...   (only for a Cartesia voice)
+CARTESIA_API_KEY=sk_car_...
 PINECONE_API_KEY=pcsk_...
 
 # Leave these as-is: they match `livekit-server --dev`
@@ -151,7 +151,9 @@ Wait for `Uvicorn running on http://127.0.0.1:8000`.
 ## 7. Talk to it
 
 1. Open http://localhost:8000. Use `localhost`, not an IP address; browsers only allow microphone access on `localhost` or HTTPS.
-2. Open the **Sign up** tab, enter a name, pick **Hinglish** and how Baatein should talk, and use any email and a password of 8+ characters.
+2. Get an account. Signup is off by default, so either:
+   - set `BAATEIN_AUTH__SIGNUP_ENABLED=true` in `.env`, restart `baatein serve`, then open the **Sign up** tab, enter a name, pick **Hinglish** and how Baatein should talk, and use any email and a password of 8+ characters; or
+   - run `uv run baatein create-user you@example.com --name Ram` (it asks for the password), then log in.
 3. Tap the green call button and allow the microphone.
 4. Within a few seconds the status shows **Baatein joined**, and you hear a greeting by name. The orb and status follow who's speaking (**Listening…** / **Baatein is speaking**). The page shows no transcript; every turn is saved in the database.
 
@@ -159,7 +161,7 @@ Baatein remembers what you ask it to (it asks before saving anything else), pick
 
 ## 8. Verify without a browser (optional)
 
-If the browser misbehaves, check the backend on its own. This script signs up a throwaway user, joins a call, speaks a Hinglish sentence through Sarvam TTS, and prints both sides' transcripts:
+If the browser misbehaves, check the backend on its own. This script signs up a throwaway user (with signup on; otherwise pass `--email` and `--password` of an existing account), joins a call, speaks a Hinglish sentence through Sarvam TTS, and prints both sides' transcripts:
 
 ```bash
 uv run python .claude/skills/livekit-agents/scripts/probe_call.py --say "Kal mera interview hai"

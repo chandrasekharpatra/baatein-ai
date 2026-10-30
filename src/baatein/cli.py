@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import getpass
 from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -7,21 +8,23 @@ from zoneinfo import ZoneInfo
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
+from pydantic import ValidationError
 
+from baatein.accounts import Accounts
 from baatein.api.app import create_app
+from baatein.auth.service import AuthService
 from baatein.config import Settings
 from baatein.container import build_root
+from baatein.domain.errors import BaateinError
 from baatein.memory.finalizer import Finalizer
-from baatein.memory.seed import Seeder, SeedFile
+from baatein.memory.seed import SeedError, SeedFile, problems
 from baatein.memory.service import MemoryDeps, MemoryService
 from baatein.metrics import CallMetrics, report
-from baatein.ports.auth import PasswordHasher
 from baatein.ports.clock import DemoClock
 from baatein.ports.repos import SessionRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.migrate import migrate
-from baatein.storage.sqlite.repos import delete_user
 
 
 async def reembed(settings: Settings) -> str:
@@ -94,29 +97,65 @@ def demo_date(settings: Settings, day: str | None, at: str, tz: str, clear: bool
     return f"demo clock: it is now {moment:%a %d %b %Y, %H:%M} ({tz}), and time runs on"
 
 
+# What a bad file or a bad name raises: shown as a message, not a traceback.
+REFUSED = (BaateinError, SeedError, LookupError)
+
+
 def read_seed(path: Path) -> SeedFile:
-    seed = SeedFile.model_validate_json(path.read_text(encoding="utf-8"))
-    if seed.user is None:
-        raise SystemExit(f"{path}: a seed file for the CLI needs a 'user' section")
-    return seed
-
-
-async def load_seed(settings: Settings, seed: SeedFile, replace: bool) -> str:
-    """Create the account in a seed file's `user` section and load the rest into it."""
-    assert seed.user is not None
-    injector = build_root(settings=settings)
-    db = injector.get(Database)
     try:
-        if replace and await delete_user(db, seed.user.email):
-            print(f"removed the existing {seed.user.email}")
-        seeder = injector.get(Seeder)
-        hasher: PasswordHasher = injector.get(PasswordHasher)  # type: ignore[type-abstract]
-        user = await seeder.create_user(seed, hasher.hash(seed.user.password))
-        result = await seeder.load(user, seed)
+        return SeedFile.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValidationError as exc:
+        raise SystemExit(f"{path}: {problems(exc)}") from exc
+
+
+async def load_seeds(
+    settings: Settings, paths: Sequence[Path], replace: bool, if_missing: bool
+) -> str:
+    """Create the account in each file's `user` section and load the rest into it."""
+    seeds = [(path, read_seed(path)) for path in paths]
+    password = settings.auth.seed_password
+    injector = build_root(settings=settings)
+    accounts = injector.get(Accounts)
+    lines = []
+    try:
+        for path, seed in seeds:
+            if if_missing and seed.user and await accounts.exists(seed.user.email):
+                lines.append(f"{path}: {seed.user.email} already exists, left as it is")
+                continue
+            try:
+                loaded = await accounts.load(
+                    seed,
+                    replace=replace,
+                    password=password.get_secret_value() if password else None,
+                )
+            except REFUSED as exc:
+                raise SystemExit(f"{path}: {exc}") from exc
+            counts = ", ".join(
+                f"{n} {name.replace('_', ' ')}" for name, n in vars(loaded.added).items()
+            )
+            action = "replaced" if loaded.replaced else "seeded"
+            lines.append(f"{action} {loaded.user.email} ({loaded.user.id}): {counts}")
     finally:
-        await db.close()
-    counts = ", ".join(f"{n} {name.replace('_', ' ')}" for name, n in vars(result).items())
-    return f"seeded {user.email} ({user.id}): {counts}"
+        await injector.get(Database).close()
+    return "\n".join(lines)
+
+
+async def create_user(
+    settings: Settings, email: str, name: str | None, language: str | None, persona: str | None
+) -> str:
+    """An account made by hand, e.g. an admin's, while signup is closed."""
+    password = getpass.getpass(f"Password for {email}: ")
+    if getpass.getpass("Again: ") != password:
+        raise SystemExit("the passwords don't match")
+    injector = build_root(settings=settings)
+    try:
+        user = await injector.get(AuthService).signup(email, password, name, language, persona)
+    except REFUSED as exc:
+        raise SystemExit(str(exc)) from exc
+    finally:
+        await injector.get(Database).close()
+    role = " (admin)" if settings.auth.is_admin(user.email) else ""
+    return f"created {user.email}{role}"
 
 
 def load_env() -> None:
@@ -132,12 +171,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("migrate", help="apply database migrations")
     commands.add_parser("reembed", help="rebuild the fact vector index for the current embedder")
     seed_cmd = commands.add_parser(
-        "seed", help="create a test account from a seed file (see docs/SEED_DATA.md)"
+        "seed", help="create test accounts from seed files (see docs/SEED_DATA.md)"
     )
-    seed_cmd.add_argument("file", type=Path)
-    seed_cmd.add_argument(
-        "--replace", action="store_true", help="delete that user and their data first"
+    seed_cmd.add_argument("files", type=Path, nargs="+")
+    existing = seed_cmd.add_mutually_exclusive_group()
+    existing.add_argument(
+        "--replace", action="store_true", help="load an existing account again from scratch"
     )
+    existing.add_argument(
+        "--if-missing", action="store_true", help="skip accounts that already exist (deploys)"
+    )
+    user_cmd = commands.add_parser(
+        "create-user", help="make an account by hand (admins; signup is usually closed)"
+    )
+    user_cmd.add_argument("email")
+    user_cmd.add_argument("--name")
+    user_cmd.add_argument("--language")
+    user_cmd.add_argument("--persona")
     finalize_cmd = commands.add_parser(
         "finalize", help="summarise finished calls now (baatein serve also does it)"
     )
@@ -185,7 +235,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "demo-date":
         print(demo_date(settings, args.day, args.time, args.tz, args.clear))
     elif args.command == "seed":
-        print(asyncio.run(load_seed(settings, read_seed(args.file), args.replace)))
+        print(asyncio.run(load_seeds(settings, args.files, args.replace, args.if_missing)))
+    elif args.command == "create-user":
+        print(
+            asyncio.run(create_user(settings, args.email, args.name, args.language, args.persona))
+        )
     elif args.command == "serve":
         uvicorn.run(create_app(build_root(settings=settings)), host=args.host, port=args.port)
     return 0

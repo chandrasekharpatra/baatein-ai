@@ -4,6 +4,7 @@ from pathlib import Path
 from anthropic import AsyncAnthropic
 from injector import Binder, Injector, Module, provider, singleton
 
+from baatein.accounts import Accounts
 from baatein.auth.livekit import LiveKitCallTokens
 from baatein.auth.passwords import Argon2PasswordHasher
 from baatein.auth.service import AuthService
@@ -197,6 +198,19 @@ class AuthModule(Module):
     @provider
     def password_hasher(self) -> PasswordHasher:
         return Argon2PasswordHasher()
+
+    @singleton
+    @provider
+    def accounts(
+        self,
+        db: Database,
+        deps: MemoryDeps,
+        seeder: Seeder,
+        hasher: PasswordHasher,
+        languages: LanguageRegistry,
+        settings: Settings,
+    ) -> Accounts:
+        return Accounts(db, deps, seeder, hasher, languages, settings)
 
     @singleton
     @provider

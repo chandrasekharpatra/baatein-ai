@@ -258,3 +258,33 @@ Three problems from Ram's live calls at 4:45 and 4:47 pm:
 - **Other languages:** English uses `sanchita_en_companion` and Kannada `chaitra_kn_conversation`, both heard back correctly. Odia stays on `bulbul:v3`, because v4-flash has no Odia voice.
 - **Settings:** pace is Sarvam's `pace` (0.5–2.0 on v4-flash; the elder persona's 0.85 fits). Temperature stays at the default 0.6; the livelier 0.9 sample wasn't preferred.
 - **Cartesia** stays registered: `BAATEIN_VOICE__TTS` can switch any one language back without a code change, and its key is now optional. This replaces D24's "measure before changing the default".
+
+### D30. Closed signup, admin test accounts, and one Railway service (2026-10-30)
+- **Asked for:** a hosted demo on Railway with a Cloudflare domain and LiveKit Cloud; no public signup; three admins who can load test accounts from seed files, list them and download them in the same format; demo seed data loaded at deploy.
+- **Signup** is off by default (`BAATEIN_AUTH__SIGNUP_ENABLED`). `/auth/signup` answers 403, and the page shows Sign up only when the server says it's open. Accounts come from admins, or from `baatein create-user`, which asks for the password.
+- **Admins** are a list of emails in settings (`BAATEIN_AUTH__ADMIN_EMAILS`), not a database flag. That keeps one source of truth, set as a secret on the deploy so the addresses stay out of the public repo. The server checks it on every admin route.
+- **One format, three ways:** the seed file. Admins upload it in Settings, `baatein seed` loads it, and a download writes it.
+  - **Round trip:** a download loads back as the same account, so download, replace, download gives identical files. A test does this for every file in `seeds/`.
+  - **New fields:** to make that true, the format gained a storyline `key`, `times_offered`, a boundary's `thread`, and a reminder's `status` and `settled` occurrences.
+  - **Checked first:** references (call, memory and storyline keys) are checked when the file is read, so a bad file fails before anything is saved.
+- **Replace is atomic.** The new copy is loaded under a placeholder email, then one transaction removes the old account and gives the new one its email. A failure partway (say, Pinecone down) leaves the old account as it was. A replace without a password keeps the old one. Admin accounts can't be loaded from a file, because a file's password would then decide who is admin.
+- **Passwords:** the repo is public, so demo files carry no password. Admins type one when loading. A deploy gives seeded accounts `BAATEIN_AUTH__SEED_PASSWORD`, and `--if-missing` means a redeploy never resets them.
+- **`/dev/seed` and "Test memories" are gone.** They let any user add test data to their own account; the admin upload replaces them.
+- **Deploy:** one Docker image and one Railway service in Singapore, running `baatein serve` and `baatein-agent start` side by side (`deploy/start.sh`), with SQLite on a volume. A volume can't be shared between services, and both processes need the same database. LiveKit Cloud carries the audio, and the agent only connects out.
+  - **Config:** `.railway/railway.ts`, Railway's Infrastructure as Code. `railway.json` is deprecated and stops being read on 2026-12-01.
+  - **Memory:** LiveKit keeps one warm call process per CPU core by default, about 250 MB each (measured), so 2 GB or more on a many-core machine. The worker now keeps two: the whole container measured about 1 GB with nothing running, and 2 GB leaves headroom for calls.
+
+### D31. Cartesia sonic-3.6 with Siya for Hinglish (2026-10-30)
+- **The problem:** Simran (Sarvam `bulbul:v4-flash`) sometimes changed tone mid-reply, as if another voice took over.
+- **The cause:** Sarvam's stream synthesises each piece of a reply (50–150 characters) separately, at temperature 0.6, so each piece can come out with its own pitch and energy.
+  - In recordings streamed word by word as in a call, one take had a garbled sound between two sentences, and pitch moved by up to 50 Hz between pieces.
+  - Lowering the temperature to 0.3 was worse: a 5.7 s silence in one take.
+  - Bigger pieces (120/300 characters) didn't slow it down, but didn't clearly help.
+  - Of 8 `bulbul:v3` voices, Ritu was the steadiest. Kavya, Neha and Priya paused mid-sentence, and Neha dropped about 70 Hz after her first piece.
+- **Cartesia sonic-3.6** (generally available 2026-08-27) is Cartesia's most natural model. It adds Roman-script Hindi, and the LiveKit plugin sends a whole reply as one stream (`continue: true`), so the tone carries across sentences.
+  - The same reply came out in 1–3 pieces with pitch within about 15–35 Hz, every word correct.
+  - First audio about 300 ms, against Sarvam's 450–650 ms.
+  - The user picked **Siya** by ear.
+  - Its emotion tags work only in English, so Hinglish gets its built-in expressiveness only.
+- **Caveat:** only one take per voice was measured, because the Cartesia account ran out of credits partway (402). The account needs a top-up before calls can use this voice.
+- **Other languages:** English and Kannada stay on Sarvam `bulbul:v4-flash`, Odia on `bulbul:v3`. `BAATEIN_VOICE__TTS` can still switch Hinglish back to Simran without a code change. `CARTESIA_API_KEY` is required again. Clips and scripts are in `demo/voices/` (`make_seam_samples.py`, `make_v3_samples.py`, `make_sonic36_samples.py`).

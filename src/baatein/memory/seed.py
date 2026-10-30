@@ -1,8 +1,8 @@
-"""Load artificial memories into an account, to test calls without living through them.
+"""Test accounts from a file, to test calls without living through them.
 
-Development only. Two ways in, one format (see `docs/SEED_DATA.md` and `seeds/`):
-- `POST /dev/seed` (when `BAATEIN_DEV__SEED_ENABLED=true`) adds to the logged-in user.
-- `baatein seed FILE [--replace]` creates the account named in the file's `user` section.
+One format, three ways in and out (see `docs/SEED_DATA.md` and `seeds/`): admins upload a
+file in Settings, `baatein seed FILE` loads one from the command line, and admins download any
+account as a file (`seed_export.py`) that loads back the same.
 
 Dates are relative ("today+3", "next sunday", `days_ago`), so a seed file works on any day.
 Memories go through the memory store, so they are embedded and searchable like real ones.
@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from baatein.domain.ids import new_id
 from baatein.domain.models import (
@@ -24,6 +31,7 @@ from baatein.domain.models import (
     Fact,
     FinalizeStatus,
     MemoryKind,
+    OccurrenceStatus,
     Pace,
     Person,
     Preferences,
@@ -82,10 +90,12 @@ class _Seed(BaseModel):
 
 
 class SeedUser(_Seed):
-    """The account `baatein seed` creates. Ignored by the upload endpoint."""
+    """The account the file creates."""
 
     email: str
-    password: str = Field(min_length=8)
+    password: str | None = Field(default=None, min_length=8)
+    """Needed for a new account. Left out (as in a download), a replaced account keeps its
+    password."""
     display_name: str | None = None
     language: str = "hinglish"
     timezone: str = "Asia/Kolkata"
@@ -142,12 +152,16 @@ class SeedEvent(_Seed):
 
 
 class SeedThread(_Seed):
+    key: str | None = None
+    """Name for a boundary's `thread`."""
     title: str = Field(min_length=1)
     kind: ThreadKind = ThreadKind.PLAN
     status: ThreadStatus = ThreadStatus.OPEN
     next_step: str | None = None
     check_in_after: str | None = None
     last_offered_days_ago: int | None = Field(default=None, ge=0)
+    times_offered: int | None = Field(default=None, ge=0)
+    """Default: 1 if `last_offered_days_ago` is given, else 0."""
     about: str | None = None
     sensitivity: Sensitivity = Sensitivity.NORMAL
     call: str | None = None
@@ -160,6 +174,8 @@ class SeedBoundary(_Seed):
     topic: str = Field(min_length=1)
     scope: Literal["until_reopened", "until_date"] = "until_reopened"
     until: str | None = None
+    thread: str | None = None
+    """Key of the storyline this topic belongs to."""
     call: str | None = None
 
     _day = field_validator("until")(_check_day)
@@ -170,6 +186,15 @@ class SeedDeclined(_Seed):
     call: str | None = None
 
 
+class SeedOccurrence(_Seed):
+    """One occurrence of a reminder the user already marked done or skipped."""
+
+    date: str
+    status: OccurrenceStatus
+
+    _day = field_validator("date")(_check_day)
+
+
 class SeedReminder(_Seed):
     title: str = Field(min_length=1)
     date: str | None = None
@@ -178,6 +203,9 @@ class SeedReminder(_Seed):
     days_before: list[int] = [0]
     about: str | None = None
     note: str | None = None
+    status: Literal["done", "cancelled"] | None = None
+    """Default: active, or waiting for a date when there is none."""
+    settled: list[SeedOccurrence] = []
     call: str | None = None
 
     _day = field_validator("date")(_check_day)
@@ -203,9 +231,54 @@ class SeedFile(_Seed):
     declined_suggestions: list[str | SeedDeclined] = []
     reminders: list[SeedReminder] = []
 
+    @model_validator(mode="after")
+    def _check_references(self) -> "SeedFile":
+        """Every key a file refers to exists, so a bad file fails before anything is saved."""
+        calls = _unique_keys("call", [c.key for c in self.calls])
+        threads = _unique_keys("storyline", [t.key for t in self.threads])
+        memories: set[str] = set()
+        for memory in self.memories:
+            if memory.corrects is not None and memory.corrects not in memories:
+                raise ValueError(f"'corrects' names unknown memory '{memory.corrects}'")
+            if memory.key is not None:
+                if memory.key in memories:
+                    raise ValueError(f"memory key '{memory.key}' is used twice")
+                memories.add(memory.key)
+        linked: list[
+            SeedMemory | SeedThread | SeedEvent | SeedBoundary | SeedDeclined | SeedReminder
+        ] = [
+            *self.memories,
+            *self.threads,
+            *(e for t in self.threads for e in t.events),
+            *self.boundaries,
+            *(d for d in self.declined_suggestions if isinstance(d, SeedDeclined)),
+            *self.reminders,
+        ]
+        for item in linked:
+            if item.call is not None and item.call not in calls:
+                raise ValueError(f"unknown call '{item.call}'")
+        for boundary in self.boundaries:
+            if boundary.thread is not None and boundary.thread not in threads:
+                raise ValueError(f"unknown storyline '{boundary.thread}'")
+        return self
+
+
+def _unique_keys(what: str, keys: list[str | None]) -> set[str]:
+    named = [key for key in keys if key is not None]
+    if len(named) != len(set(named)):
+        raise ValueError(f"{what} keys must be unique")
+    return set(named)
+
 
 class SeedError(ValueError):
     pass
+
+
+def problems(exc: ValidationError) -> str:
+    """A file's validation errors on one line, e.g. "memories.0.txt: Extra inputs…"."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}" for error in exc.errors()
+    )
 
 
 @dataclass(frozen=True)
@@ -281,13 +354,11 @@ class _Loader:
         self._today = self._now.date()
         self._calls: dict[str, Session] = {}
         self._facts: dict[str, Fact] = {}
+        self._threads: dict[str, Thread] = {}
         self.people_created = 0
 
     async def run(self) -> None:
         seed = self._seed
-        keys = [c.key for c in seed.calls if c.key]
-        if len(keys) != len(set(keys)):
-            raise SeedError("call keys must be unique")
         for person in seed.people:
             await self._person(person.name, person.relation)
         for call in seed.calls:
@@ -319,11 +390,7 @@ class _Loader:
         return datetime.combine(self._day(value), time(0), self._tz) if value else None
 
     def _session(self, key: str | None) -> Session | None:
-        if key is None:
-            return None
-        if key not in self._calls:
-            raise SeedError(f"unknown call '{key}'")
-        return self._calls[key]
+        return self._calls[key] if key is not None else None
 
     def _session_id(self, key: str | None) -> str | None:
         session = self._session(key)
@@ -352,10 +419,12 @@ class _Loader:
 
     async def _call(self, call: SeedCall) -> None:
         day = self._today - timedelta(days=call.days_ago)
+        ends_by_now = self._now - timedelta(minutes=call.minutes)
         if call.at:
-            started = datetime.combine(day, time.fromisoformat(call.at), self._tz)
+            # A call "today at 19:00" loaded in the morning would be in the future: it ends now.
+            started = min(datetime.combine(day, time.fromisoformat(call.at), self._tz), ends_by_now)
         else:
-            started = self._now - timedelta(days=call.days_ago, minutes=call.minutes)
+            started = ends_by_now - timedelta(days=call.days_ago)
         session = Session(
             id=new_id(),
             user_id=self._user_id,
@@ -393,8 +462,6 @@ class _Loader:
             sensitivity=memory.sensitivity,
         )
         if memory.corrects:
-            if memory.corrects not in self._facts:
-                raise SeedError(f"'corrects' names unknown memory '{memory.corrects}'")
             await self._deps.store.supersede(self._facts[memory.corrects].id, fact)
         else:
             await self._deps.store.add(fact)
@@ -413,12 +480,18 @@ class _Loader:
             next_step=seeded.next_step,
             check_in_after=self._midnight(seeded.check_in_after),
             last_offered_at=self._now - timedelta(days=offered) if offered is not None else None,
-            times_offered=1 if offered is not None else 0,
+            times_offered=(
+                seeded.times_offered
+                if seeded.times_offered is not None
+                else int(offered is not None)
+            ),
             sensitivity=seeded.sensitivity,
             about_person_id=await self._person_id(seeded.about),
             source_session_id=self._session_id(seeded.call),
         )
         await self._deps.threads.add(thread)
+        if seeded.key:
+            self._threads[seeded.key] = thread
         for event in seeded.events:
             if event.call:
                 at = self._saved_at(event.call)
@@ -446,24 +519,32 @@ class _Loader:
                 scope=BoundaryScope(boundary.scope) if until else BoundaryScope.UNTIL_REOPENED,
                 session_id=self._session_id(boundary.call),
                 until=until,
+                thread_id=self._threads[boundary.thread].id if boundary.thread else None,
             )
         )
 
     async def _reminder(self, reminder: SeedReminder) -> None:
         on = self._day(reminder.date) if reminder.date else None
-        await self._deps.reminders.add(
-            Reminder(
-                id=new_id(),
-                user_id=self._user_id,
-                title=reminder.title,
-                created_at=self._saved_at(reminder.call),
-                on=on,
-                at=time.fromisoformat(reminder.time),
-                repeat=reminder.repeat,
-                alert_days_before=tuple(sorted(set(reminder.days_before), reverse=True)),
-                status=ReminderStatus.ACTIVE if on else ReminderStatus.NEEDS_INFO,
-                note=reminder.note,
-                about_person_id=await self._person_id(reminder.about),
-                source_session_id=self._session_id(reminder.call),
-            )
+        if reminder.status is not None:
+            status = ReminderStatus(reminder.status)
+        else:
+            status = ReminderStatus.ACTIVE if on else ReminderStatus.NEEDS_INFO
+        saved = Reminder(
+            id=new_id(),
+            user_id=self._user_id,
+            title=reminder.title,
+            created_at=self._saved_at(reminder.call),
+            on=on,
+            at=time.fromisoformat(reminder.time),
+            repeat=reminder.repeat,
+            alert_days_before=tuple(sorted(set(reminder.days_before), reverse=True)),
+            status=status,
+            note=reminder.note,
+            about_person_id=await self._person_id(reminder.about),
+            source_session_id=self._session_id(reminder.call),
         )
+        await self._deps.reminders.add(saved)
+        for occurrence in reminder.settled:
+            await self._deps.reminders.settle(
+                saved.id, self._day(occurrence.date), occurrence.status, self._now
+            )

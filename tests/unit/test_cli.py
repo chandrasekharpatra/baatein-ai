@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from injector import Injector, Module, provider, singleton
 
 from baatein import cli
+from baatein.auth.service import AuthService
 from baatein.cli import load_env as _real_load_env
 from baatein.cli import main
 from baatein.config import Settings
@@ -120,13 +121,62 @@ def test_seed_creates_the_account_and_replaces_it_on_request(
     first = capsys.readouterr().out
     assert main(["seed", str(seed), "--replace"]) == 0
     second = capsys.readouterr().out
+    assert main(["seed", str(seed), "--if-missing"]) == 0
+    third = capsys.readouterr().out
 
     assert "seeded ram@example.com" in first
     assert "1 people, 0 calls, 1 memories" in first
-    assert "removed the existing ram@example.com" in second
+    assert "replaced ram@example.com" in second
+    assert "ram@example.com already exists, left as it is" in third
     with sqlite3.connect(tmp_path / "app.db") as conn:
         assert conn.execute("SELECT count(*) FROM users").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM facts").fetchone()[0] == 1
+    with pytest.raises(SystemExit, match="already exists; choose replace"):
+        main(["seed", str(seed)])
+
+
+def test_seed_password_replaces_the_files_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seed files are public in the repo, so a deploy loads them with a secret password."""
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    monkeypatch.setenv("BAATEIN_AUTH__SEED_PASSWORD", "deploy-secret-1")
+    monkeypatch.setenv("BAATEIN_AUTH__JWT_SECRET", "jwt-test-secret-of-sufficient-length")
+    fake_embedding(monkeypatch)
+    files = []
+    for name in ("asha", "ravi"):
+        files.append(tmp_path / f"{name}.json")
+        files[-1].write_text(f'{{"user": {{"email": "{name}@example.com"}}}}')
+
+    assert main(["seed", *map(str, files), "--if-missing"]) == 0
+
+    async def can_log_in(email: str) -> bool:
+        injector = build_root(settings=Settings())
+        try:
+            await injector.get(AuthService).login(email, "deploy-secret-1")
+            return True
+        finally:
+            await injector.get(Database).close()
+
+    assert asyncio.run(can_log_in("asha@example.com"))
+    assert asyncio.run(can_log_in("ravi@example.com"))
+
+
+def test_create_user_asks_for_the_password_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    monkeypatch.setenv("BAATEIN_AUTH__ADMIN_EMAILS", "boss@example.com")
+    monkeypatch.setenv("BAATEIN_AUTH__JWT_SECRET", "jwt-test-secret-of-sufficient-length")
+    answers = iter(["boss-password-1", "boss-password-1", "x", "y", "short", "short"])
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: next(answers))
+
+    assert main(["create-user", "Boss@example.com", "--name", "Boss"]) == 0
+    assert "created boss@example.com (admin)" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="don't match"):
+        main(["create-user", "ravi@example.com"])
+    with pytest.raises(SystemExit, match="at least 8 characters"):
+        main(["create-user", "ravi@example.com"])
 
 
 def test_forget_user_needs_yes_then_erases_but_keeps_the_account(
@@ -205,12 +255,19 @@ def test_demo_date_sets_and_clears_the_demo_clock(
     assert "Give a day" in capsys.readouterr().out
 
 
-def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:
+def test_seed_without_a_user_section_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
     seed = tmp_path / "no-user.json"
     seed.write_text('{"memories": []}')
+    broken = tmp_path / "broken.json"
+    broken.write_text('{"memories": [{"txt": "x"}]}')
 
     with pytest.raises(SystemExit, match="needs a 'user' section"):
         main(["seed", str(seed)])
+    with pytest.raises(SystemExit, match=r"broken.json: .*txt"):
+        main(["seed", str(broken)])
 
 
 def ended_call_in(settings: Settings) -> str:

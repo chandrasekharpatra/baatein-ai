@@ -13,3 +13,6 @@ htmlcov/
 *.db-shm
 data/
 console-recordings/
+
+# Railway IaC authoring package (npm install railway), not committed
+node_modules/

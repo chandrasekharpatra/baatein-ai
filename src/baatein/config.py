@@ -1,7 +1,8 @@
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baatein.registry import ProviderSpec
 
@@ -128,8 +129,6 @@ class FinalizeSettings(BaseModel):
 
 
 class DevSettings(BaseModel):
-    seed_enabled: bool = False
-    """Expose POST /dev/seed to load artificial memories. Never enable in production."""
     clock_file: str | None = None
     """For recording demos across days: memory, reminders and summaries take "now" from this
     file, set with `baatein demo-date`. Logins keep real time. Never set in production."""
@@ -142,6 +141,27 @@ class AuthSettings(BaseModel):
     jwt_secret: SecretStr | None = None
     token_ttl_minutes: int = 7 * 24 * 60
     min_password_length: int = 8
+    signup_enabled: bool = False
+    """Anyone can make an account. Off: accounts come from admins' seed uploads and the CLI."""
+    seed_password: SecretStr | None = None
+    """Password for accounts `baatein seed` creates, instead of the files' own (which are
+    public in the repo). Set it wherever seed files are loaded on a deploy."""
+    admin_emails: Annotated[list[str], NoDecode] = []
+    """Who may load, list and download test accounts, e.g.
+    BAATEIN_AUTH__ADMIN_EMAILS=asha@example.com,ravi@example.com."""
+
+    @field_validator("admin_emails", mode="before")
+    @classmethod
+    def _split(cls, value: object) -> object:
+        return value.split(",") if isinstance(value, str) else value
+
+    @field_validator("admin_emails")
+    @classmethod
+    def _normalize(cls, emails: list[str]) -> list[str]:
+        return [email.strip().lower() for email in emails if email.strip()]
+
+    def is_admin(self, email: str) -> bool:
+        return email.strip().lower() in self.admin_emails
 
 
 class LiveKitSettings(BaseSettings):

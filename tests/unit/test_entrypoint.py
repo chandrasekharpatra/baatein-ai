@@ -17,6 +17,7 @@ from livekit.agents.metrics import (
     TTSModelUsage,
 )
 from livekit.agents.voice import FunctionToolsExecutedEvent
+from livekit.agents.worker import ServerEnvOption
 
 from baatein.agent import entrypoint
 from baatein.agent.assistant import Assistant
@@ -423,3 +424,11 @@ async def test_resolve_user_returns_none_for_unknown_user() -> None:
 
     assert await entrypoint.resolve_user(injector, '{"user_id": "ghost"}') is None
     assert await entrypoint.resolve_user(injector, None) is None
+
+
+def test_a_deployed_worker_keeps_two_call_processes_warm() -> None:
+    """One per CPU core (LiveKit's default) is ~250 MB each; two keep a server near 1 GB."""
+    idle = entrypoint.server._num_idle_processes
+
+    assert ServerEnvOption.getvalue(idle, devmode=False) == 2
+    assert ServerEnvOption.getvalue(idle, devmode=True) == 0
