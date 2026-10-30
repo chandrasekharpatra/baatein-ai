@@ -11,7 +11,14 @@ from baatein.voice.personas import ELDER
 from tests.factories import at, make_fact, make_session, make_thread
 from tests.fakes.world import build_world
 
-PROFILE = LanguageProfile("hinglish", ProviderSpec("s"), ProviderSpec("t"), "Speak Hinglish.")
+PROFILE = LanguageProfile(
+    "hinglish",
+    ProviderSpec("s"),
+    ProviderSpec("t"),
+    "Speak Hinglish.",
+    honorific="ji",
+    formal_you="Say 'aap', never 'tum'.",
+)
 
 
 def test_instructions_include_language_reply_style() -> None:
@@ -154,8 +161,9 @@ def test_instructions_follow_persona_address_and_preferences() -> None:
         PROFILE, "Mohan", persona=ELDER, preferences=Preferences(fewer_questions=True)
     )
 
-    assert ELDER.style in text
+    assert f"{ELDER.style} Say 'aap', never 'tum'." in text
     assert 'You are talking with Mohan. Address them as "Mohan ji".' in text
+    assert "never 'tum'" not in build_instructions(PROFILE, "Mohan")  # casual persona
     assert "it overrides the style above:\n- They don't like many questions" in text
     assert "overrides" not in build_instructions(PROFILE, "Mohan")
     assert 'Address the user as "Bauji".' in build_instructions(

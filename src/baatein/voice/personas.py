@@ -19,8 +19,9 @@ class Persona:
     greeting: str
     """Instructions for the first thing Baatein says in a call."""
     pace: Pace = Pace.NORMAL
-    honorific: str | None = None
-    """Added after the user's name, e.g. "ji" → "Mohan ji"."""
+    respectful: bool = False
+    """Use the language's respectful address: its honorific after the name ("Mohan ji") and
+    its formal "you" (see `LanguageProfile`)."""
 
 
 class UnknownPersonaError(LookupError):
@@ -53,19 +54,19 @@ class PersonaRegistry:
 ELDER = Persona(
     code="elder",
     style=(
-        "The user is an older adult. Be respectful, patient and calm: say 'aap', never 'tum'. "
-        "Speak Hindi first, with only the simple English words they use themselves. Use short, "
+        "The user is an older adult. Be respectful, patient and calm. Speak their language "
+        "first, with only the simple English words they use themselves. Use short, "
         "simple sentences, one idea at a time. Ask few questions; often just listen and reflect "
         "what they said. If they ask you to repeat, say it again more simply. You are an AI "
         "companion: warm, but never pretend to be a friend, relative or a replacement for the "
         "people in their life."
     ),
     greeting=(
-        "Greet the user respectfully by name in one short sentence ('Namaste, Mohan ji!') and "
-        "ask how they are."
+        "Greet the user respectfully by name in one short sentence, in their language "
+        "('Namaste, Mohan ji!'), and ask how they are."
     ),
     pace=Pace.SLOW,
-    honorific="ji",
+    respectful=True,
 )
 
 CASUAL = Persona(
@@ -84,12 +85,18 @@ def effective_pace(persona: Persona, preferences: Preferences) -> float:
     return PACE_VALUES[preferences.pace or persona.pace]
 
 
-def address(persona: Persona, preferences: Preferences, user_name: str | None) -> str | None:
-    """How to address the user: what they asked for, else their name with the honorific."""
+def address(
+    persona: Persona,
+    preferences: Preferences,
+    user_name: str | None,
+    honorific: str | None = None,
+) -> str | None:
+    """How to address the user: what they asked for, else their name, with the language's
+    honorific if the persona is respectful."""
     if preferences.address_as:
         return preferences.address_as
-    if user_name and persona.honorific:
-        return f"{user_name} {persona.honorific}"
+    if user_name and persona.respectful and honorific:
+        return f"{user_name} {honorific}"
     return user_name
 
 

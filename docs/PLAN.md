@@ -255,7 +255,16 @@ facts_vec_<model>_<dims> USING vec0(user_id TEXT PARTITION KEY, embedding FLOAT[
 
 ## 8. Languages
 
-`LanguageProfile(code, stt: ProviderSpec, tts: ProviderSpec, reply_style)`; `hinglish` = Sarvam STT `codemix` + Sarvam Bulbul v3 + Roman-script Hinglish style; `english` = Sarvam STT + Cartesia. New language = new registry entry; `users.language` selects it per call.
+`LanguageProfile(code, stt, tts, reply_style, pace_option, cannot_hear, honorific, formal_you)`; `users.language` selects it per call. All use Sarvam `saaras:v4` STT (`codemix` for the Indian languages, which returns native script with English words in Latin).
+
+| Code | TTS | Claude writes | Elder persona's respect |
+|---|---|---|---|
+| `hinglish` | Cartesia `sonic-3`, `hi`, voice Sneha | Roman-script Hinglish | "Mohan ji", "aap" |
+| `english` | Cartesia `sonic-3`, `en` | Indian English | "Mohan ji" |
+| `odia` (2026-10-30) | Sarvam `bulbul:v3`, `od-IN`, speaker kavya (Cartesia rejects `or` on every model) | Odia script | "ଆପଣ"; no name suffix, since Odia's (babu, apa) depend on gender |
+| `kannada` (2026-10-30) | Cartesia `sonic-3`, `kn`, voice Disha | Kannada script | "Mohan avare", "ನೀವು" |
+
+Respect lives in the language profile, not the persona: the elder persona only says "be respectful", and each language says how. Odia and Kannada were checked end to end on 2026-10-30: synthesised speech transcribed back exactly by Sarvam STT, and Claude replies in the right script with the formal "you" (`test_replies_in_the_users_language_and_script`). The memory instructions' example phrases are Hindi; Claude is told to say them in the user's language. Memories stay in English for every language.
 
 ## 9. Testing (coverage-first)
 
@@ -289,7 +298,7 @@ Tests don't have to be written before the code, but every change ships with test
 ## 11. Risks
 
 - **Latency**: per-turn retrieval under a hard timeout (~300ms); embedder prewarmed per process; Haiku for conversation.
-- **Embedding quality on Romanized Hinglish**: MiniLM is the weakest option; mitigations are English-normalized facts, keyword fusion, and an easy switch to `bge-m3`, Gemini or Pinecone. Fallback: normalize the query to English before search.
+- **Embedding quality across languages**: measured on 2026-10-30 in `docs/RETRIEVAL_BENCHMARK.md` (6 embedding models, 2 rerankers, Hindi, Hinglish, Odia and Kannada). MiniLM is fine for Hindi but weak for Odia and Kannada; `multilingual-e5-large` is the recommended switch, with a similarity cut-off per language. Re-run `uv run python -m bench.retrieval.run` before changing the embedder.
 - **Memory per process**: each LiveKit job process loads the embedder (~0.22 GB); keep idle process count low.
 - **Reconciliation quality**: the analyzer prompt decides add/supersede/retire; covered by evals on fixed transcripts.
 

@@ -461,3 +461,35 @@ async def test_looks_up_saved_details_before_saying_they_are_not_saved() -> None
         result.expect.contains_function_call(name="recall")
         [reply] = assistant_replies(result)
         assert "headmaster" in reply.lower() or "school" in reply.lower(), reply
+
+
+SCRIPTS = {"odia": re.compile("[଀-୿]"), "kannada": re.compile("[ಀ-೿]")}
+
+
+@pytest.mark.parametrize(
+    ("language", "said", "familiar_you"),
+    [
+        ("odia", "ଆଜି ମୋ ଝିଅ ସହ ବହୁତ ସମୟ କଥା ହେଲି।", "ତୁମେ"),
+        ("kannada", "ಇವತ್ತು ನನ್ನ ಮಗಳ ಜೊತೆ ತುಂಬಾ ಹೊತ್ತು ಮಾತಾಡಿದೆ.", "ನೀನು"),
+    ],
+)
+async def test_replies_in_the_users_language_and_script(
+    language: str, said: str, familiar_you: str
+) -> None:
+    from baatein.voice.languages import default_language_registry
+
+    profile = default_language_registry().get(language)
+    world = build_world()
+    memory = await world.service.open_call(world.user)
+    context = render_context(await memory.context())
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await session.start(Assistant(profile, "Mohan", memory, context, persona=ELDER))
+
+        [reply] = assistant_replies(await turn(session, said))
+
+        letters = [ch for ch in reply if ch.isalpha()]
+        native = sum(bool(SCRIPTS[language].match(ch)) for ch in letters)
+        assert native > len(letters) / 2, reply
+        # The danda (U+0964/5) is the full stop of Odia too, though it sits in the Devanagari block.
+        assert not DEVANAGARI.search(reply.replace("\u0964", "").replace("\u0965", "")), reply
+        assert familiar_you not in reply, reply

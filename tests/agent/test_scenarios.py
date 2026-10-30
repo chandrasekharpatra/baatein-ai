@@ -94,7 +94,8 @@ async def test_accepts_a_correction_and_keeps_only_the_new_version() -> None:
         await result.expect.contains_message(role="assistant").judge(
             judge,
             intent="Accepts the correction simply (maybe a short apology) without arguing or "
-            "insisting on the old version.",
+            "insisting on the old version. Restating the corrected fact or asking a follow-up "
+            "question is fine.",
         )
 
 

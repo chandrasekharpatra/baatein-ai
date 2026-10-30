@@ -25,7 +25,9 @@ from tests.factories import make_thread, make_user
 from tests.fakes.repos import InMemoryState, InMemoryUserRepo
 from tests.fakes.world import build_world
 
-PROFILE = LanguageProfile("hinglish", ProviderSpec("s"), ProviderSpec("t"), "Hinglish")
+PROFILE = LanguageProfile(
+    "hinglish", ProviderSpec("s"), ProviderSpec("t"), "Hinglish", honorific="ji"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -189,7 +191,9 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     await InMemoryUserRepo(state).add(user)
     session = FakeSession()
     monkeypatch.setattr(entrypoint, "create_session", lambda p, v, s: session)
-    english = LanguageProfile("english", ProviderSpec("s"), ProviderSpec("t"), "Speak English.")
+    english = LanguageProfile(
+        "english", ProviderSpec("s"), ProviderSpec("t"), "Speak English.", honorific="ji"
+    )
     factory = FakeFactory(VoicePipeline(english, stt=object(), llm=object(), tts=object()))  # type: ignore[arg-type]
     injector = Injector()
     injector.binder.bind(Settings, to=Settings(_env_file=None))  # type: ignore[call-arg]

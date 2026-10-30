@@ -26,9 +26,9 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 | Concern | Choice |
 |---|---|
 | Realtime voice | LiveKit Agents 1.8, self-hosted `livekit-server` |
-| Speech-to-text | Sarvam `saaras:v4` in `codemix` mode (Hinglish) |
+| Speech-to-text | Sarvam `saaras:v4` in `codemix` mode (Hindi, Odia, Kannada mixed with English) |
 | LLM | Claude Haiku 5.5 (configurable) |
-| Text-to-speech | Sarvam `bulbul:v3` for Hinglish, Cartesia `sonic-3` for English |
+| Text-to-speech | Cartesia `sonic-3` for Hinglish, English and Kannada; Sarvam `bulbul:v3` for Odia (Cartesia has no Odia) |
 | Storage | SQLite (WAL) via `aiosqlite`, numbered SQL migrations |
 | Memory search | `sqlite-vec` vectors + FTS5 keyword search, fused with reciprocal rank fusion |
 | Embeddings | FastEmbed `paraphrase-multilingual-MiniLM-L12-v2` (local, 384-d) |
@@ -123,7 +123,7 @@ Migrations also run automatically when the API or an agent worker starts.
 |---|---|---|---|
 | `GET` | `/` | — | Web client |
 | `GET` | `/health` | — | Liveness check |
-| `POST` | `/auth/signup` | — | `{email, password, display_name?, language?}` → access token + user |
+| `POST` | `/auth/signup` | — | `{email, password, display_name?, language?, persona?}` → access token + user; `language` is `hinglish`, `english`, `odia` or `kannada` |
 | `POST` | `/auth/login` | — | `{email, password}` → access token + user |
 | `GET` | `/me` | Bearer | Current user |
 | `POST` | `/livekit/token` | Bearer | `{server_url, participant_token, room_name}` for a new call |
@@ -175,7 +175,7 @@ Pass `--email someone@example.com` to call as the same user every time (signed u
 
 ## Extending
 
-- **New language**: add a `LanguageProfile` in `src/baatein/voice/languages.py` with its STT, TTS and reply style. Users pick it at signup.
+- **New language**: add a `LanguageProfile` in `src/baatein/voice/languages.py` with its STT, TTS, reply style, and the respectful address the elder persona uses (`honorific` after a name, `formal_you`). Users pick it at signup. Check the TTS provider really supports it: Cartesia rejected Odia on every model.
 - **New STT/TTS/LLM provider**: register the LiveKit plugin class in `src/baatein/voice/providers.py`, then reference it by name from a language profile or `BAATEIN_LLM__PROVIDER`.
 - **New embedding provider**: implement the `Embedder` protocol, register it in `src/baatein/memory/embeddings/registry.py`, set `BAATEIN_EMBEDDING__*` and run `baatein reembed`.
 - **Schema change**: add `src/baatein/storage/sqlite/migrations/NNNN_name.sql`, numbered after the last one, without `BEGIN`/`COMMIT`.

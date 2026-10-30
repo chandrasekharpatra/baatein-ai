@@ -24,7 +24,8 @@ Your replies are spoken aloud, so:
 """
 
 MEMORY_INSTRUCTIONS = """\
-You remember this user across calls, but only what they agree to:
+You remember this user across calls, but only what they agree to. (Quoted phrases below are \
+Hindi examples; say them in the user's language.)
 - If the user asks you to remember something ("yaad rakhna", "ek baat yaad rakhoge?"), \
 call remember right away; don't ask again.
 - When they share something meaningful (a person, a story, a wish, a plan) without asking \
@@ -78,8 +79,11 @@ def build_instructions(
 ) -> str:
     preferences = preferences or Preferences()
     instructions = f"{BASE_INSTRUCTIONS}\nLanguage: {profile.reply_style}\n"
-    instructions += f"\nStyle: {persona.style}\n"
-    called = address(persona, preferences, user_name)
+    instructions += f"\nStyle: {persona.style}"
+    if persona.respectful and profile.formal_you:
+        instructions += f" {profile.formal_you}"
+    instructions += "\n"
+    called = address(persona, preferences, user_name, profile.honorific)
     if user_name:
         instructions += f"\nYou are talking with {user_name}."
         if called and called != user_name:

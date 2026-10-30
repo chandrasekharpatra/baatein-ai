@@ -59,3 +59,21 @@ def test_hinglish_speaks_through_cartesia_in_hindi_with_speed_control() -> None:
     assert hinglish.pace_option == "speed"
     assert hinglish.cannot_hear.startswith("Maaf kijiye")
     assert default_language_registry().get("english").pace_option == "speed"
+
+
+def test_odia_speaks_through_sarvam_and_kannada_through_cartesia() -> None:
+    from baatein.voice.languages import KANNADA, ODIA
+
+    registry = default_language_registry()
+    assert registry.get("odia") is ODIA
+    assert registry.get("kannada") is KANNADA
+    # Cartesia rejects Odia on every model (checked 2026-10-30), so Odia uses Sarvam's pace.
+    assert (ODIA.tts.provider, ODIA.tts.options["target_language_code"]) == ("sarvam", "od-IN")
+    assert ODIA.pace_option == "pace"
+    assert (KANNADA.tts.provider, KANNADA.tts.options["language"]) == ("cartesia", "kn")
+    for profile in (ODIA, KANNADA):
+        assert profile.stt.options["mode"] == "codemix"
+        assert "never reply in Hindi" in profile.reply_style
+        assert profile.formal_you
+    assert ODIA.honorific is None  # its respectful suffixes depend on gender
+    assert KANNADA.honorific == "avare"

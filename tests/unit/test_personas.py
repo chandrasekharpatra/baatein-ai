@@ -34,8 +34,10 @@ def test_elder_speaks_slowly_unless_the_user_chose_a_pace() -> None:
 
 
 def test_address_prefers_the_users_choice_then_the_honorific() -> None:
-    assert address(ELDER, Preferences(), "Mohan") == "Mohan ji"
-    assert address(CASUAL, Preferences(), "Mohan") == "Mohan"
+    assert address(ELDER, Preferences(), "Mohan", "ji") == "Mohan ji"
+    assert address(ELDER, Preferences(), "Mohan", "avare") == "Mohan avare"
+    assert address(ELDER, Preferences(), "Mohan") == "Mohan"  # Odia: no gender-free suffix
+    assert address(CASUAL, Preferences(), "Mohan", "ji") == "Mohan"
     assert address(ELDER, Preferences(address_as="Mohan bhai"), "Mohan") == "Mohan bhai"
     assert address(ELDER, Preferences(), None) is None
 
