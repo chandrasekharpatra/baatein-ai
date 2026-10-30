@@ -5,7 +5,7 @@ import logging
 from dotenv import find_dotenv, load_dotenv
 from injector import Injector
 from livekit.agents import AgentServer, AgentSession, JobContext, JobProcess, cli, llm, vad
-from livekit.agents.voice import ConversationItemAddedEvent
+from livekit.agents.voice import CloseEvent, ConversationItemAddedEvent
 from livekit.plugins import silero
 
 from baatein.agent.assistant import Assistant
@@ -115,6 +115,13 @@ async def entrypoint(ctx: JobContext) -> None:
         await end_call(injector, memory, reason)
 
     ctx.add_shutdown_callback(on_shutdown)
+
+    @session.on("close")
+    def _on_close(event: CloseEvent) -> None:
+        # Otherwise the job lingers until LiveKit closes the empty room, about 20 s after a
+        # hang-up: the call ended late, every end reason said "parent process shutdown",
+        # and its summary waited.
+        ctx.shutdown(reason=f"session closed: {event.reason.value}")
 
     if user is None:
         assistant = Assistant(pipeline.profile, user_name=user_name, persona=persona)

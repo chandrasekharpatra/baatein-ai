@@ -143,6 +143,33 @@ async def test_entrypoint_starts_assistant_for_default_language(
     assert database.closed
 
 
+async def test_the_job_ends_as_soon_as_the_session_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from livekit.agents.voice import CloseEvent
+    from livekit.agents.voice.events import CloseReason
+
+    pipeline = VoicePipeline(PROFILE, stt=object(), llm=object(), tts=object())  # type: ignore[arg-type]
+    session = FakeSession()
+    monkeypatch.setattr(entrypoint, "create_session", lambda *_: session)
+    injector = Injector()
+    injector.binder.bind(Settings, to=Settings(_env_file=None))  # type: ignore[call-arg]
+    injector.binder.bind(VoicePipelineFactory, to=FakeFactory(pipeline))  # type: ignore[arg-type]
+    reasons: list[str] = []
+    ctx = SimpleNamespace(
+        proc=SimpleNamespace(userdata={"injector": injector, "vad": object()}),
+        room=object(),
+        job=SimpleNamespace(metadata=""),
+        add_shutdown_callback=lambda _: None,
+        shutdown=lambda reason: reasons.append(reason),
+    )
+    await entrypoint.entrypoint(ctx)  # type: ignore[arg-type]
+
+    session.handlers["close"](CloseEvent(reason=CloseReason.PARTICIPANT_DISCONNECTED))
+
+    assert reasons == ["session closed: participant_disconnected"]
+
+
 def test_main_loads_dotenv_then_runs_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     Path(".env").write_text("LIVEKIT_URL=ws://from-dotenv:7880\nSARVAM_API_KEY=from-dotenv\n")
     monkeypatch.setenv("SARVAM_API_KEY", "from-shell")

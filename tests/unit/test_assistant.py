@@ -5,6 +5,7 @@ from typing import Any
 from livekit.agents import llm
 
 from baatein.agent.assistant import Assistant, build_instructions
+from baatein.config import MemorySettings
 from baatein.domain.models import Pace, Person, Preferences
 from baatein.memory.service import CallMemory
 from baatein.voice.languages import LanguageProfile, ProviderSpec
@@ -381,3 +382,89 @@ async def test_on_enter_listens_for_transcripts(monkeypatch: Any) -> None:
     await Assistant(PROFILE).on_enter()  # no memory: nothing to listen for
 
     assert handlers == [("user_input_transcribed", assistant.heard)]
+
+
+async def slow_call(delay: float = 0.05) -> Assistant:
+    world = build_world(MemorySettings(recall_timeout_seconds=0.01))
+    await world.store.add(make_fact(world.user.id, "Has an interview at Google on Friday"))
+    search = world.store.search
+
+    async def slow(*args: Any) -> Any:
+        await asyncio.sleep(delay)
+        return await search(*args)
+
+    world.store.search = slow
+    memory = await world.service.open_call(world.user)
+    return Assistant(PROFILE, memory=memory, memory_context="")
+
+
+def history_notes(assistant: Assistant) -> list[str]:
+    return [m.text_content or "" for m in assistant.chat_ctx.messages() if m.role == "system"]
+
+
+async def test_a_slow_search_doesnt_hold_the_reply_and_joins_the_next_turn() -> None:
+    assistant = await slow_call()
+    turn_ctx = llm.ChatContext()
+
+    await assistant.on_user_turn_completed(
+        turn_ctx, llm.ChatMessage(role="user", content=["Google interview ki tayari"])
+    )
+
+    assert turn_ctx.items == []  # this reply went ahead without it
+    await asyncio.sleep(0.1)
+    [note] = history_notes(assistant)
+    assert "before your last reply" in note
+    assert "Has an interview at Google on Friday" in note
+
+    await assistant.on_user_turn_completed(  # found again: not repeated
+        llm.ChatContext(), llm.ChatMessage(role="user", content=["Google interview kal hai"])
+    )
+    await asyncio.sleep(0.1)
+    assert len(history_notes(assistant)) == 1
+
+
+async def test_a_late_search_adds_nothing_in_privacy_mode() -> None:
+    assistant = await slow_call()
+    await assistant.on_user_turn_completed(
+        llm.ChatContext(), llm.ChatMessage(role="user", content=["Google interview ki tayari"])
+    )
+    assert assistant._memory is not None
+    assistant._memory.enable_privacy_mode()
+
+    await asyncio.sleep(0.1)
+
+    assert history_notes(assistant) == []
+
+
+async def test_a_late_search_that_fails_adds_nothing() -> None:
+    world = build_world(MemorySettings(recall_timeout_seconds=0.01))
+
+    async def broken(*_: Any) -> Any:
+        await asyncio.sleep(0.05)
+        raise RuntimeError("pinecone down")
+
+    world.store.search = broken  # type: ignore[method-assign]
+    memory = await world.service.open_call(world.user)
+    assistant = Assistant(PROFILE, memory=memory, memory_context="")
+    await assistant.on_user_turn_completed(
+        llm.ChatContext(), llm.ChatMessage(role="user", content=["Google interview"])
+    )
+
+    await asyncio.sleep(0.1)
+
+    assert history_notes(assistant) == []
+
+
+async def test_a_note_that_cant_be_kept_is_logged(monkeypatch: Any, caplog: Any) -> None:
+    assistant = await slow_call()
+
+    async def closed(_: Any) -> None:
+        raise RuntimeError("session closed")
+
+    monkeypatch.setattr(assistant, "update_chat_ctx", closed)
+    await assistant.on_user_turn_completed(
+        llm.ChatContext(), llm.ChatMessage(role="user", content=["Google interview ki tayari"])
+    )
+    await asyncio.sleep(0.1)
+
+    assert "couldn't add a memory note" in caplog.text

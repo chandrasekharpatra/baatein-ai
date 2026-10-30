@@ -238,11 +238,16 @@ def render_context(context: MemoryContext) -> str:
     return "\n".join(lines)
 
 
-def render_recall(facts: Sequence[ScoredFact]) -> str | None:
-    """Hidden per-turn context with memories relevant to what the user just said."""
+def render_recall(facts: Sequence[ScoredFact], late: bool = False) -> str | None:
+    """Hidden per-turn context with memories relevant to what the user just said. `late`:
+    the search finished after the reply had started, so they're for the turns that follow."""
     if not facts:
         return None
-    lines = ["Saved memories that may be relevant to what the user just said:"]
+    lines = [
+        "Saved memories that came up for what the user said before your last reply:"
+        if late
+        else "Saved memories that may be relevant to what the user just said:"
+    ]
     lines += [render_memory(scored.fact) for scored in facts]
     lines.append("Use them only if they fit; don't list them back.")
     return "\n".join(lines)

@@ -212,6 +212,10 @@ class CallMemory:
     def user_id(self) -> str:
         return self.session.user_id
 
+    @property
+    def settings(self) -> MemorySettings:
+        return self._deps.settings
+
     async def context(self) -> MemoryContext:
         """What to tell the agent at call start. Marks the chosen check-in as offered."""
         deps, limits = self._deps, self._deps.settings
@@ -317,33 +321,52 @@ class CallMemory:
             await self._pending
 
     def start_recall(self, query: str) -> "asyncio.Task[list[ScoredFact]]":
-        """Start searching for memories that match the user's words. With a hosted embedder a
-        search takes about 400 ms, so the agent starts it on the final transcript, before the
-        turn ends, and `recall` waits only for what's left."""
+        """Start searching for memories that match the user's words. The agent starts it on
+        the final transcript, a moment before the turn ends."""
+        started = time_module.perf_counter()
         task = asyncio.ensure_future(
             self._deps.store.search(
                 self.user_id, query, self._deps.settings.recall_limit, self._turn_cut_off
             )
         )
         task.add_done_callback(_consume_error)
+
+        def log_duration(done: "asyncio.Task[list[ScoredFact]]") -> None:
+            if not done.cancelled():
+                took = (time_module.perf_counter() - started) * 1000
+                logger.info("memory recall: the search took %.0f ms", took)
+
+        task.add_done_callback(log_duration)
         return task
 
-    async def recall(self, query: "str | asyncio.Task[list[ScoredFact]]") -> list[ScoredFact]:
-        """Facts relevant to the user's words, or nothing if the search is slow or fails. Pass
-        a task from `start_recall` to wait for a search already under way."""
+    async def recall(
+        self, query: "str | asyncio.Task[list[ScoredFact]]"
+    ) -> list[ScoredFact] | None:
+        """Facts relevant to the user's words, if the search finishes within the reply's short
+        wait (`recall_timeout_seconds`). Otherwise None: the search carries on, and the caller
+        can use what it finds on a later turn. [] if the search fails. Pass a task from
+        `start_recall` to wait for a search already under way.
+
+        A hosted embedder takes about 450 ms, so its searches usually miss the wait; holding
+        every reply for it would make each one that much slower."""
         task = self.start_recall(query) if isinstance(query, str) else query
         timeout = self._deps.settings.recall_timeout_seconds
         started = time_module.perf_counter()
-        try:
-            found = await asyncio.wait_for(task, timeout)
-            waited = (time_module.perf_counter() - started) * 1000
-            logger.info("memory recall: the reply waited %.0f ms", waited)
-            return found
-        except TimeoutError:
-            logger.warning("memory recall timed out after %.2fs", timeout)
-        except Exception:
-            logger.exception("memory recall failed")
-        return []
+        done, _ = await asyncio.wait({task}, timeout=timeout)
+        if not done:
+            logger.info(
+                "memory recall: still searching after %.0f ms; replying without it", timeout * 1000
+            )
+            return None
+        if task.cancelled():
+            return []
+        if (error := task.exception()) is not None:
+            logger.error("memory recall failed", exc_info=error)
+            return []
+        logger.info(
+            "memory recall: the reply waited %.0f ms", (time_module.perf_counter() - started) * 1000
+        )
+        return task.result()
 
     async def search(self, query: str) -> list[ScoredFact]:
         """Saved memories matching `query`, for an explicit lookup. Never raw transcripts."""

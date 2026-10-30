@@ -29,7 +29,7 @@ Slice 6 is built (2026-10-30): real-Claude scenario evals for every scenario in 
 **Phase 4 notes**
 - Per-call state is a `CallMemory` object created by the process-wide `MemoryService` (`memory/service.py`), not a child injector: it only needs the session and the repos, and a plain object is easier to test.
 - Turns are numbered and queued synchronously from `conversation_item_added`, written in order in the background, and flushed before the session ends.
-- Per-turn recall runs `MemoryStore.search` under `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` (0.3 s) and is skipped silently on timeout or error. The embedder is warmed up at call start, in parallel with the greeting.
+- Per-turn recall waits at most `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` (0.1 s since 2026-10-30) for `MemoryStore.search`; a slower search keeps running and its memories join the next turn, and an error is logged and skipped (see §3 Embeddings, Latency). The embedder is warmed up at call start, in parallel with the greeting.
 - One shutdown callback ends the session and then closes the database; LiveKit runs shutdown callbacks in parallel, and an open `aiosqlite` thread kept job processes from exiting.
 
 **How to run** (see README): `cp .env.example .env` and fill keys, then `livekit-server --dev`, `uv run baatein-agent dev`, `uv run baatein serve`, open http://localhost:8000.
@@ -118,7 +118,11 @@ class Embedder(Protocol):
 - `FastEmbedEmbedder` loads the model lazily (first call, in a worker thread), routes `kind` to FastEmbed's `query_embed`/`passage_embed`, and validates dimensions.
 - `EmbedderRegistry` selects the adapter from `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` / `__CACHE_DIR`.
 - **Default since 2026-10-30: Pinecone `llama-text-embed-v2` at 2048 dimensions** (`PineconeEmbedder`, official `pinecone` SDK, `PINECONE_API_KEY`). Chosen from `docs/RETRIEVAL_BENCHMARK.md` for English, Hindi and Hinglish (the languages in focus); Odia and Kannada are hidden from signup until their retrieval is better. Through the real hybrid search on Ram's account, the right memory came back for 30/31 English, 29/31 Hindi (Devanagari, as Sarvam returns it) and 26/31 typed-Hinglish questions.
-- **Latency:** a hosted search takes about 460 ms from India, more than the per-turn budget. `Assistant.heard` starts the search on each final transcript (`CallMemory.start_recall`), before LiveKit decides the turn has ended, and the turn waits only for what's left (`recall_timeout_seconds`). Each wait is logged ("the reply waited N ms") so the timeout can be tuned from live calls.
+- **Latency:** a hosted search takes about 450 ms from India (p50 453 ms, p90 665 ms over 15 searches). `Assistant.heard` starts the search on each final transcript (`CallMemory.start_recall`), but in live calls that came only about 25 ms before LiveKit ended the turn, so every search missed the old 0.3 s wait and the reply went out with nothing. Since 2026-10-30:
+  - The reply never waits long for it (`recall_timeout_seconds`, 0.1 s: enough for a local embedder). A search still running carries on, and what it finds is added to the call history for the next turn (`Assistant._arrived_late`), once per memory.
+  - A memory needed right away comes from Claude's `recall` tool. If that search takes longer than `thinking_after_seconds` (0.3 s), Baatein says the language profile's `thinking` line ("Hmm…", about 0.7 s of audio) meanwhile. It is kept out of the chat history, transcript and summary.
+  - Logs: "the search took N ms", "the reply waited N ms", "still searching after N ms".
+  - Why this and not the alternatives: `docs/DECISIONS.md` (D14).
 - **Cut-offs are per model and language** (`EmbeddingSettings.cut_off`, `config.py:MEASURED_CUT_OFFS`): llama's answers score 0.14 to 0.30, MiniLM's 0.3 and up, and each language separates from small talk at its own value. A call uses its user's language's cut-off for their words and the default one for the `recall` tool's English keywords. Override with `BAATEIN_EMBEDDING__MIN_SIMILARITY`.
 - The CLI loads `.env` into the environment (like the agent worker), so `reembed`, `seed`, `finalize` and `serve` see provider keys.
 - Alternatives evaluated: Ollama `bge-m3` (shared local server, better quality), Gemini / Voyage / OpenAI (hosted), `multilingual-e5-large` (too heavy per process).
@@ -161,12 +165,13 @@ CALL START  identity → user_id → child injector (CurrentUser, SessionId)
             generate_reply("greet by name; pick the most relevant follow-up")
 
 EACH TURN   on_user_turn_completed:
-              MemoryStore.search(new_message, user_id, top_k=5) with ~300ms timeout
-              → inject as hidden context (skip silently on timeout)
+              search started on the final transcript; wait ≤0.1 s
+              → inject as hidden context; a slower search joins the next turn
             conversation_item_added → append turn to SQLite
-            tools: recall_memory(query), add_followup(text, due), resolve_followup(id)
+            tools: recall(query) ("Hmm…" if slow), remember, threads, reminders, … (agent/tools.py)
 
-CALL END    shutdown callback → flush turns, close session, status=pending
+CALL END    session closes (hang-up) → job shuts down at once
+            shutdown callback → flush turns, close session, status=pending
             Finalizer (baatein serve, every 10 s; one Claude call, structured output):
               input: transcript, items saved in this call, active boundaries
               output: summary (saved items only), ended_abruptly + topic, ≤2 notes
@@ -301,7 +306,7 @@ Tests don't have to be written before the code, but every change ships with test
 
 ## 11. Risks
 
-- **Latency**: per-turn retrieval under a hard timeout (~300ms); embedder prewarmed per process; Haiku for conversation.
+- **Latency**: the reply waits at most 0.1 s for per-turn retrieval (a hosted search's memories join the next turn); "Hmm…" covers a slow `recall` tool; Haiku for conversation. Moving the agent closer to Pinecone's region is a deploy question.
 - **Embedding quality across languages**: measured on 2026-10-30 in `docs/RETRIEVAL_BENCHMARK.md` (6 embedding models, 2 rerankers, Hindi, Hinglish, Odia and Kannada). MiniLM is fine for Hindi but weak for Odia and Kannada; `multilingual-e5-large` is the recommended switch, with a similarity cut-off per language. Re-run `uv run python -m bench.retrieval.run` before changing the embedder.
 - **Memory per process**: each LiveKit job process loads the embedder (~0.22 GB); keep idle process count low.
 - **Reconciliation quality**: the analyzer prompt decides add/supersede/retire; covered by evals on fixed transcripts.

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +17,7 @@ from baatein.agent.tools import (
     parse_time,
     user_messages,
 )
+from baatein.config import MemorySettings
 from baatein.domain.models import (
     BoundaryScope,
     Certainty,
@@ -107,10 +109,39 @@ async def test_recall_renders_saved_memories_with_people() -> None:
     fact = await memory.remember("Plays cricket with Ravi on Sundays", about="Ravi", relation="son")
     assert fact is not None
 
-    assert await tools["recall"]("cricket") == (
+    assert await tools["recall"](speaker(), "cricket") == (
         f"- [{fact.id}] Plays cricket with Ravi on Sundays (about Ravi (son))"
     )
-    assert (await tools["recall"]("zebra")).startswith("Nothing saved about that.")
+    assert (await tools["recall"](speaker(), "zebra")).startswith("Nothing saved about that.")
+
+
+def speaker() -> Any:
+    """A run context whose session records what Baatein says."""
+    said: list[tuple[str, bool]] = []
+    session = SimpleNamespace(
+        said=said, say=lambda text, add_to_chat_ctx=True: said.append((text, add_to_chat_ctx))
+    )
+    return SimpleNamespace(session=session)
+
+
+@pytest.mark.parametrize(("delay", "said"), [(0.05, [("Hmm…", False)]), (0.0, [])])
+async def test_a_slow_recall_says_hmm_meanwhile(delay: float, said: list[Any]) -> None:
+    world = build_world(MemorySettings(thinking_after_seconds=0.01))
+    memory = await world.service.open_call(world.user)
+    search = memory.search
+
+    async def slow(query: str) -> Any:
+        await asyncio.sleep(delay)
+        return await search(query)
+
+    memory.search = slow  # type: ignore[method-assign]
+    [recall] = [t for t in memory_tools(memory, thinking="Hmm…") if t.info.name == "recall"]  # type: ignore[union-attr]
+    context = speaker()
+
+    await recall(context, "cricket")  # type: ignore[operator]
+
+    # Kept out of the chat history: Claude never sees it.
+    assert context.session.said == said
 
 
 async def test_remember_saves_with_kind_sensitivity_and_uncertainty() -> None:

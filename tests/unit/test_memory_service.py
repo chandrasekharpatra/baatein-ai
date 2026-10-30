@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import replace
 from datetime import date, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -291,18 +292,35 @@ async def test_recall_returns_relevant_facts(world: World) -> None:
     assert recalled[0].fact.text == "Has a job interview at Google"
 
 
-async def test_recall_gives_up_after_timeout(caplog: pytest.LogCaptureFixture) -> None:
+async def test_a_slow_recall_stops_waiting_but_keeps_searching(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     world = build_world(MemorySettings(recall_timeout_seconds=0.01))
+    await world.store.add(make_fact(world.user.id, "Has a job interview at Google"))
+    search = world.store.search
 
-    async def slow(*_: object) -> list[ScoredFact]:
-        await asyncio.sleep(1)
-        return []
+    async def slow(*args: Any) -> list[ScoredFact]:
+        await asyncio.sleep(0.05)
+        return await search(*args)
 
     world.store.search = slow  # type: ignore[method-assign]
     memory = await world.service.open_call(world.user)
+    task = memory.start_recall("google interview")
 
-    assert await memory.recall("anything") == []
-    assert "timed out" in caplog.text
+    with caplog.at_level(logging.INFO):
+        assert await memory.recall(task) is None
+        assert "still searching" in caplog.text
+        [found] = await task  # not cancelled: the caller can use it later
+    assert found.fact.text == "Has a job interview at Google"
+    assert "the search took" in caplog.text
+
+
+async def test_recall_of_a_cancelled_search_finds_nothing(world: World) -> None:
+    memory = await world.service.open_call(world.user)
+    task = memory.start_recall("anything")
+    task.cancel()
+
+    assert await memory.recall(task) == []
 
 
 async def test_recall_swallows_errors(world: World, caplog: pytest.LogCaptureFixture) -> None:

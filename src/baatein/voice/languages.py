@@ -18,6 +18,8 @@ class LanguageProfile:
     """Respectful word after a name for a respectful persona, e.g. "ji" (Hindi)."""
     formal_you: str | None = None
     """How a respectful persona says "you" in this language."""
+    thinking: str = "Hmm…"
+    """Said while a slow memory lookup runs, so the caller hears a pause, not silence."""
 
 
 class UnknownLanguageError(LookupError):

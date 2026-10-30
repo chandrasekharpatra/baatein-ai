@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from livekit.agents import Agent, llm
 from livekit.agents.voice import UserInputTranscribedEvent
@@ -15,6 +16,8 @@ from baatein.voice.personas import (
     effective_pace,
     preference_lines,
 )
+
+logger = logging.getLogger(__name__)
 
 BASE_INSTRUCTIONS = """\
 You are Baatein, a warm and curious voice companion who remembers people and \
@@ -122,13 +125,16 @@ class Assistant(Agent):
         self._persona = persona
         super().__init__(
             instructions=self._compose(memory.preferences if memory else None),
-            tools=memory_tools(memory, self.apply_preferences) if memory else None,
+            tools=memory_tools(memory, self.apply_preferences, profile.thinking)
+            if memory
+            else None,
         )
         self._memory = memory
         self._recalled: set[str] = set()
         self._check_in_noted = False
         self._heard = ""
         self._early: asyncio.Task[list[ScoredFact]] | None = None
+        self._late_notes: set[asyncio.Task[None]] = set()
 
     def _compose(self, preferences: Preferences | None) -> str:
         return build_instructions(
@@ -148,9 +154,9 @@ class Assistant(Agent):
             self.session.on("user_input_transcribed", self.heard)
 
     def heard(self, event: UserInputTranscribedEvent) -> None:
-        """Start the per-turn search on each final transcript. LiveKit waits a moment before
-        it decides the turn is over, and that wait hides most of a hosted embedder's round
-        trip (about 400 ms); the reply then waits only for what's left."""
+        """Start the per-turn search on each final transcript, a moment before LiveKit decides
+        the turn is over. In live calls that moment was only about 25 ms, so a hosted search
+        still finishes after the reply starts (see `_arrived_late`)."""
         words = event.transcript.strip()
         if self._memory is None or self._memory.private or not event.is_final or not words:
             return
@@ -172,16 +178,33 @@ class Assistant(Agent):
             if early is not None:
                 early.cancel()
             return
-        search: str | asyncio.Task[list[ScoredFact]] = text
-        if early is not None and _same_words(heard, text):
-            search = early
-        elif early is not None:
+        if early is not None and not _same_words(heard, text):
             early.cancel()
-        found = [s for s in await self._memory.recall(search) if s.fact.id not in self._recalled]
-        recalled = render_recall(found)
-        if recalled:
-            self._recalled.update(s.fact.id for s in found)
+            early = None
+        search = early or self._memory.start_recall(text)
+        found = await self._memory.recall(search)
+        if found is None:  # still searching: what it finds joins the next turn
+            search.add_done_callback(self._arrived_late)
+        elif recalled := self._fresh(found):
             await self._add_note(turn_ctx, recalled)
+
+    def _fresh(self, found: list[ScoredFact], late: bool = False) -> str | None:
+        """The note for memories not yet shown in this call, which are then marked as shown."""
+        new = [s for s in found if s.fact.id not in self._recalled]
+        self._recalled.update(s.fact.id for s in new)
+        return render_recall(new, late)
+
+    def _arrived_late(self, search: "asyncio.Task[list[ScoredFact]]") -> None:
+        """Keep memories from a search that finished after the reply started, for the next
+        turn. With a hosted embedder that's most searches: waiting for them would add about
+        450 ms to every reply, while a memory needed right away comes from the recall tool."""
+        memory = self._memory
+        if search.cancelled() or search.exception() is not None or memory is None:
+            return
+        if not memory.private and (note := self._fresh(search.result(), late=True)):
+            task = asyncio.ensure_future(self._keep_note(note))
+            self._late_notes.add(task)
+            task.add_done_callback(self._late_notes.discard)
 
     async def _note_check_in_asked(self, turn_ctx: llm.ChatContext) -> None:
         """Once a reply has brought up the check-in, say so: told only "ask once", Claude
@@ -204,6 +227,12 @@ class Assistant(Agent):
         turn_ctx changes after the reply; without the history copy, Claude later saw its own
         answer without the memory behind it and apologised for "inventing" it."""
         turn_ctx.add_message(role="system", content=note)
+        await self._keep_note(note)
+
+    async def _keep_note(self, note: str) -> None:
         history = self.chat_ctx.copy()
         history.add_message(role="system", content=note)
-        await self.update_chat_ctx(history)
+        try:
+            await self.update_chat_ctx(history)
+        except Exception:  # e.g. the call ended while a late search finished
+            logger.warning("couldn't add a memory note to the call history", exc_info=True)

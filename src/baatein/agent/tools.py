@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
@@ -118,9 +119,12 @@ def choice[E: StrEnum, D](enum: type[E], value: str | None, default: D) -> E | D
 def memory_tools(
     memory: CallMemory,
     on_preferences: Callable[[Preferences], Awaitable[None]] | None = None,
+    thinking: str | None = None,
 ) -> list[llm.Tool | llm.Toolset]:
+    """`thinking`: what Baatein says while a slow recall search runs, e.g. "Hmm…"."""
+
     @function_tool
-    async def recall(query: str) -> str:
+    async def recall(context: RunContext[None], query: str) -> str:
         """Look up what the user has asked you to remember. Call it whenever they ask about or
         refer to something from before that isn't in your context, before ever saying you don't
         have it saved. If nothing is found, say so honestly.
@@ -128,7 +132,13 @@ def memory_tools(
         Args:
             query: A few English keywords, e.g. "Ramesh", "wedding Sabitri", "father job".
         """
-        facts = await memory.search(query)
+        search = asyncio.ensure_future(memory.search(query))
+        done, _ = await asyncio.wait({search}, timeout=memory.settings.thinking_after_seconds)
+        if not done and thinking:
+            # A natural pause instead of silence. Kept out of the history, so Claude never
+            # sees it and the transcript and summary don't include it.
+            context.session.say(thinking, add_to_chat_ctx=False)
+        facts = await search
         return render_search(facts, await memory.people() if facts else [])
 
     @function_tool
