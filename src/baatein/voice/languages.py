@@ -52,15 +52,13 @@ class LanguageRegistry:
 HINGLISH = LanguageProfile(
     code="hinglish",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "hi-IN"}),
-    # Cartesia "Sneha - Empathetic Voice" (Hindi); it reads Roman-script Hinglish. Cartesia has
-    # no word timestamps for Hindi, so LiveKit times the live transcript itself.
+    # Sarvam's code-mixed companion voice, made for Roman-script Hinglish (D29).
     tts=ProviderSpec(
-        "cartesia",
+        "sarvam",
         {
-            "model": "sonic-3",
-            "language": "hi",
-            "voice": "6b02ffe5-e3cb-48c0-a023-c72f85953375",
-            "word_timestamps": False,
+            "model": "bulbul:v4-flash",
+            "target_language_code": "hi-IN",
+            "speaker": "simran_enhi_companion",
         },
     ),
     reply_style=(
@@ -69,7 +67,7 @@ HINGLISH = LanguageProfile(
         "balance of Hindi and English. Always write in Roman script, never Devanagari, even "
         "when the user's words reach you in Devanagari."
     ),
-    pace_option="speed",
+    pace_option="pace",
     cannot_hear=(
         "Maaf kijiye, aapki awaaz mujh tak nahi pahunch rahi. Thodi der mein phir baat karte hain."
     ),
@@ -80,16 +78,23 @@ HINGLISH = LanguageProfile(
 ENGLISH = LanguageProfile(
     code="english",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "transcribe", "language": "en-IN"}),
-    tts=ProviderSpec("cartesia", {"model": "sonic-3", "language": "en"}),
+    tts=ProviderSpec(
+        "sarvam",
+        {
+            "model": "bulbul:v4-flash",
+            "target_language_code": "en-IN",
+            "speaker": "sanchita_en_companion",
+        },
+    ),
     reply_style="Speak in simple, friendly Indian English.",
-    pace_option="speed",
+    pace_option="pace",
     honorific="ji",
 )
 
 ODIA = LanguageProfile(
     code="odia",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "od-IN"}),
-    # Cartesia has no Odia (every model rejects "or"), so Odia speaks through Sarvam.
+    # bulbul:v4-flash has no Odia voice yet, so Odia keeps bulbul:v3 (Cartesia has no Odia).
     tts=ProviderSpec(
         "sarvam", {"model": "bulbul:v3", "target_language_code": "od-IN", "speaker": "kavya"}
     ),
@@ -107,14 +112,12 @@ ODIA = LanguageProfile(
 KANNADA = LanguageProfile(
     code="kannada",
     stt=ProviderSpec("sarvam", {"model": "saaras:v4", "mode": "codemix", "language": "kn-IN"}),
-    # Cartesia "Disha - Friendly Anchor" (Kannada); like Hindi, no word timestamps.
     tts=ProviderSpec(
-        "cartesia",
+        "sarvam",
         {
-            "model": "sonic-3",
-            "language": "kn",
-            "voice": "4c00ff98-199c-4967-99ae-7b69125edcff",
-            "word_timestamps": False,
+            "model": "bulbul:v4-flash",
+            "target_language_code": "kn-IN",
+            "speaker": "chaitra_kn_conversation",
         },
     ),
     reply_style=(
@@ -122,7 +125,7 @@ KANNADA = LanguageProfile(
         "ಹೇಗಿತ್ತು?'). Keep the English words the user uses themselves (phone, doctor, TV) in "
         "Latin script. Never write Kannada in Roman script, and never reply in Hindi."
     ),
-    pace_option="speed",
+    pace_option="pace",
     cannot_hear=("ಕ್ಷಮಿಸಿ, ನಿಮ್ಮ ಧ್ವನಿ ನನಗೆ ಕೇಳುತ್ತಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಮಾತನಾಡೋಣ."),
     honorific="avare",
     formal_you="Say 'ನೀವು' (neevu), never 'ನೀನು'.",

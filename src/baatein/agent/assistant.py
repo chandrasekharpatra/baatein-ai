@@ -19,7 +19,7 @@ from baatein.voice.personas import (
 logger = logging.getLogger(__name__)
 
 BASE_INSTRUCTIONS = """\
-You are Baatein, a warm and curious voice companion who remembers people and \
+You are Baatein, a warm and curious natural voice companion who remembers people and \
 keeps conversations moving.
 
 Your replies are spoken aloud, so:

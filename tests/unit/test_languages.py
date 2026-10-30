@@ -52,25 +52,39 @@ def test_default_registry_includes_hinglish_with_codemix_stt() -> None:
     assert "Hinglish" in hinglish.reply_style
 
 
-def test_hinglish_speaks_through_cartesia_in_hindi_with_speed_control() -> None:
-    hinglish = default_language_registry().get("hinglish")
+def test_speaks_through_sarvam_bulbul_v4_flash_with_pace_control() -> None:
+    registry = default_language_registry()
+    voices = {
+        code: (
+            registry.get(code).tts.provider,
+            registry.get(code).tts.options["model"],
+            registry.get(code).tts.options["target_language_code"],
+            registry.get(code).pace_option,
+        )
+        for code in ("hinglish", "english", "kannada")
+    }
 
-    assert (hinglish.tts.provider, hinglish.tts.options["language"]) == ("cartesia", "hi")
-    assert hinglish.pace_option == "speed"
-    assert hinglish.cannot_hear.startswith("Maaf kijiye")
-    assert default_language_registry().get("english").pace_option == "speed"
+    assert voices == {
+        "hinglish": ("sarvam", "bulbul:v4-flash", "hi-IN", "pace"),
+        "english": ("sarvam", "bulbul:v4-flash", "en-IN", "pace"),
+        "kannada": ("sarvam", "bulbul:v4-flash", "kn-IN", "pace"),
+    }
+    assert registry.get("hinglish").tts.options["speaker"] == "simran_enhi_companion"
+    assert registry.get("hinglish").cannot_hear.startswith("Maaf kijiye")
 
 
-def test_odia_speaks_through_sarvam_and_kannada_through_cartesia() -> None:
+def test_odia_and_kannada_have_their_own_script_and_respect() -> None:
     from baatein.voice.languages import KANNADA, ODIA
 
     registry = default_language_registry()
     assert registry.get("odia") is ODIA
     assert registry.get("kannada") is KANNADA
-    # Cartesia rejects Odia on every model (checked 2026-10-30), so Odia uses Sarvam's pace.
-    assert (ODIA.tts.provider, ODIA.tts.options["target_language_code"]) == ("sarvam", "od-IN")
+    # bulbul:v4-flash has no Odia voice yet (and Cartesia has no Odia), so Odia keeps v3.
+    assert (ODIA.tts.options["model"], ODIA.tts.options["target_language_code"]) == (
+        "bulbul:v3",
+        "od-IN",
+    )
     assert ODIA.pace_option == "pace"
-    assert (KANNADA.tts.provider, KANNADA.tts.options["language"]) == ("cartesia", "kn")
     for profile in (ODIA, KANNADA):
         assert profile.stt.options["mode"] == "codemix"
         assert "never reply in Hindi" in profile.reply_style

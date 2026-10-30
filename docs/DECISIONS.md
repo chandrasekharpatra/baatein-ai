@@ -248,3 +248,13 @@ Three problems from Ram's live calls at 4:45 and 4:47 pm:
   - **Baatein's lines:** one at call start (user, language, persona, what the context holds), one per tool call (name, arguments and result, shortened, with codes and long numbers redacted), one per memory search (time, how many found), and one at call end (length, turns, reply and search p50, tools, Claude tokens and the share cached).
   - **Metrics:** tool calls are counted in the call's metrics and in `baatein metrics`.
   - **Usage:** it's read once from `session.usage` at the end, replacing the deprecated `metrics_collected` event and its warning.
+
+### D29. Sarvam bulbul:v4-flash for the voices; Simran for Hinglish (2026-10-30)
+- **Asked for:** a voice that sounds like natural conversation, on Sarvam's newest model, instead of Cartesia.
+- **Measured** with the same warm Baatein reply in each voice:
+  - **First audio, streaming as in a call:** Sarvam about 220–390 ms, Cartesia about 120–340 ms. That's at most about 0.2 s more, next to Claude's 1–3 s.
+  - **Pronunciation:** Sarvam's own speech-to-text heard every candidate's words and names back correctly ("आरव", "बर्थडे").
+- **Chosen by ear:** the user compared 9 Sarvam and 7 Cartesia clips (`demo/voices/`) and picked **`simran_enhi_companion`**. "enhi" voices are made for code-mixed Hindi-English, which suits Baatein's Roman-script Hinglish.
+- **Other languages:** English uses `sanchita_en_companion` and Kannada `chaitra_kn_conversation`, both heard back correctly. Odia stays on `bulbul:v3`, because v4-flash has no Odia voice.
+- **Settings:** pace is Sarvam's `pace` (0.5–2.0 on v4-flash; the elder persona's 0.85 fits). Temperature stays at the default 0.6; the livelier 0.9 sample wasn't preferred.
+- **Cartesia** stays registered: `BAATEIN_VOICE__TTS` can switch any one language back without a code change, and its key is now optional. This replaces D24's "measure before changing the default".

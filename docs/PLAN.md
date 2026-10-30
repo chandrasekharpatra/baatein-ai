@@ -1,6 +1,6 @@
 # Baatein AI — Voice Agent with Long-Term Memory
 
-Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, SQLite + `sqlite-vec`, Pinecone embeddings, `injector`. No Docker. Coverage-first testing.
+Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam, SQLite + `sqlite-vec`, Pinecone embeddings, `injector`. No Docker. Coverage-first testing.
 
 ## Status (2026-10-30)
 
@@ -26,7 +26,6 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 - live voice runs of the multi-call scenarios (#1, #34);
 - recording the demo video;
 - the deferred items in `docs/DECISIONS.md` ("Later");
-- the Hinglish voice choice, if a Sarvam voice measures better than Cartesia (D24).
 
 **Phase 4 notes**
 - Per-call state is a `CallMemory` object created by the process-wide `MemoryService` (`memory/service.py`), not a child injector: it only needs the session and the repos, and a plain object is easier to test.
@@ -39,7 +38,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 **Gotchas found so far**
 - Anthropic rejects a tool parameter that has an enum and a nullable type (`Enum value 'fact' does not match declared type ['string', 'null']`). The LiveKit plugin makes every defaulted parameter nullable in strict mode, so optional parameters with fixed choices are plain `str | None` and mapped with `agent/tools.py:choice`. `tests/unit/test_tools.py` checks the generated schemas.
 - A Sarvam STT outage (websocket connects timing out, 2026-10-30) closed the LiveKit session about 20 s in, silently, with the default retry limits. `agent/resilience.py` retries longer (`BAATEIN_VOICE__STT_MAX_ERRORS`, default 6 failures of ~10 s each) and, past that, says the profile's `cannot_hear` line over TTS before ending the call.
-- Hinglish TTS is Cartesia `sonic-3` with `language="hi"` (voice Sneha), which reads Roman-script Hinglish; pace maps to Cartesia `speed` (0.6–2.0). Cartesia has no word timestamps for Hindi, so they're off for that profile. Sarvam is still the STT.
+- TTS is Sarvam `bulbul:v4-flash` (D29; until then Cartesia `sonic-3`). Its pace option is `pace`, limited to 0.5–2.0 on v4-flash (the elder persona uses 0.85), and temperature to 0.01–1.0.
 - Anthropic's strict tool schemas allow at most 16 nullable (optional) parameters across all tools (`Schemas contains too many parameters with union types`). Baatein sends non-strict schemas; see `voice/providers.py:anthropic_llm`.
 - `Agent.on_user_turn_completed` is not called in LiveKit's text-mode tests (`session.run(user_input=...)`). Logic that must count user turns reads `RunContext.session.history` in the tool instead.
 - Claude 5.5 rejects `temperature`; `BAATEIN_LLM__TEMPERATURE` is unset by default and only sent when set.
@@ -64,7 +63,7 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 | LLM (conversation) | Claude via `livekit-plugins-anthropic` | Default `claude-haiku-5-5` for latency; `claude-sonnet-5-5` via env |
 | LLM (memory/analysis) | Claude `claude-haiku-5-5` | One structured call per finished session: summary, whether it ended mid-story (and the topic), up to 2 "maybe ask next time" notes. It never creates memories |
 | STT | Sarvam `STT(mode="codemix")` | Code-mixed Hinglish |
-| TTS | Sarvam Bulbul or Cartesia Sonic | Chosen per language profile |
+| TTS | Sarvam `bulbul:v4-flash` (Odia `bulbul:v3`) | Chosen per language profile; Cartesia still registered |
 | Long-term memory | **Own `MemoryStore`** on SQLite: `facts` table + `sqlite-vec` + FTS5 | Replaces Mem0 (see §3) |
 | Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d) | Behind the `Embedder` port; FastEmbed local models still work (see §3 Embeddings, D11) |
 | App DB | SQLite via `aiosqlite`, raw SQL, repository pattern | WAL, FK on, busy_timeout; migrations via `PRAGMA user_version` |
@@ -290,10 +289,10 @@ Later migrations (Phase 5–6): `0003_memory_consent` (people; memory kind, quot
 
 | Code | TTS | Claude writes | Elder persona's respect |
 |---|---|---|---|
-| `hinglish` | Cartesia `sonic-3`, `hi`, voice Sneha | Roman-script Hinglish | "Mohan ji", "aap" |
-| `english` | Cartesia `sonic-3`, `en` | Indian English | "Mohan ji" |
-| `odia` (2026-10-30) | Sarvam `bulbul:v3`, `od-IN`, speaker kavya (Cartesia rejects `or` on every model) | Odia script | "ଆପଣ"; no name suffix, since Odia's (babu, apa) depend on gender |
-| `kannada` (2026-10-30) | Cartesia `sonic-3`, `kn`, voice Disha | Kannada script | "Mohan avare", "ನೀವು" |
+| `hinglish` | Sarvam `bulbul:v4-flash`, `hi-IN`, `simran_enhi_companion` | Roman-script Hinglish | "Mohan ji", "aap" |
+| `english` | Sarvam `bulbul:v4-flash`, `en-IN`, `sanchita_en_companion` | Indian English | "Mohan ji" |
+| `odia` (2026-10-30) | Sarvam `bulbul:v3`, `od-IN`, speaker kavya (v4-flash has no Odia voice; Cartesia rejects `or`) | Odia script | "ଆପଣ"; no name suffix, since Odia's (babu, apa) depend on gender |
+| `kannada` (2026-10-30) | Sarvam `bulbul:v4-flash`, `kn-IN`, `chaitra_kn_conversation` | Kannada script | "Mohan avare", "ನೀವು" |
 
 Respect lives in the language profile, not the persona: the elder persona only says "be respectful", and each language says how. Odia and Kannada were checked end to end on 2026-10-30: synthesised speech transcribed back exactly by Sarvam STT, and Claude replies in the right script with the formal "you" (`test_replies_in_the_users_language_and_script`). The memory instructions' example phrases are Hindi; Claude is told to say them in the user's language. Memories stay in English for every language.
 

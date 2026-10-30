@@ -15,7 +15,7 @@ Commands are for Linux, macOS or WSL2 (Ubuntu). On Windows, use WSL2 and run eve
         ▼
 ┌───────────────┐    dispatch job   ┌─────────────────────────┐
 │ livekit-server│ ────────────────▶ │ baatein-agent dev       │  Sarvam STT → Claude
-│    --dev      │ ◀──── audio ───── │ (agent worker)          │  → Cartesia TTS
+│    --dev      │ ◀──── audio ───── │ (agent worker)          │  → Sarvam TTS
 └───────────────┘                   └─────────────────────────┘
 ```
 
@@ -73,11 +73,11 @@ uv run pre-commit install    # optional: lint, type-check and test before each c
 | Service | Used for | Where |
 |---|---|---|
 | Anthropic | Claude, the conversation LLM | https://console.anthropic.com/ → API Keys |
-| Sarvam | Speech-to-text for every language, and the Odia voice | https://dashboard.sarvam.ai/ → API Keys |
-| Cartesia | The Hinglish, English and Kannada voices | https://play.cartesia.ai/ → API Keys |
+| Sarvam | Speech-to-text and the voices, for every language | https://dashboard.sarvam.ai/ → API Keys |
 | Pinecone | Memory embeddings (the default embedder) | https://app.pinecone.io/ → API Keys |
+| Cartesia (optional) | Only if you switch a language to a Cartesia voice (`BAATEIN_VOICE__TTS`) | https://play.cartesia.ai/ → API Keys |
 
-All four are needed for the default setup.
+Anthropic, Sarvam and Pinecone are needed for the default setup.
 
 ## 4. Configure `.env`
 
@@ -91,7 +91,7 @@ Edit `.env`:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 SARVAM_API_KEY=sk_...
-CARTESIA_API_KEY=sk_car_...
+# CARTESIA_API_KEY=sk_car_...   (only for a Cartesia voice)
 PINECONE_API_KEY=pcsk_...
 
 # Leave these as-is: they match `livekit-server --dev`
