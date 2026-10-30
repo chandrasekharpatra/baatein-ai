@@ -77,7 +77,7 @@ The agent runs on Railway and only connects out, so there's nothing to deploy on
    ```
 5. Add the custom domain. Railway's config file can't register one, so it's a CLI command:
    ```bash
-   railway domain baatein.experiship.com
+   railway domain baatein-ai.experiship.com
    ```
    `railway.ts` builds `main` from GitHub, so merge this branch first. To deploy what's on your disk instead, run `railway up`.
 

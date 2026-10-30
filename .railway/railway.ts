@@ -3,7 +3,7 @@
 //
 // Preview with `railway config plan`, then `railway config apply`. Set the secrets marked
 // preserve() in the Railway dashboard first (sealed); they never go in this file. The custom
-// domain (baatein.experiship.com) can't be set here: `railway domain baatein.experiship.com`.
+// domain (baatein-ai.experiship.com) can't be set here: `railway domain baatein-ai.experiship.com`.
 import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
 
 const REGION = "asia-southeast1-eqsg3a"; // Singapore, nearest to India
