@@ -51,7 +51,7 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers -m 'not llm and not model' --cov=baatein --cov-report=term-missing"
 markers = [
     "llm: calls a real LLM provider (needs API keys); run with -m llm",
-    "model: downloads and runs a real local embedding model; run with -m model",
+    "model: downloads and runs the local FastEmbed model (~0.22 GB); run with -m model",
 ]
 
 [tool.coverage.run]

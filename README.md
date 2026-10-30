@@ -26,7 +26,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 
 1. The web client signs you up or logs you in and gets an access token.
 2. `/livekit/token` creates a fresh room and a LiveKit token that dispatches the `baatein` agent, signed with your user id.
-3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens (with codes and long numbers redacted); on each of your turns it searches your saved memories, and what it finds is ready by its next reply. It asks before saving anything, can correct or forget a memory when you ask, and after the call `baatein serve` writes a short summary for next time.
+3. The agent worker joins the room, loads your profile (name and language) and what it remembers about you, opens a session and talks with you in real time. Every message is saved as it happens (with codes and long numbers redacted); on each of your turns it searches your saved memories without making the reply wait: what it finds joins the conversation by its next reply, and when it needs a memory right away it looks it up with the `recall` tool (saying "Hmm…" if that takes a moment). It opens by picking up from earlier calls and any reminder that's due. It asks before saving anything, can correct or forget a memory when you ask, and after the call `baatein serve` writes a short summary for next time.
 
 ## Tech stack
 
@@ -51,7 +51,7 @@ For a step-by-step walkthrough from a fresh machine, including installing LiveKi
 
 - Python 3.12 and [`uv`](https://docs.astral.sh/uv/)
 - `livekit-server`: see the [LiveKit install instructions](https://github.com/livekit/livekit#linux) (Linux: `curl -sSL https://get.livekit.io | bash`, macOS: `brew install livekit`)
-- API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/), and [Cartesia](https://play.cartesia.ai/) (Cartesia is only used by the English voice)
+- API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/) (speech-to-text, and the Odia voice), [Cartesia](https://play.cartesia.ai/) (the Hinglish, English and Kannada voices) and [Pinecone](https://app.pinecone.io/) (memory embeddings)
 
 ### Install
 
@@ -63,7 +63,7 @@ uv run pre-commit install
 
 Fill in `.env`:
 
-- `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`
+- `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `PINECONE_API_KEY`
 - `BAATEIN_AUTH__JWT_SECRET`: a long random string, e.g. `openssl rand -hex 32`
 - Keep the `LIVEKIT_*` defaults; they match `livekit-server --dev`.
 
@@ -88,16 +88,19 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Claude (read by the LiveKit plugin) |
-| `SARVAM_API_KEY` | — | Sarvam STT and TTS |
-| `CARTESIA_API_KEY` | — | Cartesia TTS (English profile) |
+| `SARVAM_API_KEY` | — | Sarvam STT (every language) and TTS (Odia) |
+| `CARTESIA_API_KEY` | — | Cartesia TTS (Hinglish, English, Kannada) |
+| `PINECONE_API_KEY` | — | Hosted memory embeddings (the default embedder) |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server the agent and tokens point to |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | — | Sign room tokens; register the worker |
 | `LIVEKIT_AGENT_NAME` | `baatein` | Name used for explicit agent dispatch |
+| `LIVEKIT_TOKEN_TTL_MINUTES` | `15` | Lifetime of a room token |
 | `BAATEIN_AUTH__JWT_SECRET` | — | Required by the API to issue access tokens |
 | `BAATEIN_AUTH__TOKEN_TTL_MINUTES` | `10080` (7 days) | Access token lifetime |
 | `BAATEIN_LLM__PROVIDER` / `__MODEL` | `anthropic` / `claude-haiku-5-5` | Conversation LLM |
 | `BAATEIN_LLM__TEMPERATURE` | unset | Only sent when set; Claude 5.5 models reject it |
-| `BAATEIN_VOICE__DEFAULT_LANGUAGE` | `hinglish` | Used when a call has no known user (e.g. `console`) |
+| `BAATEIN_VOICE__DEFAULT_LANGUAGE` / `__DEFAULT_PERSONA` | `hinglish` / `casual` | Used when a call has no known user (e.g. `console`) |
+| `BAATEIN_VOICE__STT_MAX_ERRORS` | `6` | Speech-to-text failures in a row (about 10 s each) before Baatein apologises and ends the call |
 | `BAATEIN_DATABASE__URL` | `sqlite:///data/baatein.db` | Database file (relative to the working directory) |
 | `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` | `pinecone` / `llama-text-embed-v2` / `2048` | Fact embeddings (needs `PINECONE_API_KEY`); run `baatein reembed` after changing |
 | `BAATEIN_EMBEDDING__MIN_SIMILARITY` | measured per model | Similarity cut-offs by language, e.g. `{"english": 0.2, "default": 0.12}`; by default the values measured for the model in `config.py:MEASURED_CUT_OFFS` |
@@ -105,9 +108,11 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_EMBEDDING__CACHE_DIR` | `data/models` | Where FastEmbed downloads a local model |
 | `BAATEIN_MEMORY__CONTEXT_FACTS` / `__CONTEXT_THREADS` / `__CONTEXT_DECLINED` | `10` / `10` / `10` | How much memory goes into the agent's instructions at call start |
 | `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall` tool |
+| `BAATEIN_MEMORY__CHECK_IN_GAP_DAYS` / `__CHECK_IN_MAX_OFFERS` | `3` / `3` | A storyline is checked in on at most every 3 days, and offered at most 3 times |
 | `BAATEIN_VOICE__TTS` | unset | Another voice for a language, as JSON by language code (e.g. a Sarvam `bulbul:v4-flash` expressive voice for a demo); unset keeps each profile's own |
 | `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0` | How long a reply waits for per-turn recall; a slower search's memories join the next turn. Set `0.1` with a local FastEmbed model |
 | `BAATEIN_MEMORY__THINKING_AFTER_SECONDS` | `0.3` | If the `recall` tool takes longer, Baatein says "Hmm…" meanwhile |
+| `BAATEIN_DEV__SEED_ENABLED` | `false` | Development only: `/dev/seed` and Settings → "Test memories" in the web client |
 | `BAATEIN_DEV__CLOCK_FILE` | unset | Demos only: memory and reminders take "now" from this file (`baatein demo-date`); never set in production |
 | `BAATEIN_FINALIZE__MODEL` / `__EFFORT` | `claude-haiku-5-5` / `low` | The model that writes each call's summary |
 | `BAATEIN_FINALIZE__INTERVAL_SECONDS` | `10` | How often `baatein serve` summarises finished calls; `0` turns it off |
@@ -122,7 +127,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `uv run baatein reembed` | Rebuild the fact vector index for the current embedding model |
 | `uv run --env-file .env baatein finalize [--session ID]` | Summarise finished calls now (`serve` also does this every 10 s); `--session` re-runs one call |
 | `uv run baatein metrics [--days 7] [--email E]` | Reply latency (and where it goes), memory search and usage of recent calls |
-| `uv run baatein demo-date YYYY-MM-DD [--time 10:00] \| --clear` | Demos only (needs `BAATEIN_DEV__CLOCK_FILE`): make it a chosen day for memory, reminders and summaries, so one recording session can show several days |
+| `uv run baatein demo-date YYYY-MM-DD [--time 10:00] [--tz Asia/Kolkata] \| --clear` | Demos only (needs `BAATEIN_DEV__CLOCK_FILE`): make it a chosen day for memory, reminders and summaries, so one recording session can show several days |
 | `uv run baatein forget-user EMAIL --yes` | Erase everything Baatein remembers about a user (memories, people, storylines, reminders, calls); the account stays |
 | `uv run baatein seed FILE [--replace]` | Create a test account with artificial memories (see `docs/SEED_DATA.md`) |
 | `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload |
@@ -142,6 +147,7 @@ Migrations also run automatically when the API or an agent worker starts.
 | `GET` | `/me` | Bearer | Current user |
 | `POST` | `/me/forget` | Bearer + `{password}` | "Forget me": erase everything Baatein remembers; the account stays (204) |
 | `POST` | `/livekit/token` | Bearer | `{server_url, participant_token, room_name}` for a new call |
+| `GET` / `POST` | `/dev/seed` | — / Bearer | Development only (`BAATEIN_DEV__SEED_ENABLED`): check it's on / load a seed file into your account |
 
 Errors use `409` for a duplicate email, `401` for bad credentials or tokens, and `422` for invalid input (weak password, unknown language, bad email). Interactive docs are at http://127.0.0.1:8000/docs.
 
@@ -152,19 +158,23 @@ src/baatein/
   agent/          LiveKit worker: prewarm, per-call entrypoint, Assistant, memory tools
   api/            FastAPI app and static web client
   auth/           Argon2 hashing, JWT tokens, LiveKit call tokens, AuthService
-  domain/         Models (User, Session, Turn, FollowUp, Fact), errors, ids
-  memory/         MemoryService (per-call memory), context rendering, embedders, ranking
-  ports/          Protocols every adapter implements (repos, memory, embedder, auth, clock)
+  domain/         Models (User, Session, Turn, Fact, Person, Thread, Boundary, Reminder…), errors, ids
+  memory/         MemoryService (per-call memory), context and greeting, embedders, ranking,
+                  end-of-call summary (analyzer, finalizer), reminder dates, redaction, seeds
+  ports/          Protocols every adapter implements (repos, memory, embedder, analyzer, auth, clock)
   storage/sqlite/ Connection, migrations, repositories, memory store with sqlite-vec
   voice/          Language profiles and STT/TTS/LLM provider registries
   config.py       Settings
+  metrics.py      Per-call numbers and the `baatein metrics` report
   container.py    Dependency injection modules
   cli.py          `baatein` command
 tests/
   unit/ contract/ integration/ api/ agent/   (contract suites run against SQLite and in-memory fakes)
   fakes/ factories.py
-docs/PLAN.md      Architecture, decisions, status and roadmap
+docs/PLAN.md      Architecture, status and roadmap
 docs/DECISIONS.md Decision log: what was chosen, the options, and why
+docs/RUNNING.md   Step-by-step setup from a fresh machine
+docs/             Also: memory design, Phase 5 slices, seed data, retrieval benchmark
 .claude/skills/   Claude Code skill for LiveKit work, with a headless call probe
 ```
 
@@ -174,7 +184,7 @@ The code uses ports and adapters: business logic depends on the `Protocol`s in `
 
 ```bash
 uv run pytest              # unit, contract, integration and API tests, with coverage; no network
-uv run pytest -m model     # real embedding model (downloads ~0.22 GB to data/models once)
+uv run pytest -m model     # the local FastEmbed model (downloads ~0.22 GB to data/models once)
 uv run pytest -m llm       # agent behaviour against real Claude (needs ANTHROPIC_API_KEY)
 uv run ruff check && uv run ruff format --check && uv run mypy
 ```
@@ -191,9 +201,9 @@ Pass `--email someone@example.com` to call as the same user every time (signed u
 
 ## Extending
 
-- **New language**: add a `LanguageProfile` in `src/baatein/voice/languages.py` with its STT, TTS, reply style, and the respectful address the elder persona uses (`honorific` after a name, `formal_you`). Users pick it at signup. Check the TTS provider really supports it: Cartesia rejected Odia on every model.
+- **New language**: add a `LanguageProfile` in `src/baatein/voice/languages.py` with its STT, TTS, reply style, and the respectful address the elder persona uses (`honorific` after a name, `formal_you`). Add it to the signup `<select>` in `api/static/index.html` so users can pick it (Odia and Kannada are built but not offered there yet). Check the TTS provider really supports it: Cartesia rejected Odia on every model.
 - **New STT/TTS/LLM provider**: register the LiveKit plugin class in `src/baatein/voice/providers.py`, then reference it by name from a language profile or `BAATEIN_LLM__PROVIDER`.
-- **New embedding provider**: implement the `Embedder` protocol, register it in `src/baatein/memory/embeddings/registry.py`, set `BAATEIN_EMBEDDING__*` and run `baatein reembed`.
+- **New embedding provider**: implement the `Embedder` protocol, register it in `src/baatein/memory/embeddings/registry.py`, set `BAATEIN_EMBEDDING__*` and run `baatein reembed`. Measure the model's cut-offs and duplicate similarity (`bench/retrieval`) and add them to `MEASURED_CUT_OFFS` / `MEASURED_DUPLICATES` in `config.py`: without them the cut-off falls back to 0.3 and the duplicate check is skipped.
 - **Schema change**: add `src/baatein/storage/sqlite/migrations/NNNN_name.sql`, numbered after the last one, without `BEGIN`/`COMMIT`.
 
 ## Troubleshooting

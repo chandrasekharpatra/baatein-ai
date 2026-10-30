@@ -4,8 +4,9 @@ A seed file fills an account with memories, storylines, boundaries, reminders an
 
 | File | Who | Good for |
 |---|---|---|
-| `seeds/mohan.json` | Mohan, elder persona; last call cut off mid-story | Cut-off story, boundary, grief, due birthday |
+| `seeds/mohan.json` | Mohan, elder persona; last call cut off mid-story. Has no `user` section, so load it from the web client (or curl) into an account you're logged in as | Cut-off story, boundary, grief, due birthday |
 | `seeds/ram_mohapatra.json` | Ram Babu (72), Bhubaneswar; five past calls with full transcripts, 14 people, 34 memories | Retrieval of his life story, a correction, storyline check-in with history, health worry, reminders |
+| `seeds/ram_demo.json` | `ram.demo@example.com`, "Ram", elder persona, Hinglish; no memories | The multi-day demo recorder (`demo/days/`), which resets it each run so Ram's main account is never touched |
 
 ## Two ways to load one
 
@@ -133,7 +134,7 @@ Every section is optional.
 | Wife's death (grief) | Never raised unless Mohan raises it |
 | Yoga storyline, cancelled | Never mentioned |
 | Declined "go for a walk" | Never suggests a walk |
-| Ravi's birthday in 6 days (its 7-days-before alert fell yesterday, after the last call) | Reminds about it early in the call |
+| Ravi's birthday in 6 days (its 7-days-before alert fell yesterday, after the last call) | Brings it up in the greeting |
 | June visit without a date | Doesn't push it; only if Mohan brings it up |
 
 To see the storyline check-in instead of the cut-off story, set `"ended_abruptly": false` on the last call.
@@ -149,7 +150,7 @@ To see the storyline check-in instead of the cut-off story, set `"ended_abruptly
 | Rohan's PhD worry (personal) | Not raised; he asked not to be asked often |
 | Boundary on Laxman and the land | Never brings it up; Laxman isn't in his people |
 | Declined laughter yoga | Never suggested |
-| Sambit's birthday in 2 days (alert 3 days before) | Reminds about it early in the call |
+| Sambit's birthday in 2 days (alert 3 days before) | Brings it up in the greeting |
 | AIIMS checkup in 3 days, Sunday video call | Coming up: mentioned only if it fits |
 | Lipsa's godh bharai, no date | Waits for a date |
 

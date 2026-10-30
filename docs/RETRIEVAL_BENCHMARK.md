@@ -41,7 +41,7 @@ The Odia and Kannada lines were written by Claude and should be reviewed by nati
 
 This measures the model alone (dense similarity). Production adds keyword search (FTS5) and a similarity cut-off per model and language (`config.py:MEASURED_CUT_OFFS`, taken from these results).
 
-An `english` form (full English sentences, for English-speaking users) was added on 2026-10-30, after the first runs; the tables that show it come from runs after that.
+An `english` form (full English sentences, for English-speaking users) was added on 2026-10-30, after the first runs. The tables below come from the earlier runs and have no English column; the English figures in the decision note above come from the later Pinecone runs.
 
 ## Results (2026-10-30, Apple Silicon Mac, CPU)
 
@@ -51,7 +51,7 @@ Models tried: 6 local embedding models and 2 local rerankers (below), then Pinec
 
 | Model | Dim | hindi | hinglish | odia | kannada | keywords |
 |---|---|---|---|---|---|---|
-| MiniLM-L12 (current) | 384 | 25 / 28 | 9 / 13 | 12 / 21 | 15 / 21 | 28 / 30 |
+| MiniLM-L12 (default then) | 384 | 25 / 28 | 9 / 13 | 12 / 21 | 15 / 21 | 28 / 30 |
 | multilingual-mpnet-base | 768 | 25 / 29 | 10 / 16 | 19 / 27 | 22 / 27 | 28 / 31 |
 | **multilingual-e5-large** | 1024 | 26 / 30 | 16 / 25 | **24 / 28** | **25 / 29** | 28 / 30 |
 | embeddinggemma-300m | 768 | **29 / 31** | **20 / 27** | 18 / 25 | 25 / 31 | 29 / 31 |
@@ -65,7 +65,7 @@ Models tried: 6 local embedding models and 2 local rerankers (below), then Pinec
 
 | Model | hindi | hinglish | odia | kannada |
 |---|---|---|---|---|
-| MiniLM-L12 (current) | 0.91 (74% / 0%) | 0.32 (23% / 0%) | 0.69 (55% / 0%) | 0.54 (48% / 17%) |
+| MiniLM-L12 (default then) | 0.91 (74% / 0%) | 0.32 (23% / 0%) | 0.69 (55% / 0%) | 0.54 (48% / 17%) |
 | multilingual-mpnet-base | 0.91 (77% / 0%) | 0.42 (23% / 0%) | 0.80 (61% / 0%) | 0.86 (65% / 0%) |
 | **multilingual-e5-large** | 0.96 (90% / 0%) | 0.59 (42% / 0%) | **0.87 (81% / 0%)** | **0.94 (90% / 0%)** |
 | embeddinggemma-300m | **0.97** (84% / 0%) | **0.70** (58% / 0%) | 0.46 (39% / 0%) | 0.85 (71% / 0%) |
@@ -77,7 +77,7 @@ Models tried: 6 local embedding models and 2 local rerankers (below), then Pinec
 
 | Model | Query ms | RSS MB |
 |---|---|---|
-| MiniLM-L12 (current) | 4 / 6 | 850 |
+| MiniLM-L12 (default then) | 4 / 6 | 850 |
 | multilingual-mpnet-base | 20 / 34 | 3,738 |
 | multilingual-e5-large | 34 / 48 | 1,740 |
 | embeddinggemma-300m | 16 / 25 | 970 |
@@ -91,11 +91,13 @@ Models tried: 6 local embedding models and 2 local rerankers (below), then Pinec
 2. **multilingual-e5-large is the best all-round choice for Baatein's four languages**: top-5 recall of 28 to 30 for the scripts Sarvam returns, the best Odia and Kannada separation, 34 ms a query (well inside the 0.3 s per-turn budget this benchmark assumed), about 1.7 GB.
 3. **embeddinggemma-300m is the light alternative**: best for Hindi and Hinglish at half the memory and 16 ms, but weak for Odia (AUC 0.46, no better than chance). Not suitable while Odia is a supported language.
 4. **Rerankers rank almost perfectly but cost 260 to 330 ms on CPU**, the whole per-turn budget. They fit the `recall` tool (Claude is already waiting on a tool call), not per-turn recall.
-5. **One similarity cut-off can't serve every language.** With e5-large, each language separates cleanly at its own cut-off (0.78 to 0.82), but one cut-off for all lets 25% of small talk through. The cut-off belongs in the language profile. Today's single 0.3, set for MiniLM, already lets some Kannada small talk through.
+5. **One similarity cut-off can't serve every language.** With e5-large, each language separates cleanly at its own cut-off (0.78 to 0.82), but one cut-off for all lets 25% of small talk through. The cut-off belongs in the language profile. The single 0.3 then used for MiniLM already let some Kannada small talk through. (Cut-offs are now per model and language: `config.py:MEASURED_CUT_OFFS`.)
 6. **Hinglish in Roman script is the hardest form for every model** (at best 27 of 31 in the top 5). It only reaches per-turn recall if the user types; Sarvam returns Devanagari.
 7. Keyword queries (the `recall` tool) work with every model (28 to 31 of 31).
 
-### Recommendation
+### Recommendation (from these local runs; superseded)
+
+> Superseded by the decision at the top: Pinecone `llama-text-embed-v2` was chosen (D11), and replies stopped waiting for the search (D14). Kept as the record of what the local runs suggested.
 
 - Switch the default embedder to `intfloat/multilingual-e5-large` (1024 dimensions) and run `baatein reembed`. Nothing else changes: the `Embedder` port and per-model vector tables already support it.
 - Move `min_similarity` into each `LanguageProfile`, starting from these cut-offs, and re-measure with a larger set of small talk before trusting them (6 lines per language is too few to tune on).
@@ -140,7 +142,7 @@ Run with `uv run --env-file .env python -m bench.retrieval.run --models pinecone
 4. **pinecone-rerank-v0 is English-centric** (9 of 31 first for Odia); bge-reranker-v2-m3 is the multilingual reranker to use, local or hosted.
 5. The Cohere rerankers (`cohere-rerank-3.5`, `cohere-rerank-4-fast`) returned 403 "Project is not authorized to use model"; they need enabling on the Pinecone project.
 
-The recommendation stands: local `multilingual-e5-large`. A hosted model is worth it only if per-process memory becomes the deciding constraint, and then only with a provider and region close enough to fit the budget.
+At the time, the recommendation stood: local `multilingual-e5-large`. It was later superseded: Baatein chose Pinecone `llama-text-embed-v2` for its quality in English, Hindi and Hinglish, and stopped holding replies for the search (D11, D14).
 
 ### Caveats
 

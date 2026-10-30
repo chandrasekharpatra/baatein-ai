@@ -185,7 +185,8 @@ class MemoryService:
         logger.info("erased everything Baatein remembered about user %s", user_id)
 
     async def warm_up(self) -> None:
-        """Load the embedding model so the first per-turn recall fits its timeout."""
+        """Warm up the embedder (load a local model, or open the hosted connection) so the
+        first search of the call isn't the slowest."""
         try:
             await self._embedder.embed(["warm up"], "query")
         except Exception:

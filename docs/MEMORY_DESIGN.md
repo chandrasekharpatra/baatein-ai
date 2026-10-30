@@ -4,6 +4,8 @@ Source: `docs/voice_buddy_scenario_library_v3_full_dialogues.docx` (Voice Buddy,
 
 This document records what each scenario teaches about memory, the gaps in Baatein's current memory layer, the proposed structure, and the decisions taken. It is the input for the Phase 5 plan.
 
+> **As built (Phase 5, 2026-10-30):** this is the design written before the build; where they differ, the code and `docs/PHASE5_SLICES.md` / `docs/DECISIONS.md` win. The main differences: `facts`/`Fact` were extended rather than renamed to `memories`, and there is no consent column (with strict consent, `remember` after a "yes" is the only way in); threads use `last_offered_at` / `times_offered`; the reminder tools are `create_reminder`, `update_reminder`, `complete_occurrence`, `skip_occurrence` and `cancel_reminder`; and besides the last call's summary, the context also gets the one before a trivial call (D20) and other calls from the same day (D27). Due reminders are brought up in the greeting itself (D26).
+
 ## 1. Headline findings
 
 1. Today's call-start context (user name, today's date, open follow-ups, plus in-call chat history) covers only about a quarter of what the scenarios need.
@@ -97,11 +99,11 @@ users ─┬─ profile        address_as, timezone, language/mix, speech pace,
        ├─ memories       kind: fact | story | preference | moment
        │  (extends       about: user | person_id
        │   facts)        text (English) + quote (user's own words), certainty: sure | uncertain
-       │                 consent: given        sensitivity: normal | personal | health | grief | crisis
+       │                 sensitivity: normal | personal | health | grief | crisis   (consent: implied by remember)
        │                 superseded_by, retired_at, deleted_at
        ├─ threads        kind: relationship | aspiration | intention | worry | plan | story
        │  (replaces      status: open | in_progress | done | not_done | cancelled | snoozed
-       │   followups)    next_step, check_in_after, last_raised_at, times_raised, sensitivity
+       │   followups)    next_step, check_in_after, last_offered_at, times_offered, sensitivity
        │                 └─ thread_events  (date, what happened: "called Ramesh", "decided on Sunday")
        ├─ boundaries     topic or thread_id, scope: this_call | until_reopened | until_date
        ├─ suggestions    declined ones (e.g. "go for a walk", #29), so they aren't repeated
@@ -112,7 +114,7 @@ users ─┬─ profile        address_as, timezone, language/mix, speech pace,
              └─ turns    internal log only (see decision 2)
 ```
 
-`followups` becomes `threads` and `facts` becomes `memories`. Both are additive migrations; repositories and the `MemoryStore` contract tests carry over.
+`followups` becomes `threads`, and `facts` is extended with the memory fields (built that way rather than renamed to `memories`). Both are additive migrations; repositories and the `MemoryStore` contract tests carry over.
 
 ### Call-start context (small and chosen, not everything)
 
@@ -125,7 +127,7 @@ users ─┬─ profile        address_as, timezone, language/mix, speech pace,
                 due or relevant · not snoozed · not sensitive unless the user raises it · not raised recently
                 "Ramesh: he planned to call him (talked 3 days ago). Ask gently, accept 'no'."
 6. Reminders:   due in the next 7 days, mentioned in conversation (decision 3)
-7. Last call:   its summary (decision 2)
+7. Last call:   its summary (decision 2); as built, also the call before a trivial one and other calls today
 8. Rules:       ask before saving · never invent · say "I don't have that saved"
 ```
 
@@ -141,7 +143,7 @@ On each user turn, search memories and threads, skipping anything without consen
 | `update_thread(id, status, event, next_step, check_in_after)` | 1, 3, 5, 6, 8, 16, 17 |
 | `set_boundary(topic, scope)` / `lift_boundary` | 11, 17, 19, 32 |
 | `set_preference(...)` | 21, 22, 23, 30 |
-| `reminder_create / update / complete / skip / cancel`, read back to the user before saving | 34–45 |
+| `create_reminder` / `update_reminder` / `complete_occurrence` / `skip_occurrence` / `cancel_reminder`, read back to the user before saving | 34–45 |
 | `recall(query)` over consented memories and threads only | all |
 
 ### End-of-call analyzer (Phase 5)
@@ -156,7 +158,7 @@ On each user turn, search memories and threads, skipping anything without consen
 | # | Question | Decision |
 |---|---|---|
 | 1 | Consent model | **Strict.** Every personal memory is saved only with the user's agreement in the call. No silent extraction. Refined on 2026-10-29: an explicit request ("Ek baat yaad rakhoge? …", "yaad rakhna") is the agreement, so it is saved right away (#34); when Baatein itself wants to keep something it asks first ("Kya main yaad rakhun?" → "Haan", #1). **Destructive actions are always confirmed**, even right after an explicit request: forget asks "Pakka, main yeh poori tarah mita doon?" and deletes only on the user's next message (#13). |
-| 2 | Transcripts | **Internal log only, plus the summary of the last call.** Claude never searches raw transcripts; `recall` covers consented memories and threads. The last call's summary goes into call-start context. |
+| 2 | Transcripts | **Internal log only, plus call summaries.** Claude never searches raw transcripts; `recall` covers consented memories and threads. The last call's summary goes into call-start context (as built, also the one before a trivial call and other calls from the same day: D20, D27). |
 | 3 | Reminder delivery | **In the next conversation only, for now.** Reminders are stored as first-class dated objects; Baatein brings due ones up when the user next talks to it and never claims it will "notify" or "call" at a time. Timed delivery (scheduler + outbound call or push) is a later phase. |
 | 4 | Audience and persona | **Persona as a per-user setting** (option C in §6). The profile holds a persona (tone, form of address, pace, sentence length, question frequency) next to the language. An elder persona follows the scenario library; the current casual Hinglish persona stays. Preferences from #21–23 adjust it per user. |
 | 5 | Deletion | **Tombstone** (option C in §7). `forget` wipes the content (text, quote, vectors, FTS entries, related transcript turns) and keeps a contentless row (`id`, `deleted_at`, requested by the user) so the deletion is provable. Baatein says "deleted" only after the write succeeds. |

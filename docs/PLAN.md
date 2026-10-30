@@ -1,6 +1,6 @@
 # Baatein AI — Voice Agent with Long-Term Memory
 
-Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, SQLite + `sqlite-vec`, FastEmbed, `injector`. No Docker. Coverage-first testing.
+Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, SQLite + `sqlite-vec`, Pinecone embeddings, `injector`. No Docker. Coverage-first testing.
 
 ## Status (2026-10-30)
 
@@ -62,14 +62,14 @@ Hackathon plan. Python, LiveKit Agents (self-hosted), Claude, Sarvam/Cartesia, S
 | Realtime transport | LiveKit server, self-hosted native binary (`livekit-server --dev`), no Docker | `console` mode needs no server at all; swap to LiveKit Cloud via env vars |
 | Agent framework | `livekit-agents ~=1.8` | `AgentSession`, `Agent`, `@function_tool`, `on_user_turn_completed`, text-mode tests |
 | LLM (conversation) | Claude via `livekit-plugins-anthropic` | Default `claude-haiku-5-5` for latency; `claude-sonnet-5-5` via env |
-| LLM (memory/analysis) | Claude `claude-haiku-5-5` | One structured call per finished session: summary, follow-ups, fact changes |
+| LLM (memory/analysis) | Claude `claude-haiku-5-5` | One structured call per finished session: summary, whether it ended mid-story (and the topic), up to 2 "maybe ask next time" notes. It never creates memories |
 | STT | Sarvam `STT(mode="codemix")` | Code-mixed Hinglish |
 | TTS | Sarvam Bulbul or Cartesia Sonic | Chosen per language profile |
 | Long-term memory | **Own `MemoryStore`** on SQLite: `facts` table + `sqlite-vec` + FTS5 | Replaces Mem0 (see §3) |
-| Embeddings | FastEmbed `paraphrase-multilingual-MiniLM-L12-v2` (384-d, 0.22 GB, in-process) | Behind `Embedder` port; Pinecone `llama-text-embed-v2` later (see §12) |
+| Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d) | Behind the `Embedder` port; FastEmbed local models still work (see §3 Embeddings, D11) |
 | App DB | SQLite via `aiosqlite`, raw SQL, repository pattern | WAL, FK on, busy_timeout; migrations via `PRAGMA user_version` |
 | Auth | Email + password, Argon2 (`argon2-cffi`), JWT | FastAPI service issues LiveKit tokens |
-| DI | `python-injector` | Root injector per process, child injector per call |
+| DI | `python-injector` | Root injector per process; per-call state is a plain `CallMemory` |
 | Tooling | `uv`, Python 3.12, ruff, mypy (strict on `src/`), pytest, pytest-asyncio, pytest-cov | |
 
 **Postgres migration path:** repositories and `MemoryStore` get Postgres adapters that pass the same contract suites; `sqlite-vec` → `pgvector`, FTS5 → `tsvector`.
@@ -80,8 +80,8 @@ Mem0 would give us fact extraction, ADD/UPDATE/DELETE reconciliation and vector 
 
 | Mem0 capability | Our equivalent |
 |---|---|
-| Fact extraction | Session analyzer (Claude, structured output) at end of call |
-| Reconciliation (ADD/UPDATE/DELETE/NOOP) | Same analyzer call, given the transcript + the user's most similar existing facts; applied via `MemoryStore.add` / `supersede` / `retire` |
+| Fact extraction | With strict consent (Phase 5), only the `remember` tool, after the user's "yes"; the end-of-call analyzer writes a summary, never memories |
+| Reconciliation (ADD/UPDATE/DELETE/NOOP) | `correct_memory` supersedes, `forget` tombstones; `remember` won't save a near copy (`add_unless_similar`) |
 | Vector store + search | `facts` + per-model `sqlite-vec` table (partitioned by user) + FTS5, fused with reciprocal rank fusion |
 | History | Facts are never hard-deleted: `superseded_by` + `retired_at` |
 
@@ -92,16 +92,24 @@ The `MemoryStore` port stays provider-agnostic, so Mem0 Platform or Zep could be
 ```python
 class MemoryStore(Protocol):
     async def add(self, fact: Fact) -> None: ...
+    async def add_unless_similar(self, fact: Fact, min_similarity: float) -> list[ScoredFact]: ...
     async def get(self, fact_id: str) -> Fact | None: ...
     async def supersede(self, fact_id: str, replacement: Fact) -> None: ...
     async def retire(self, fact_id: str, at: datetime) -> None: ...
     async def active(self, user_id: str, limit: int) -> list[Fact]: ...
-    async def search(self, user_id: str, query: str, limit: int) -> list[ScoredFact]: ...
+    async def search(
+        self, user_id: str, query: str, limit: int, min_similarity: float | None = None
+    ) -> list[ScoredFact]: ...
+    async def saved_in(self, session_id: str) -> list[Fact]: ...
+    async def count_about(self, person_id: str) -> int: ...
+    async def forget(self, fact_id: str, at: datetime) -> list[str]: ...
+    async def forget_all(self, user_id: str, at: datetime) -> None: ...
 ```
+(See `ports/memory.py` for the exact signatures.)
 
-- `Fact(id, user_id, text, category, importance 1–5, source_session_id, superseded_by, retired_at)`; facts are stored normalized in English for consistent retrieval across Hinglish/Hindi/English.
-- **Hybrid search**: vector KNN (cosine, `min_similarity` threshold, default 0.3) + FTS5 keyword match, each taking `4 × limit` candidates, merged with reciprocal rank fusion (k=60); ties broken by importance then recency.
-- **Search terms** (`baatein/text.py`): Unicode-aware tokenizer that keeps Devanagari vowel signs, strips possessives, and drops English/Hinglish/Hindi stopwords. Used by both fact and transcript search.
+- `Fact(id, user_id, text, category, importance 1–5, kind, about_person_id, quote, certainty, sensitivity, source_session_id, superseded_by, retired_at, deleted_at)`; facts are stored normalized in English for consistent retrieval across Hinglish/Hindi/English.
+- **Hybrid search**: vector KNN (cosine, above a `min_similarity` cut-off measured per model and language, `config.py:MEASURED_CUT_OFFS`) + FTS5 keyword match (kept only with a little shared meaning: `ranking.py:KEYWORD_FLOOR` 0.1), each taking `4 × limit` candidates, merged with reciprocal rank fusion (k=60); ties broken by importance then recency.
+- **Search terms** (`baatein/text.py`): Unicode-aware tokenizer that keeps Devanagari vowel signs, strips possessives, and drops English/Hinglish/Hindi stopwords and fillers (`FILLERS`: a turn of only "haan", "ठीक है"… isn't searched). Used by both fact and transcript search.
 - **Per-model vector tables**: `facts_vec_<model_slug>_<dims>`, created on first use, with a delete trigger so user deletion cascades to vectors. Only active facts have vectors. Switching embedder = new table + `uv run baatein reembed`.
 - `sqlite-vec` is loaded on every connection (runtime and migrations).
 
@@ -136,13 +144,13 @@ class Embedder(Protocol):
    │  1. POST /auth/login  → JWT
    │  2. POST /livekit/token (JWT) → LiveKit token, identity = user_id
    ▼
- FastAPI (api/) ──── SQLite (users, sessions, turns, followups, facts, vectors)
+ FastAPI (api/) ──── SQLite (users, sessions, turns, facts + vectors, people, threads, reminders)
    │
  LiveKit server (self-hosted) ── dispatches job ──▶ Agent worker (agent/)
                                                     │  STT Sarvam → Claude → TTS
                                                     │  MemoryService
                                                     │   ├─ MemoryStore (facts, hybrid search)
-                                                    │   └─ repos (sessions, turns, follow-ups)
+                                                    │   └─ repos (sessions, turns, people, threads, reminders)
                                                     ▼
                      Finalizer, in the API process (Claude: summary, cut-off, notes)
 ```
@@ -154,18 +162,21 @@ class Embedder(Protocol):
 | Facts + vectors | Long-term semantic memory, hybrid search |
 | Users, credentials, language preference | Relational, auth |
 | Sessions + full transcripts (turns) | Source of truth, audit, replay into the finalizer on failure |
-| Follow-ups (text, due_at, status) | Status/due-date queries for the proactive opener |
+| People, storylines (threads), boundaries, reminders | The check-in, reminders and "don't bring this up" at call start |
 | Session summaries | Cheap "last time we talked about…" context |
 
 ### Conversation lifecycle
 
 ```
 CALL START  identity → user_id → CallMemory (MemoryService.open_call)
-            load in parallel: profile, last call's summary (or the one before it if the
-                              last was trivial), people, storylines + one check-in,
+            load in parallel: profile, recent calls (SessionRepo.recent_conversations,
+                              which skips silent calls): the last call's summary (or the
+                              one before it if the last was trivial) and other calls from
+                              earlier today, people, storylines + one check-in,
                               reminders, boundaries, MemoryStore.active(top importance)
-            context_builder → instructions (docs/DECISIONS.md D1–D20)
-            generate_reply(persona greeting)
+            context_builder → instructions (docs/DECISIONS.md D1–D27)
+            generate_reply(context_builder.opening: a same-day call picks up from the
+                           last one, others fit the time of day; reminders due now)
 
 EACH TURN   on_user_turn_completed:
               search the turn's words, unless they're only fillers (ठीक है, haan…);
@@ -194,34 +205,40 @@ CALL END    session closes (hang-up) → job shuts down at once
   - `AuthModule` → `PasswordHasher` (Argon2), `AccessTokens` (JWT, needs `BAATEIN_AUTH__JWT_SECRET`), `CallTokenIssuer` (LiveKit, needs `LIVEKIT_API_KEY/SECRET`), `AuthService`
   - `VoiceModule` → `LanguageRegistry`, STT/TTS/LLM registries, `VoicePipelineFactory`
 - **Identity → agent**: `/livekit/token` issues a token for a fresh room `baatein-<user>-<ulid>` with explicit agent dispatch (`agent_name="baatein"`) whose metadata is `{"user_id": ...}`. The metadata is signed by our API, so the agent trusts it, loads the user, and picks their language and name. Without metadata (e.g. `console`) it falls back to the default language.
-- **Child injector per call** (Phase 4): `root.create_child_injector([SessionModule(user, session_id)])`.
+- **Per call**: no child injector. `MemoryService.open_call` returns a plain `CallMemory` holding the session and the repos (Phase 4 notes).
 - **Tests**: `build_root(OverrideModule(), settings=...)` rebinds any port to a fake.
 
 ## 6. Project layout
 
 ```
 src/baatein/
-  config.py                 pydantic-settings (BAATEIN_<SECTION>__<FIELD>)
+  config.py                 pydantic-settings (BAATEIN_<SECTION>__<FIELD>), measured cut-offs
   container.py              injector modules, build_root()
   registry.py               ProviderSpec, ProviderRegistry
-  text.py                   search tokenizer + stopwords
-  cli.py                    baatein migrate | reembed
+  text.py                   search tokenizer, stopwords and fillers
+  metrics.py                CallMetrics and the `baatein metrics` report
+  cli.py                    baatein migrate | reembed | seed | finalize | forget-user |
+                            metrics | demo-date | serve
   domain/                   models.py, errors.py, ids.py
-  ports/                    clock.py, repos.py, embedder.py, memory.py
+  ports/                    analyzer.py, auth.py, clock.py (incl. DemoClock), repos.py,
+                            embedder.py, memory.py
   storage/sqlite/
-    db.py, vec.py, migrate.py, migrations/0001_init.sql, 0002_facts.sql
-    repos.py, memory_store.py
+    db.py, vec.py, migrate.py, repos.py, memory_store.py
+    migrations/             0001_init … 0008_call_metrics
   memory/
-    ranking.py              reciprocal rank fusion
-    embeddings/             registry.py, fastembed.py
+    ranking.py, ranker.py   reciprocal rank fusion, keyword floor; ranking for the context
+    embeddings/             registry.py, pinecone.py (default), fastembed.py
     service.py              MemoryService, CallMemory
-    context_builder.py      memory → agent instructions / per-turn context / tool output
-    analyzer.py             (Phase 5) session analyzer
-  voice/                    languages.py, providers.py
-  agent/                    assistant.py, entrypoint.py, tools.py
+    context_builder.py      memory → agent instructions, greeting (opening), per-turn notes
+    analyzer.py             end-of-call summary (Claude)
+    finalizer.py            runs the analyzer for finished calls, with retry
+    recurrence.py           reminder occurrences and when they are due
+    redact.py               codes and long numbers out of transcripts
+    seed.py                 test accounts from seed files
+  voice/                    languages.py, personas.py, providers.py
+  agent/                    assistant.py, entrypoint.py, tools.py, resilience.py
   auth/                     passwords.py, tokens.py, livekit.py, service.py
   api/                      app.py (FastAPI), static/index.html (web client)
-  workers/finalizer.py      (Phase 5)
 tests/
   fakes/                    in-memory repos, InMemoryMemoryStore, FakeEmbedder (bag-of-words)
   factories.py
@@ -244,9 +261,7 @@ sessions(id TEXT PK, user_id FK ON DELETE CASCADE, room_name, started_at, ended_
 turns(id INTEGER PK, session_id FK ON DELETE CASCADE, seq, role CHECK IN ('user','assistant'),
       text, language, interrupted, created_at, UNIQUE(session_id, seq))
 turns_fts USING fts5(text, content='turns', tokenize='unicode61 remove_diacritics 0') + triggers
-followups(id TEXT PK, user_id FK ON DELETE CASCADE, text, due_at,
-          status CHECK IN ('open','done','dropped'), priority,
-          source_session_id FK ON DELETE SET NULL, created_at, resolved_at)
+followups(...)   -- dropped in 0004 for threads
 ```
 
 `0002_facts.sql`:
@@ -261,6 +276,8 @@ facts_fts USING fts5(text, content='facts', content_rowid='pk') + triggers
 facts_vec_<model>_<dims> USING vec0(user_id TEXT PARTITION KEY, embedding FLOAT[dims] cosine)
 ```
 
+Later migrations (Phase 5–6): `0003_memory_consent` (people; memory kind, quote, person, certainty, sensitivity and `deleted_at` tombstones on `facts`), `0004_threads_boundaries` (storylines and their events, boundaries, declined suggestions, the user's timezone, a call's cut-off topic; drops `followups`), `0005_persona_preferences`, `0006_reminders` (reminders and their occurrences), `0007_call_summaries` (notes, saving paused, retry time), `0008_call_metrics` (`sessions.metrics`).
+
 - `facts.pk` is an `INTEGER PRIMARY KEY` so the FTS and vector rowids stay stable across `VACUUM`.
 - IDs are ULID text. Timestamps are UTC ISO-8601 with microseconds; naive datetimes are rejected.
 - `remove_diacritics 0` keeps Devanagari vowel signs intact so Hindi search works.
@@ -269,7 +286,7 @@ facts_vec_<model>_<dims> USING vec0(user_id TEXT PARTITION KEY, embedding FLOAT[
 
 ## 8. Languages
 
-`LanguageProfile(code, stt, tts, reply_style, pace_option, cannot_hear, honorific, formal_you)`; `users.language` selects it per call. All use Sarvam `saaras:v4` STT (`codemix` for the Indian languages, which returns native script with English words in Latin).
+`LanguageProfile(code, stt, tts, reply_style, pace_option, cannot_hear, honorific, formal_you, thinking)`; `users.language` selects it per call. All use Sarvam `saaras:v4` STT (`codemix` for the Indian languages, which returns native script with English words in Latin).
 
 | Code | TTS | Claude writes | Elder persona's respect |
 |---|---|---|---|
@@ -289,9 +306,8 @@ Tests don't have to be written before the code, but every change ships with test
 | Unit | ms, no I/O | registries, text/ranking, adapters with stubs, container wiring, CLI, entrypoint |
 | Contract | fast | every port's real adapter and fake behave the same: repos, `MemoryStore` |
 | Integration | fast (SQLite) | migrations, transactions, cascades, Devanagari search, vector index lifecycle |
-| Model (`-m model`) | downloads 0.22 GB once to `data/models` | real FastEmbed: Hinglish query closer to matching English fact |
-| Agent (`-m llm`) | real Claude | conversational behaviour via `session.run` + `.judge` |
-| Evals | real Claude, manual | Hinglish transcripts → expected facts/follow-ups |
+| Model (`-m model`) | downloads 0.22 GB once to `data/models` | the local FastEmbed alternative: Hinglish query closer to matching English fact |
+| Agent (`-m llm`, 39 tests) | real Claude | conversational behaviour via `session.run` + `.judge`; multi-call scenarios against a real database (`tests/agent/test_scenarios.py`); the end-of-call analyzer on fixed transcripts |
 
 - Coverage gate: `fail_under = 95` with branch coverage; currently 100%.
 - Default `pytest` makes no network calls.
@@ -306,15 +322,15 @@ Tests don't have to be written before the code, but every change ships with test
 | 2 ✅ | `MemoryStore` contract (SQLite + fake), vector index lifecycle, embedder adapter, real model | `Embedder` port + FastEmbed, `facts` + `sqlite-vec` + FTS5 hybrid search, `MemoryModule`, `baatein reembed` |
 | 3 ✅ | auth service, Argon2, JWT expiry via clock, LiveKit token claims, API routes, identity → agent | `AuthService`, `/auth/signup`, `/auth/login`, `/me`, `/livekit/token`, `AuthModule`, `baatein serve`, web client at `/` with live transcripts; agent resolves the user from dispatch metadata. Verified live end to end |
 | 4 ✅ | MemoryService unit tests, lifecycle tests, entrypoint wiring, memory tool behaviour against real Claude | Session lifecycle, transcript persistence, call-start context, per-turn retrieval, memory tools. Verified live across two calls |
-| 5 | slice tests per §13, scenario evals against real Claude | Consent-based memory layer (§13): memories with consent and tombstones, people, threads, boundaries, persona and preferences, conversation-only reminders, ranked call-start context, end-of-call summary with retry |
+| 5 ✅ | slice tests per §13, scenario evals against real Claude | Consent-based memory layer (§13): memories with consent and tombstones, people, threads, boundaries, persona and preferences, conversation-only reminders, ranked call-start context, end-of-call summary with retry |
 | 6 ✅ | forget-me contracts (SQLite + fakes), API and CLI, metrics, demo clock | "Forget me", per-call metrics and `baatein metrics`, web client redesign, demo clock, voice override, multi-day demo |
 
 ## 11. Risks
 
 - **Latency**: the reply doesn't wait for per-turn retrieval (a hosted search's memories join the next turn); "Hmm…" covers a slow `recall` tool; Haiku for conversation. Moving the agent closer to Pinecone's region is a deploy question.
-- **Embedding quality across languages**: measured on 2026-10-30 in `docs/RETRIEVAL_BENCHMARK.md` (6 embedding models, 2 rerankers, Hindi, Hinglish, Odia and Kannada). MiniLM is fine for Hindi but weak for Odia and Kannada; `multilingual-e5-large` is the recommended switch, with a similarity cut-off per language. Re-run `uv run python -m bench.retrieval.run` before changing the embedder.
-- **Memory per process**: each LiveKit job process loads the embedder (~0.22 GB); keep idle process count low.
-- **Reconciliation quality**: the analyzer prompt decides add/supersede/retire; covered by evals on fixed transcripts.
+- **Embedding quality across languages**: measured on 2026-10-30 in `docs/RETRIEVAL_BENCHMARK.md` (6 embedding models, 2 rerankers, Hindi, Hinglish, Odia and Kannada). Pinecone `llama-text-embed-v2` was chosen (D11), with cut-offs per language; Odia and Kannada retrieval is still weak and on the list. Re-run `uv run python -m bench.retrieval.run` before changing the embedder.
+- **Memory per process**: the hosted embedder loads no model; with a local FastEmbed model each job process holds it (~0.22 GB for MiniLM).
+- **Summary quality**: the analyzer must keep unsaved details out of the summary; covered by `-m llm` tests on fixed transcripts.
 
 ## 12. Open items (discuss later)
 
@@ -322,7 +338,7 @@ Tests don't have to be written before the code, but every change ships with test
 
 ## 13. Phase 5 plan: the consent-based memory layer
 
-Design and the full scenario review are in `docs/MEMORY_DESIGN.md`. Decisions: strict consent; transcripts are an internal log and only the last call's summary reaches the agent; reminders are delivered in conversation only; persona is a per-user setting; forgetting writes a tombstone.
+Design and the full scenario review are in `docs/MEMORY_DESIGN.md`. Decisions: strict consent; transcripts are an internal log and only summaries reach the agent (the last call's; since D20/D27 also the one before a trivial call, and others from the same day); reminders are delivered in conversation only; persona is a per-user setting; forgetting writes a tombstone.
 
 Each slice below says **what it is for, with a scenario from the library**, then what changes and how it is tested. Scenario numbers refer to the library (#1–45). Every slice is committed separately, keeps coverage at 100%, and is checked with a live probe call before the next one starts.
 
@@ -347,7 +363,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 **Tests**: tombstone wipes text, vectors, FTS and turns; deleted memories never come back from `recall`, `active` or search; `remember` is refused while saving is paused; redaction cases. Real-Claude: Claude asks before calling `remember`; after `forget` it doesn't use the detail.
 
-### Slice 2: threads, boundaries and the call-start context
+### Slice 2: threads, boundaries and the call-start context ✅
 
 **Why, in the scenarios**
 - #1 Ramesh, over three calls: wants to call → *"Main phone karunga"* → *"Maine unko phone kar diya!"* → *"Abhi sirf baat hui. Dekhenge."* One thread moves through states, with a dated event at each step, so the next call can say *"pichhli baar aap Ramesh ke baare mein…"* accurately.
@@ -367,7 +383,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 **Tests**: ranker picks the right single check-in for fixed states (#1, #5, #16, #17); boundaries always present and never violated; first-call and abrupt-end wording. Real-Claude: with Ramesh's thread in context it asks once and accepts *"nahi"*; with a painting boundary it doesn't raise painting.
 
-### Slice 3: persona and preferences
+### Slice 3: persona and preferences ✅
 
 **Why, in the scenarios**
 - The library is written for users aged 68–78: *"Namaste, Mohan ji!"*, Hindi-first, patient, few questions. Baatein's current prompt is casual urban Hinglish.
@@ -382,7 +398,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 **Tests**: prompt and TTS options per persona and preference. Real-Claude: elder persona uses "ji" and short replies; after "itne sawaal mat poochho" it stops asking several questions per reply.
 
-### Slice 4: reminders, delivered in conversation
+### Slice 4: reminders, delivered in conversation ✅
 
 **Why, in the scenarios**
 - #34 Asha: *"Mere bete Ravi ka birthday 18 november ko hai… har saal 11 november subah 9 baje, aur 18 november subah 9 baje."* One reminder, two alert times, every year.
@@ -409,7 +425,7 @@ Each slice below says **what it is for, with a scenario from the library**, then
 
 **Changes**
 - `memory/analyzer.py`: after a call, one structured Claude call over the transcript and the call's consented items → summary (consented items only), `ended_abruptly`, `unfinished_topic`, and "maybe ask next time" notes (not memories). Redaction runs on all output.
-- `workers/finalizer.py`: runs `pending` sessions after the call and retries `failed` ones with backoff (`finalize_attempts`); `baatein finalize` CLI to run it by hand.
+- `memory/finalizer.py` (run by `baatein serve`): runs `pending` sessions after the call and retries `failed` ones with backoff (`finalize_attempts`); `baatein finalize` CLI to run it by hand.
 
 **Tests**: finalizer state machine (pending → done, failed → retried, max attempts); analyzer output validation. Evals on fixed transcripts: #10 gives a summary and no notes; a #14-style transcript keeps the unsaved detail out of the summary.
 

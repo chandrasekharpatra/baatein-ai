@@ -27,8 +27,8 @@ Problems the scenarios exposed: memory is saved without asking, there's no way t
 | 2 ✅ | Storylines (threads), boundaries, and a smarter call-start context | #1, #5, #8, #11, #15, #16, #19, #29, #31, #32 |
 | 3 ✅ | Persona and how each user likes to talk | #21, #22, #23, #28, #30 |
 | 4 ✅ | Dated reminders, brought up in the next conversation | #34–45 |
-| 5 | Summary after each call, with retry | #10, #14, #31 |
-| 6 | Scenario tests against real Claude | all |
+| 5 ✅ | Summary after each call, with retry | #10, #14, #31 |
+| 6 ✅ | Scenario tests against real Claude | all |
 
 ---
 
@@ -67,7 +67,7 @@ Buddy: Theek hai, maine woh baat poori tarah mita di.    ← said only after the
 | Kind | What |
 |---|---|
 | Database | Migration `0003`: `facts` gains `kind` (fact, story, preference, moment), `about_person_id`, `quote`, `certainty`, `sensitivity`, `consent_session_id`, `deleted_at`. New `people` table (name, relation, aliases). |
-| Code | `domain/models.py` (`Memory`, `Person`), `storage/sqlite/memory_store.py` (forget, filters), `memory/redact.py` (new), `agent/tools.py` (new tools) |
+| Code | `domain/models.py` (`Fact` extended, `Person`), `storage/sqlite/memory_store.py` (forget, filters), `memory/redact.py` (new), `agent/tools.py` (new tools) |
 | Tools | `remember`, `correct_memory`, `forget`, `pause_saving`, `recall` |
 
 ### Tests
@@ -140,7 +140,7 @@ A live sequence of three probe calls reproduces Mohan's storyline (#1), with the
 **Status:** built on 2026-10-30, with offline and real-Claude tests; a live call is still to do. As built:
 - `voice/personas.py`: `casual` (default, the old style) and `elder` (respectful "aap", "Mohan ji", Hindi first, short sentences, few questions, slower TTS at pace 0.85, an honest "I'm an AI companion"). Each persona also has its own greeting.
 - Preferences live on the user (migration `0005`): `address_as`, `pace` (slow 0.85, normal 1.0, fast 1.15), `verbosity` (short, normal, detailed), `fewer_questions`. They override the persona and are listed in the instructions as "the user asked for this".
-- `set_preference` saves them and applies them **in the same call**: the agent rebuilds its instructions and calls Sarvam `update_options(pace=...)`. It works while saving is paused, because the user asked for it directly.
+- `set_preference` saves them and applies them **in the same call**: the agent rebuilds its instructions and sets the TTS pace through the profile's `pace_option` (Cartesia `speed` for Hinglish, English and Kannada; Sarvam `pace` for Odia). It works while saving is paused, because the user asked for it directly.
 - Signup in the web client has a "How Baatein talks" choice; `/auth/signup` takes `persona` and `/me` returns it. Changing persona after signup isn't built yet.
 - Fixes from slice 2 testing: the Hinglish style now says "never Devanagari, even when the user's words reach you in Devanagari" (the STT returns Devanagari); the base rules say "End with at most one question, never two, and often none".
 - Not done: #22 language mix as a preference (the language profile already matches the user's mix), and a persona switch tool.
@@ -158,7 +158,7 @@ User:  Dheere bolo, sunai nahi diya.      → set_preference(pace=slow)  → TTS
 1. Each user has a **persona**: `elder` (follows the scenario library: *"Mohan ji"*, Hindi-first, patient, few questions, short sentences) or `casual` (today's urban Hinglish).
 2. Personas live in a small registry next to the language profiles, so a new one is a config entry.
 3. **Preferences** fine-tune it per user: pace, verbosity, fewer questions, how to address them (#22 language mix, #30 *"chai mein elaichi nahi"* stays a memory).
-4. Persona and preferences go into the instructions, and pace goes to Sarvam TTS (`pace` option, checked to exist).
+4. Persona and preferences go into the instructions, and pace goes to the TTS through the profile's `pace_option` (checked to exist).
 5. Signup in the web client lets the user pick a persona.
 
 ### Building blocks
@@ -182,7 +182,7 @@ A live call with the elder persona sounds slower and gentler, and a preference s
 **Status:** built on 2026-10-30, with offline and real-Claude tests; a live call is still to do. As built:
 - A reminder (migration `0006`) has a title, an optional person, the event day `on` (none means `needs_info`), a local time (default 9:00 am), a repeat rule (once, weekly, monthly by date, monthly by weekday, yearly) and `alert_days_before` (e.g. `[7, 0]` for #34). Dates are in the user's timezone. Only exceptions are stored per occurrence (`done` or `skipped`), so skipping one keeps the series.
 - `memory/recurrence.py`: yearly 29 Feb falls on 28 Feb in other years; a monthly 31st falls on the last day of shorter months; "monthly by weekday" takes the weekday and week from the first date (a fifth weekday means the last one).
-- The call-start context has three groups. **Due now**: an alert passed since the last call; bring it up once. **Coming up**: the event or an alert is within 7 days; mention only if it fits. **Waiting for a date**. Choosing them marks nothing: "since the last call" stops a reminder repeating.
+- The call-start context has three groups. **Due now**: an alert passed since the last call (an alert already past when the reminder was made counts from when it was made, D26); it goes into the greeting itself. **Coming up**: the event or an alert is within 7 days; mention only if it fits. **Waiting for a date**. Choosing them marks nothing: "since the last call" stops a reminder repeating.
 - The context now also lists the next 7 days ("Coming days: Fri 30 Oct, Sat 31 Oct, …"), so Claude resolves "agle shanivaar" and "somvaar" correctly.
 - Tools: `create_reminder` (after reading it back; never guesses a date), `update_reminder` (in place, #43), `complete_occurrence`, `skip_occurrence` (the nearest occurrence by default; a one-off reminder ends with it), and `cancel_reminder`, which needs the same two-step confirmation as `forget`. Reminders are explicit requests, so they are saved even while saving is paused.
 - Honesty (decision 3): the first real-Claude runs said *"11 November ko subah 9 baje yaad dilaungi"*. The instructions and the tool reply now spell out that Baatein can only bring it up when they talk, with the exact wording to use.
@@ -211,7 +211,7 @@ Buddy: Asha ji, Ravi ka birthday 18 tareekh ko hai, aapne yaad dilane ko kaha th
 4. Missing information (#36 *"shayad June ke aakhri hafte"*) creates the reminder as `needs_info`; nothing is guessed.
 5. Rescheduling (#37 *"somvaar ko phir yaad dilao… purani ko hi badal do"*) updates the same reminder, never a second one.
 6. Relative dates (*"agle shanivaar"*, *"parson"*) are resolved in the user's timezone.
-7. At call start, reminders whose alert time passed since the last call, or falls in the next 7 days, go into the context.
+7. At call start, reminders whose alert time passed since the last call, or falls in the next 7 days, go into the context; ones due now go into the greeting (D26).
 
 ### Building blocks
 | Kind | What |
@@ -274,7 +274,7 @@ A live call is summarised automatically after it ends, and the next call opens w
 
 ## Slice 6: scenario tests against real Claude ✅ built
 
-**Status:** built on 2026-10-30. All 35 real-Claude tests passed twice in a row (`uv run --env-file .env pytest -m llm --no-cov`, about 4 minutes). Every test turn now runs the agent's per-turn hook as a voice call does (`turn()` in `tests/agent/test_assistant_behaviour.py`); LiveKit's text mode skips it.
+**Status:** built on 2026-10-30. All 35 real-Claude tests then passed twice in a row (39 as of D27) (`uv run --env-file .env pytest -m llm --no-cov`, about 4 minutes). Every test turn now runs the agent's per-turn hook as a voice call does (`turn()` in `tests/agent/test_assistant_behaviour.py`); LiveKit's text mode skips it.
 
 | Scenario | Test |
 |---|---|
@@ -288,9 +288,10 @@ A live call is summarised automatically after it ends, and the next call opens w
 | #21, #23 | `test_fewer_questions_when_asked_and_remembered`, `test_shorter_replies_when_asked`, `test_slower_speech_when_asked` |
 | #25 | `test_gives_safety_advice_after_an_otp_scam_and_stores_no_number` |
 | #31 | `test_offers_once_to_continue_a_cut_off_story_and_accepts_no`; detection in `test_call_analyzer.py` |
-| #34, #36 | `test_reads_back_a_reminder_then_saves_it_honestly`, `test_does_not_guess_an_unclear_date`, and create, reschedule, complete over three calls: `test_a_reminder_is_created_rescheduled_and_completed_over_three_calls` |
+| #34, #36 | `test_reads_back_a_reminder_then_saves_it_honestly`, `test_does_not_guess_an_unclear_date`, and create, reschedule, complete over three calls (brought up in the greeting on the day): `test_a_reminder_is_created_rescheduled_and_completed_over_three_calls` |
+| Same-day calls (D27) | `test_a_second_call_the_same_day_picks_up_instead_of_starting_over` |
 
-The scenario tests live in `tests/agent/test_scenarios.py`. The two multi-call tests use SQLite, a frozen clock and the real end-of-call summary between calls.
+The scenario tests live in `tests/agent/test_scenarios.py`. The three multi-call tests use SQLite, a frozen clock and the real end-of-call summary between calls, and open each call with the same greeting instruction as the entrypoint.
 
 **What the evals found, and the kind of fix:**
 - *Structural:* a reminder more than a week away wasn't in the call context at all, so "18 nahi, 19 November" couldn't change it (Claude corrected the memory and said it couldn't see the reminder). The context now lists later reminders, "so you can change one".

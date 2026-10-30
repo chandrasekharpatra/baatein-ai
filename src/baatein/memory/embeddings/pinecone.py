@@ -1,8 +1,8 @@
 """Embeddings from Pinecone's hosted inference (llama-text-embed-v2 by default).
 
 Chosen on 2026-10-30 from docs/RETRIEVAL_BENCHMARK.md: the best model for English, Hindi and
-Roman Hinglish there, at the cost of a network round trip (about 400 ms from India), which
-per-turn recall hides by starting on the final transcript (see `Assistant`).
+Roman Hinglish there, at the cost of a network round trip (about 450 ms from India). Replies
+don't wait for per-turn recall, whose memories join the next turn (see `Assistant`).
 """
 
 import asyncio

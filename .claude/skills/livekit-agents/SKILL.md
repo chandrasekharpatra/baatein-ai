@@ -44,7 +44,7 @@ To add a provider: register its plugin class in the right registry in `voice/pro
 - **Speech during a tool works.** LiveKit marks the reply's generation done before it runs tools, so `context.session.say("Hmm…", add_to_chat_ctx=False)` from inside a tool plays while it works and stays out of the history.
 - **The job doesn't end at hang-up by itself.** After the participant leaves, the session closes but the job lingers until LiveKit closes the empty room (~20 s), and the shutdown reason is "parent process shutdown". `entrypoint` calls `ctx.shutdown()` from the session's `close` event.
 - **`turn_ctx` in `on_user_turn_completed` is thrown away after that reply.** Anything added only there is gone next turn. Per-turn recall added memories only there, so Claude later saw its own answer without the memory behind it and apologised for "inventing" it. `Assistant` now also writes each recalled memory into the history once (`update_chat_ctx`).
-- **Text-mode `session.run(user_input=...)` skips `on_user_turn_completed`.** Behaviour tests never exercise per-turn recall; call the hook yourself if a test depends on it.
+- **Text-mode `session.run(user_input=...)` skips `on_user_turn_completed`.** The behaviour tests call the hook themselves before each run (`turn()` in `tests/agent/test_assistant_behaviour.py`), so per-turn recall is exercised; do the same in new tests.
 - **STT outages end calls silently by default.** LiveKit closes the session after a few unrecoverable STT errors. `agent/resilience.py` (`connect_options`, `SpeechGuard`) retries longer and apologises over TTS before ending. Hinglish TTS is now Cartesia (`language="hi"`, option `speed` for pace); Sarvam is STT only.
 
 - **`.env` isn't loaded by the LiveKit CLI.** `entrypoint.main()` calls `load_dotenv(find_dotenv(usecwd=True))` before `cli.run_app`. Without it: `ws_url is required, or set LIVEKIT_URL`, and plugins miss their API keys.
@@ -67,7 +67,7 @@ Isolate the failing leg before changing code:
    - **No agent joins:** dispatch problem. Check that the agent names match and that the worker logs "registered worker".
    - **Agent greets but no user transcript:** STT problem.
    - **User transcript but no reply:** LLM/TTS problem. Check the worker terminal.
-2. **The backend works but the browser doesn't**: the web client shows connection state, live transcripts and a "Tap to hear Baatein" button when autoplay is blocked. Use those to tell mic, playback and network apart (see WSL above).
+2. **The backend works but the browser doesn't**: the web client shows connection state ("Baatein joined", "Listening…", "Baatein is speaking") and a "Tap to hear Baatein" button when autoplay is blocked; it shows no transcript, but `window.baateinTranscript` in the browser console has both sides. Use those to tell mic, playback and network apart (see WSL above).
 3. **Server-side room state**: `livekit.api.LiveKitAPI()` with `room.list_rooms`, `room.list_participants` and `agent_dispatch.list_dispatch` shows whether the agent joined and published audio.
 
 ## Testing conventions

@@ -15,7 +15,7 @@ Commands are for Linux, macOS or WSL2 (Ubuntu). On Windows, use WSL2 and run eve
         ▼
 ┌───────────────┐    dispatch job   ┌─────────────────────────┐
 │ livekit-server│ ────────────────▶ │ baatein-agent dev       │  Sarvam STT → Claude
-│    --dev      │ ◀──── audio ───── │ (agent worker)          │  → Sarvam TTS
+│    --dev      │ ◀──── audio ───── │ (agent worker)          │  → Cartesia TTS
 └───────────────┘                   └─────────────────────────┘
 ```
 
@@ -73,10 +73,11 @@ uv run pre-commit install    # optional: lint, type-check and test before each c
 | Service | Used for | Where |
 |---|---|---|
 | Anthropic | Claude, the conversation LLM | https://console.anthropic.com/ → API Keys |
-| Sarvam | Hinglish speech-to-text and text-to-speech | https://dashboard.sarvam.ai/ → API Keys |
-| Cartesia | Text-to-speech for the English profile only | https://play.cartesia.ai/ → API Keys |
+| Sarvam | Speech-to-text for every language, and the Odia voice | https://dashboard.sarvam.ai/ → API Keys |
+| Cartesia | The Hinglish, English and Kannada voices | https://play.cartesia.ai/ → API Keys |
+| Pinecone | Memory embeddings (the default embedder) | https://app.pinecone.io/ → API Keys |
 
-Cartesia is optional if you only use Hinglish, but the key must still be non-empty for the English profile to build. Any placeholder works until you pick English.
+All four are needed for the default setup.
 
 ## 4. Configure `.env`
 
@@ -91,6 +92,7 @@ Edit `.env`:
 ANTHROPIC_API_KEY=sk-ant-...
 SARVAM_API_KEY=sk_...
 CARTESIA_API_KEY=sk_car_...
+PINECONE_API_KEY=pcsk_...
 
 # Leave these as-is: they match `livekit-server --dev`
 LIVEKIT_URL=ws://localhost:7880
@@ -107,7 +109,7 @@ Leave the other `BAATEIN_*` lines at their defaults. Don't set `BAATEIN_LLM__TEM
 
 ```bash
 uv run baatein migrate
-# data/baatein.db: schema version 2
+# data/baatein.db: schema version 8
 ```
 
 This step is optional, since `serve` and the agent also migrate on startup, but it confirms that SQLite and the `sqlite-vec` extension load.
@@ -149,11 +151,11 @@ Wait for `Uvicorn running on http://127.0.0.1:8000`.
 ## 7. Talk to it
 
 1. Open http://localhost:8000. Use `localhost`, not an IP address; browsers only allow microphone access on `localhost` or HTTPS.
-2. Click **New here? Sign up**, enter a name, pick **Hinglish**, and use any email and a password of 8+ characters.
-3. Click **Start talking** and allow the microphone.
-4. Within a few seconds the status shows **Baatein joined**, and you hear a greeting by name. The transcript under the button shows both sides as you speak.
+2. Open the **Sign up** tab, enter a name, pick **Hinglish** and how Baatein should talk, and use any email and a password of 8+ characters.
+3. Tap the green call button and allow the microphone.
+4. Within a few seconds the status shows **Baatein joined**, and you hear a greeting by name. The orb and status follow who's speaking (**Listening…** / **Baatein is speaking**). The page shows no transcript; every turn is saved in the database.
 
-The agent remembers your name and language. It doesn't remember past conversations yet; that's Phase 4.
+Baatein remembers what you ask it to (it asks before saving anything else), picks up from earlier calls, and brings up reminders when they're due. The gear opens settings: erase memories, log out.
 
 ## 8. Verify without a browser (optional)
 
@@ -189,7 +191,7 @@ This talks through your machine's microphone and speakers, using the default lan
 ## WSL2 notes
 
 - **Run all three processes inside WSL** and open the page in your Windows browser at `http://localhost:8000`. WSL forwards TCP `localhost` ports to Windows automatically.
-- **Audio media uses UDP 7882**, which is bound to the WSL network address and isn't forwarded the same way. If the page shows "Connection: connected" and the agent's transcript appears but you hear nothing, or the connection keeps reconnecting, switch WSL to mirrored networking. Create or edit `C:\Users\<you>\.wslconfig`:
+- **Audio media uses UDP 7882**, which is bound to the WSL network address and isn't forwarded the same way. If the status shows **Baatein joined** but you hear nothing, or the connection keeps reconnecting, switch WSL to mirrored networking. Create or edit `C:\Users\<you>\.wslconfig`:
 
   ```ini
   [wsl2]
@@ -208,7 +210,7 @@ This talks through your machine's microphone and speakers, using the default lan
   rm -f data/baatein.db data/baatein.db-wal data/baatein.db-shm
   ```
 
-  `data/models` holds the downloaded embedding model; keep it to avoid re-downloading.
+  `data/models` only exists if you switched to a local FastEmbed model; it holds the download.
 
 ## Troubleshooting
 
@@ -219,8 +221,8 @@ This talks through your machine's microphone and speakers, using the default lan
 | API: `BAATEIN_AUTH__JWT_SECRET must be set` | Missing secret | Add it to `.env` (step 4) |
 | API: `LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set` | Missing LiveKit credentials | Use `devkey` / `secret` for `--dev` |
 | Status stays at **Waiting for Baatein…** | Agent worker not running or not registered | Check terminal 2 for `registered worker`. `LIVEKIT_AGENT_NAME` must be the same for the API and the worker |
-| Agent's words appear in the transcript but there's no sound | Browser can't receive audio | Click **Tap to hear Baatein** if shown; on WSL use mirrored networking |
-| No user transcript when you speak | Mic blocked, or the wrong input device | Allow the mic for `localhost`; check the system's default input device |
+| The status says **Baatein is speaking** but there's no sound | Browser can't receive audio | Click **Tap to hear Baatein** if shown; on WSL use mirrored networking |
+| The status stays at **Listening…** while you speak and Baatein never answers | Mic blocked, or the wrong input device | Allow the mic for `localhost`; check the system's default input device |
 | Agent terminal shows `401` / `invalid api key` from Sarvam or Anthropic | Wrong or missing key | Fix the key in `.env`; the `dev` worker reloads on code changes only, so restart it |
 | `address already in use` on 7880 or 8000 | A previous run is still alive | `pkill livekit-server`, or stop the old `baatein serve` / pick `--port` |
 

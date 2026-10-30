@@ -10,6 +10,7 @@ from baatein.memory.embeddings.registry import default_embedder_registry
 pytestmark = pytest.mark.model
 
 MODEL_CACHE = Path(__file__).resolve().parents[2] / "data" / "models"
+LOCAL_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -17,8 +18,10 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b)))
 
 
-async def test_default_model_embeds_hinglish_close_to_english() -> None:
-    spec = Settings(_env_file=None).embedding.spec()  # type: ignore[call-arg]
+async def test_local_model_embeds_hinglish_close_to_english() -> None:
+    """The local alternative to the hosted default (`BAATEIN_EMBEDDING__PROVIDER=fastembed`)."""
+    local = {"provider": "fastembed", "model": LOCAL_MODEL, "dimensions": 384}
+    spec = Settings(_env_file=None, embedding=local).embedding.spec()  # type: ignore[call-arg]
     cached = replace(spec, options={**spec.options, "cache_dir": str(MODEL_CACHE)})
     embedder = default_embedder_registry().create(cached)
 

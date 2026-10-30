@@ -23,7 +23,7 @@ The decisions taken so far, the options considered, and why. Details live in the
 - **Why:** the scenario library (#1, #10, #34) and trust. The end-of-call analyzer never creates memories.
 
 ### D4. Transcripts are an internal log
-- **Chosen:** Claude never searches raw transcripts; only the last call's summary reaches the next call.
+- **Chosen:** Claude never searches raw transcripts; only summaries reach the next call (the last call's; since D20 also the one before a trivial call, and since D27 other calls from the same day).
 - **Why:** transcripts include things the user never agreed to keep.
 
 ### D5. Reminders are delivered in conversation only, for now
@@ -217,7 +217,7 @@ An independent review of D14–D24 found these, all fixed:
 - **Erasing is logged** (`erased everything Baatein remembered about user <id>`).
 
 ### D26. A reminder that is due is brought up in the greeting (2026-10-30)
-Found in a live call: Ram asked to be reminded "in five minutes" that he had to go out. Baatein said honestly that it can't call him later (it never calls out; decision 3) and saved a reminder for today. In his next call, a minute later, it said nothing until he asked. Two causes:
+Found in a live call: Ram asked to be reminded "in five minutes" that he had to go out. Baatein said honestly that it can't call him later (it never calls out; D5) and saved a reminder for today. In his next call, a minute later, it said nothing until he asked. Two causes:
 - **An alert that had already passed when the reminder was made never fired.** A reminder for today with no time alerts at 9 am, which was hours before he asked. An alert counts if it falls between the last call's start and now, so this one never did. Now an alert that had passed when the reminder was made counts as falling when it was made, so the next call brings it up. The same applies to "remind me a day before" when that day is today.
 - **The greeting couldn't mention it.** The opening reply is generated with a fixed instruction ("greet them and ask how they are"), so a reminder due now waited, and Claude kept making small talk. The real-Claude reminder test (#34) showed the same thing on Ravi's birthday. The code already knows which reminders are due, so the greeting instruction now adds "then, in the same reply, gently remind them of: …". This uses no extra model call; the reminder is only added to the instruction.
 
