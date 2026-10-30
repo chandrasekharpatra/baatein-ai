@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.embedder import Embedder
 from baatein.ports.repos import SessionRepo, TurnRepo, UserRepo
 from baatein.storage.sqlite.db import Database
-from baatein.storage.sqlite.migrate import bundled_migrations
+from baatein.storage.sqlite.migrate import bundled_migrations, migrate
 from tests.factories import at, make_session, make_turn, make_user
 from tests.fakes.analyzer import FakeAnalyzer
 from tests.fakes.embedder import FakeEmbedder
@@ -150,6 +151,39 @@ def test_forget_user_needs_yes_then_erases_but_keeps_the_account(
         assert conn.execute("SELECT count(*) FROM users").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM people").fetchone()[0] == 0
         assert conn.execute("SELECT text FROM facts").fetchall() == [("",)]
+
+
+def test_metrics_reports_recent_calls_for_everyone_or_one_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BAATEIN_DATABASE__URL", f"sqlite:///{tmp_path}/app.db")
+    settings = Settings()
+    migrate(settings.database.sqlite_path())
+    call_id = ended_call_in(settings)
+
+    async def save() -> None:
+        injector = build_root(settings=settings)
+        try:
+            sessions: SessionRepo = injector.get(SessionRepo)  # type: ignore[type-abstract]
+            await sessions.save_metrics(call_id, {"reply_ms": [900], "replies": 1})
+        finally:
+            await injector.get(Database).close()
+
+    asyncio.run(save())
+    with sqlite3.connect(tmp_path / "app.db") as conn:
+        conn.execute("UPDATE sessions SET started_at = ?", (datetime.now(UTC).isoformat(),))
+        [email] = conn.execute("SELECT email FROM users").fetchone()
+
+    assert main(["metrics"]) == 0
+    everyone = capsys.readouterr().out
+    assert main(["metrics", "--days", "1", "--email", email]) == 0
+    one = capsys.readouterr().out
+    assert main(["metrics", "--email", "nobody@example.com"]) == 0
+
+    assert "Last 7 day(s)" in everyone
+    assert "reply            p50 900 ms, p90 900 ms (1)" in everyone
+    assert f"Last 1 day(s) for {email}" in one
+    assert "no user nobody@example.com" in capsys.readouterr().out
 
 
 def test_seed_without_a_user_section_is_refused(tmp_path: Path) -> None:

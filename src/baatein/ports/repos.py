@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from baatein.domain.models import (
     Boundary,
@@ -61,6 +61,16 @@ class SessionRepo(Protocol):
 
     async def clear_summary(self, session_id: str) -> None:
         """Remove what the call left behind for later calls: summary, unfinished topic, notes."""
+        ...
+
+    async def save_metrics(self, session_id: str, metrics: dict[str, Any]) -> None:
+        """Keep the call's numbers (`baatein.metrics.CallMetrics`, as JSON)."""
+        ...
+
+    async def metrics_since(
+        self, since: datetime, user_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Saved numbers of calls started at or after `since`, optionally for one user."""
         ...
 
 

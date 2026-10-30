@@ -98,6 +98,7 @@ async def test_user_turn_injects_recalled_facts() -> None:
     )
 
     [injected] = turn_ctx.items
+    assert memory.metrics.memories_now == 1
     assert isinstance(injected, llm.ChatMessage)
     assert injected.role == "system"
     assert "Has an interview at Google on Friday" in (injected.text_content or "")
@@ -349,6 +350,11 @@ async def test_a_slow_search_doesnt_hold_the_reply_and_joins_the_next_turn() -> 
 
     assert turn_ctx.items == []  # this reply went ahead without it
     await asyncio.sleep(0.1)
+    assert assistant._memory is not None
+    assert (assistant._memory.metrics.memories_now, assistant._memory.metrics.memories_late) == (
+        0,
+        1,
+    )
     [note] = history_notes(assistant)
     assert "before your last reply" in note
     assert "Has an interview at Google on Friday" in note

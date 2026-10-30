@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
+from typing import Any
 
 from baatein.domain.errors import (
     DuplicateEmailError,
@@ -37,6 +38,7 @@ class InMemoryState:
     suggestions: list[DeclinedSuggestion] = field(default_factory=list)
     reminders: dict[str, Reminder] = field(default_factory=dict)
     occurrences: dict[tuple[str, date], OccurrenceStatus] = field(default_factory=dict)
+    metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class InMemoryUserRepo:
@@ -154,6 +156,22 @@ class InMemorySessionRepo:
 
     async def clear_summary(self, session_id: str) -> None:
         self._update(session_id, summary=None, unfinished_topic=None, notes=())
+
+    async def save_metrics(self, session_id: str, metrics: dict[str, Any]) -> None:
+        self._get(session_id)
+        self._state.metrics[session_id] = metrics
+
+    async def metrics_since(
+        self, since: datetime, user_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        sessions = sorted(self._state.sessions.values(), key=lambda s: s.started_at)
+        return [
+            self._state.metrics[s.id]
+            for s in sessions
+            if s.id in self._state.metrics
+            and s.started_at >= since
+            and user_id in (None, s.user_id)
+        ]
 
     def _get(self, session_id: str) -> Session:
         try:

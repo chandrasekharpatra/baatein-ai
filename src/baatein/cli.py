@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 
 import uvicorn
@@ -12,8 +13,10 @@ from baatein.container import build_root
 from baatein.memory.finalizer import Finalizer
 from baatein.memory.seed import Seeder, SeedFile
 from baatein.memory.service import MemoryService
+from baatein.metrics import CallMetrics, report
 from baatein.ports.auth import PasswordHasher
-from baatein.ports.repos import UserRepo
+from baatein.ports.clock import Clock
+from baatein.ports.repos import SessionRepo, UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.migrate import migrate
@@ -54,6 +57,25 @@ async def forget_user(settings: Settings, email: str) -> str:
         return f"erased everything Baatein remembered about {user.email}; the account stays"
     finally:
         await injector.get(Database).close()
+
+
+async def show_metrics(settings: Settings, days: float, email: str | None) -> str:
+    """Latency, memory and usage numbers of recent calls (saved when each call ends)."""
+    injector = build_root(settings=settings)
+    try:
+        user_id = None
+        if email is not None:
+            user = await injector.get(UserRepo).get_by_email(email)  # type: ignore[type-abstract]
+            if user is None:
+                return f"no user {email}"
+            user_id = user.id
+        since = injector.get(Clock).now() - timedelta(days=days)  # type: ignore[type-abstract]
+        sessions: SessionRepo = injector.get(SessionRepo)  # type: ignore[type-abstract]
+        calls = await sessions.metrics_since(since, user_id)
+    finally:
+        await injector.get(Database).close()
+    scope = f" for {email}" if email else ""
+    return f"Last {days:g} day(s){scope}\n" + report(CallMetrics.from_json(c) for c in calls)
 
 
 def read_seed(path: Path) -> SeedFile:
@@ -111,6 +133,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     forget_cmd.add_argument(
         "--yes", action="store_true", help="confirm; nothing is erased without it"
     )
+    metrics_cmd = commands.add_parser(
+        "metrics", help="reply latency, memory search and usage of recent calls"
+    )
+    metrics_cmd.add_argument("--days", type=float, default=7, help="how far back (default 7)")
+    metrics_cmd.add_argument("--email", help="only this user's calls")
     serve = commands.add_parser("serve", help="run the HTTP API and web client")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
@@ -129,6 +156,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(asyncio.run(finalize(settings, args.session)))
     elif args.command == "forget-user":
         print(asyncio.run(forget_user(settings, args.email)))
+    elif args.command == "metrics":
+        print(asyncio.run(show_metrics(settings, args.days, args.email)))
     elif args.command == "seed":
         print(asyncio.run(load_seed(settings, read_seed(args.file), args.replace)))
     elif args.command == "serve":

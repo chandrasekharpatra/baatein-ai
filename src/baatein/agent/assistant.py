@@ -160,14 +160,15 @@ class Assistant(Agent):
         found = await self._memory.recall(search)
         if found is None:  # still searching: what it finds joins the next turn
             search.add_done_callback(self._arrived_late)
-        elif recalled := self._fresh(found):
-            await self._add_note(turn_ctx, recalled)
+        elif new := self._fresh(found):
+            self._memory.metrics.memories_now += len(new)
+            await self._add_note(turn_ctx, render_recall(new) or "")
 
-    def _fresh(self, found: list[ScoredFact], late: bool = False) -> str | None:
-        """The note for memories not yet shown in this call, which are then marked as shown."""
+    def _fresh(self, found: list[ScoredFact]) -> list[ScoredFact]:
+        """Memories not yet shown in this call, which are then marked as shown."""
         new = [s for s in found if s.fact.id not in self._recalled]
         self._recalled.update(s.fact.id for s in new)
-        return render_recall(new, late)
+        return new
 
     def _arrived_late(self, search: "asyncio.Task[list[ScoredFact]]") -> None:
         """Keep memories from a search that finished after the reply started, for the next
@@ -176,8 +177,9 @@ class Assistant(Agent):
         memory = self._memory
         if search.cancelled() or search.exception() is not None or memory is None:
             return
-        if not memory.private and (note := self._fresh(search.result(), late=True)):
-            task = asyncio.ensure_future(self._keep_note(note))
+        if not memory.private and (new := self._fresh(search.result())):
+            memory.metrics.memories_late += len(new)
+            task = asyncio.ensure_future(self._keep_note(render_recall(new, late=True) or ""))
             self._late_notes.add(task)
             task.add_done_callback(self._late_notes.discard)
 

@@ -142,6 +142,7 @@ async def test_a_slow_recall_says_hmm_meanwhile(delay: float, said: list[Any]) -
 
     # Kept out of the chat history: Claude never sees it.
     assert context.session.said == said
+    assert (memory.metrics.recall_calls, memory.metrics.thinking_said) == (1, len(said))
 
 
 async def test_remember_says_when_it_is_already_saved() -> None:

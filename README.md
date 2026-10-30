@@ -111,6 +111,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `uv run baatein migrate` | Create or upgrade the database schema |
 | `uv run baatein reembed` | Rebuild the fact vector index for the current embedding model |
 | `uv run --env-file .env baatein finalize [--session ID]` | Summarise finished calls now (`serve` also does this every 10 s); `--session` re-runs one call |
+| `uv run baatein metrics [--days 7] [--email E]` | Reply latency (and where it goes), memory search and usage of recent calls |
 | `uv run baatein forget-user EMAIL --yes` | Erase everything Baatein remembers about a user (memories, people, storylines, reminders, calls); the account stays |
 | `uv run baatein seed FILE [--replace]` | Create a test account with artificial memories (see `docs/SEED_DATA.md`) |
 | `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload |

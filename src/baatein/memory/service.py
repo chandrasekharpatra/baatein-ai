@@ -40,6 +40,7 @@ from baatein.domain.models import (
 from baatein.memory.ranker import CheckInRules, pick_check_in
 from baatein.memory.recurrence import due, nearest_open
 from baatein.memory.redact import redact
+from baatein.metrics import CallMetrics
 from baatein.ports.clock import Clock
 from baatein.ports.embedder import Embedder
 from baatein.ports.memory import MemoryStore
@@ -239,6 +240,7 @@ class CallMemory:
         self.private = False
         self._forget_requests: dict[str, int] = {}
         self.check_in: Thread | None = None
+        self.metrics = CallMetrics()
         self._check_in_terms: frozenset[str] = frozenset()
 
     @property
@@ -362,6 +364,11 @@ class CallMemory:
     def start_recall(self, query: str) -> "asyncio.Task[list[ScoredFact]]":
         """Start searching for memories that match the user's words; `recall` decides how long
         the reply waits for it."""
+        searched = bool(search_terms(query))  # without terms the store returns [] at once
+        if searched:
+            self.metrics.searches += 1
+        else:
+            self.metrics.searches_skipped += 1
         started = time_module.perf_counter()
         task = asyncio.ensure_future(
             self._deps.store.search(
@@ -371,8 +378,9 @@ class CallMemory:
         task.add_done_callback(_consume_error)
 
         def log_duration(done: "asyncio.Task[list[ScoredFact]]") -> None:
-            if not done.cancelled():
+            if searched and not done.cancelled():
                 took = (time_module.perf_counter() - started) * 1000
+                self.metrics.search_ms.append(round(took))
                 logger.info("memory recall: the search took %.0f ms", took)
 
         task.add_done_callback(log_duration)
@@ -448,9 +456,14 @@ class CallMemory:
         )
         if self._duplicate_at is None or different:
             await self._deps.store.add(fact)
+            self.metrics.saved += 1
             return fact
         similar = await self._deps.store.add_unless_similar(fact, self._duplicate_at)
-        return AlreadySaved([s.fact for s in similar]) if similar else fact
+        if similar:
+            self.metrics.already_saved += 1
+            return AlreadySaved([s.fact for s in similar])
+        self.metrics.saved += 1
+        return fact
 
     async def correct(self, fact_id: str, text: str, quote: str | None = None) -> Fact | None:
         """Replace one of the user's current memories. Returns None if there is no such memory."""
@@ -837,3 +850,7 @@ class CallMemory:
             unfinished_topic=last.text[:MAX_TOPIC_CHARS] if abrupt and last else None,
             saving_paused=self.saving_paused or self.private,
         )
+        try:
+            await self._deps.sessions.save_metrics(self.session.id, self.metrics.to_json())
+        except Exception:  # the numbers are for tuning; never fail a call's end over them
+            logger.exception("saving metrics of session %s failed", self.session.id)

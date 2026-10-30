@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from injector import Injector, InstanceProvider
 from livekit.agents import AgentSession, llm, vad
+from livekit.agents.metrics import LLMMetrics, STTMetrics, TTSMetrics
 
 from baatein.agent import entrypoint
 from baatein.agent.assistant import Assistant
@@ -16,6 +17,7 @@ from baatein.container import build_root
 from baatein.domain.errors import NotFoundError
 from baatein.domain.models import Pace, Preferences, Role
 from baatein.memory.service import MemoryService
+from baatein.metrics import CallMetrics
 from baatein.ports.repos import UserRepo
 from baatein.storage.sqlite.db import Database
 from baatein.voice.languages import LanguageProfile, ProviderSpec
@@ -258,6 +260,7 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     on_item = session.handlers["conversation_item_added"]
     on_item(SimpleNamespace(item=llm.ChatMessage(role="user", content=["Kal interview hai"])))
     on_item(SimpleNamespace(item=llm.ChatMessage(role="assistant", content=["All the best!"])))
+    session.handlers["metrics_collected"](SimpleNamespace(metrics=llm_usage(input=900, output=40)))
     [close] = shutdown
     await close("user_left")
 
@@ -266,6 +269,7 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
         (Role.ASSISTANT, "All the best!", "english"),
     ]
     assert world.state.sessions[call.id].end_reason == "user_left"
+    assert world.state.metrics[call.id]["llm_input_tokens"] == 900
     assert database.closed
 
 
@@ -322,6 +326,69 @@ async def test_record_item_saves_interrupted_flag() -> None:
 
     [turn] = world.state.turns
     assert (turn.text, turn.interrupted) == ("Accha", True)
+
+
+def llm_usage(input: int, output: int, cached: int = 0) -> LLMMetrics:
+    return LLMMetrics(
+        label="claude",
+        request_id="r",
+        timestamp=0,
+        duration=1,
+        ttft=0.4,
+        cancelled=False,
+        completion_tokens=output,
+        prompt_tokens=input,
+        prompt_cached_tokens=cached,
+        total_tokens=input + output,
+        tokens_per_second=10,
+    )
+
+
+def test_latency_is_noted_per_message() -> None:
+    metrics = CallMetrics()
+    user = llm.ChatMessage(role="user", content=["Kal interview hai"])
+    user.metrics = {"transcription_delay": 0.75, "end_of_turn_delay": 0.3}
+    reply = llm.ChatMessage(role="assistant", content=["All the best!"], interrupted=True)
+    reply.metrics = {"e2e_latency": 1.2, "llm_node_ttft": 0.6}
+
+    entrypoint.note_latency(metrics, user)
+    entrypoint.note_latency(metrics, reply)
+
+    assert (metrics.transcript_ms, metrics.turn_end_ms) == ([750], [300])
+    assert (metrics.reply_ms, metrics.llm_first_token_ms, metrics.tts_first_audio_ms) == (
+        [1200],
+        [600],
+        [],
+    )
+    assert (metrics.user_turns, metrics.replies, metrics.interrupted) == (1, 1, 1)
+
+
+def test_usage_adds_tokens_audio_and_characters() -> None:
+    metrics = CallMetrics()
+    stt = STTMetrics(
+        label="sarvam", request_id="s", timestamp=0, duration=0, audio_duration=12.5, streamed=True
+    )
+    tts = TTSMetrics(
+        label="cartesia",
+        request_id="t",
+        timestamp=0,
+        ttfb=0.2,
+        duration=1,
+        audio_duration=2,
+        cancelled=False,
+        characters_count=42,
+        streamed=True,
+    )
+
+    for usage in (llm_usage(1000, 50, cached=800), stt, tts, object()):
+        entrypoint.note_usage(metrics, usage)
+
+    assert (metrics.llm_input_tokens, metrics.llm_cached_tokens, metrics.llm_output_tokens) == (
+        1000,
+        800,
+        50,
+    )
+    assert (metrics.stt_audio_seconds, metrics.tts_characters) == (12.5, 42)
 
 
 async def test_resolve_user_returns_none_for_unknown_user() -> None:

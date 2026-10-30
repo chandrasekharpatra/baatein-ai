@@ -137,12 +137,14 @@ def memory_tools(
         Args:
             query: A few English keywords, e.g. "Ramesh", "wedding Sabitri", "father job".
         """
+        memory.metrics.recall_calls += 1
         search = asyncio.ensure_future(memory.search(query))
         done, _ = await asyncio.wait({search}, timeout=memory.settings.thinking_after_seconds)
         if not done and thinking:
             # A natural pause instead of silence. Kept out of the history, so Claude never
             # sees it and the transcript and summary don't include it.
             context.session.say(thinking, add_to_chat_ctx=False)
+            memory.metrics.thinking_said += 1
         facts = await search
         return render_search(facts, await memory.people() if facts else [])
 

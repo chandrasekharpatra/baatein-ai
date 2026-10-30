@@ -35,6 +35,7 @@ from baatein.memory.service import (
     split_relation,
     zone,
 )
+from baatein.metrics import CallMetrics
 from tests.factories import (
     at,
     make_boundary,
@@ -989,3 +990,34 @@ async def test_a_relation_in_the_name_doesnt_make_a_second_person(world: World) 
     second = await memory.person("Ramesh (college friend)")
 
     assert second.id == first.id
+
+
+async def test_a_call_counts_searches_saves_and_keeps_them_when_it_ends(world: World) -> None:
+    await world.store.add(make_fact(world.user.id, "Has a job interview at Google"))
+    memory = await duplicate_call(world)
+
+    await memory.recall("google interview")
+    await memory.recall("ठीक है")  # only fillers: not searched
+    await memory.remember("Loves masala chai")
+    await memory.remember("Loves masala chai")  # already saved
+    await memory.close("done")
+
+    [saved] = world.state.metrics.values()
+    metrics = CallMetrics.from_json(saved)
+    assert (metrics.searches, metrics.searches_skipped, len(metrics.search_ms)) == (1, 1, 1)
+    assert (metrics.saved, metrics.already_saved) == (1, 1)
+
+
+async def test_failing_to_save_metrics_doesnt_fail_the_end_of_a_call(
+    world: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def broken(*_: object) -> None:
+        raise RuntimeError("disk full")
+
+    world.deps.sessions.save_metrics = broken  # type: ignore[method-assign]
+    memory = await world.service.open_call(world.user)
+
+    await memory.close("done")
+
+    assert (await world.deps.sessions.get(memory.session.id)).ended_at is not None  # type: ignore[union-attr]
+    assert "saving metrics of session" in caplog.text

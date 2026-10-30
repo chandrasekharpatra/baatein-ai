@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from datetime import UTC, date, datetime, time
+from typing import Any
 
 import aiosqlite
 
@@ -259,6 +260,27 @@ class SqliteSessionRepo:
             " WHERE id = ?",
             (session_id,),
         )
+
+    async def save_metrics(self, session_id: str, metrics: dict[str, Any]) -> None:
+        await self._update(
+            session_id,
+            "UPDATE sessions SET metrics = ? WHERE id = ?",
+            (json.dumps(metrics), session_id),
+        )
+
+    async def metrics_since(
+        self, since: datetime, user_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT metrics FROM sessions WHERE metrics IS NOT NULL AND started_at >= ?"
+        params: tuple[object, ...] = (to_db(since),)
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params += (user_id,)
+        async with (
+            self._db.read() as conn,
+            conn.execute(sql + " ORDER BY started_at", params) as cursor,
+        ):
+            return [json.loads(row[0]) for row in await cursor.fetchall()]
 
     async def _update(self, session_id: str, sql: str, params: tuple[object, ...]) -> None:
         async with self._db.transaction() as conn:

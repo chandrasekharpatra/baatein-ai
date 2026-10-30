@@ -186,3 +186,12 @@ An evaluation looked at where a "decision step" (rules, a small classifier, or a
   - `baatein forget-user EMAIL --yes`
   - **Not by voice:** asked to forget everything, Baatein points to the app and offers to forget one named thing now. A misheard sentence shouldn't be able to wipe everything.
 - **Known gap:** a call in progress while erasing can still save a turn or memory afterwards.
+
+### D22. Each call keeps its numbers; `baatein metrics` reports them
+- **Why:** tuning choices (how long to wait for a search, whether to add a "wait when a person is named" step, whether a classifier is worth it) should use real calls, not guesses.
+- **Options:** structured logs only; per-call metrics with a CLI report; the same plus a dashboard. **Chosen (by the user):** per-call metrics plus a CLI report.
+- **What's kept per call** (`baatein/metrics.py:CallMetrics`, JSON in `sessions.metrics`, migration 0008):
+  - **Reply latency:** when the caller stops speaking to when Baatein starts replying (LiveKit's per-message `e2e_latency`), with its parts: transcript, end of turn, Claude's first token, TTS first audio. Also interrupted replies.
+  - **Memory:** searches sent and skipped (fillers), search time, memories that reached their reply against those that joined the next turn, `recall` tool calls, "Hmm…" said, saves and saves turned down as already saved.
+  - **Usage:** Claude tokens (in, cached, out), speech-to-text minutes, TTS characters.
+- **Saved when the call ends;** a failure to save is logged and never fails the call's end.

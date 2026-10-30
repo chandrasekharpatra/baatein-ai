@@ -206,3 +206,20 @@ async def test_clear_summary(repos: Repos) -> None:
     assert (stored.summary, stored.unfinished_topic, stored.notes) == (None, None, ())
     with pytest.raises(NotFoundError):
         await repos.sessions.clear_summary("missing")
+
+
+async def test_metrics_are_kept_per_call_and_listed_by_date_and_user(repos: Repos) -> None:
+    ram, asha = await add_user(repos), await add_user(repos)
+    old = make_session(ram, started_at=at(-100))
+    new = make_session(ram, started_at=at(10))
+    other = make_session(asha, started_at=at(20))
+    quiet = make_session(ram, started_at=at(30))  # ended without metrics
+    for session in (old, new, other, quiet):
+        await repos.sessions.add(session)
+    for session, replies in ((old, 1), (new, 2), (other, 3)):
+        await repos.sessions.save_metrics(session.id, {"replies": replies})
+
+    assert await repos.sessions.metrics_since(at(0)) == [{"replies": 2}, {"replies": 3}]
+    assert await repos.sessions.metrics_since(at(-200), ram) == [{"replies": 1}, {"replies": 2}]
+    with pytest.raises(NotFoundError):
+        await repos.sessions.save_metrics("missing", {})
