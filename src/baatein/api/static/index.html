@@ -6,6 +6,11 @@
   <meta name="theme-color" content="#f7f1ea" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#14110f" media="(prefers-color-scheme: dark)">
   <title>Baatein</title>
+  <!-- Baloo 2 (the name and headings) and Mukta (text), both by the Indian Type Foundry: warm,
+       easy to read for older users, with Devanagari as well as Latin. System fonts until loaded. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700&family=Mukta:wght@400;500;600;700&display=swap">
   <style>
     :root {
       --bg: #f7f1ea; --bg-glow: #ffd9bd; --surface: rgba(255, 255, 255, 0.72);
@@ -14,6 +19,8 @@
       --go: #1f9d63; --stop: #d93b3b; --error: #c0362c;
       --shadow: 0 18px 50px -18px rgba(120, 60, 20, 0.35);
       --radius: 22px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      --font-text: "Mukta", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --font-display: "Baloo 2", var(--font-text);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -29,7 +36,7 @@
     body {
       margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; justify-content: center;
       padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
-      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font: 17px/1.5 var(--font-text);
       color: var(--text); background: var(--bg); overflow-x: hidden;
       background-image:
         radial-gradient(60vmax 50vmax at 85% -10%, var(--bg-glow), transparent 60%),
@@ -50,7 +57,8 @@
       background: radial-gradient(circle at 35% 30%, #fff6 0 18%, transparent 40%),
                   conic-gradient(from 200deg, var(--accent), var(--accent-soft), var(--accent));
       box-shadow: 0 8px 24px -8px var(--accent); }
-    .brand h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .brand h1 { margin: 0; font: 700 2.2rem/1.1 var(--font-display); letter-spacing: -0.01em; }
+    h2, h3, .hello, #status { font-family: var(--font-display); }
     .brand p { margin: 0; color: var(--muted); font-size: 0.95rem; }
 
     /* Auth */
