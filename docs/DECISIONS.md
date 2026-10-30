@@ -288,3 +288,12 @@ Three problems from Ram's live calls at 4:45 and 4:47 pm:
   - Its emotion tags work only in English, so Hinglish gets its built-in expressiveness only.
 - **Caveat:** only one take per voice was measured, because the Cartesia account ran out of credits partway (402). The account needs a top-up before calls can use this voice.
 - **Other languages:** English and Kannada stay on Sarvam `bulbul:v4-flash`, Odia on `bulbul:v3`. `BAATEIN_VOICE__TTS` can still switch Hinglish back to Simran without a code change. `CARTESIA_API_KEY` is required again. Clips and scripts are in `demo/voices/` (`make_seam_samples.py`, `make_v3_samples.py`, `make_sonic36_samples.py`).
+
+### D32. Back to Sarvam for Hinglish, with Ishita (2026-10-30)
+The user chose Sarvam `bulbul:v4-flash` with **`ishita_enhi_companion`** over Cartesia sonic-3.6 Siya (D31), so Baatein needs no Cartesia account, and every language speaks through Sarvam again. `CARTESIA_API_KEY` is optional again. Ishita is a code-mixed companion voice like Simran (D29).
+
+Sarvam's stream still synthesises each piece of a reply separately, so the tone can shift between sentences (measured in D31). If that's noticeable, the levers are:
+- **Bigger pieces:** `min_buffer_size`/`max_chunk_length` 120/300 through `BAATEIN_VOICE__TTS` (no slower, in D31's tests).
+- **A Cartesia voice:** sonic-3.6, which keeps one stream per reply.
+
+Don't lower the temperature: 0.3 caused a long silence (D31).

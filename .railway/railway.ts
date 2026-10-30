@@ -44,7 +44,6 @@ export default defineRailway(() => {
       // Secrets, set (sealed) in the dashboard.
       ANTHROPIC_API_KEY: preserve(),
       SARVAM_API_KEY: preserve(),
-      CARTESIA_API_KEY: preserve(),
       PINECONE_API_KEY: preserve(),
       LIVEKIT_URL: preserve(),
       LIVEKIT_API_KEY: preserve(),

@@ -20,7 +20,7 @@ One Railway service runs everything Baatein needs, apart from the audio. LiveKit
    │    not through Cloudflare or Railway             ▼
    └───────────────────────────────────▶  LiveKit Cloud (wss://<project>.livekit.cloud)
 
- The agent also calls Sarvam (speech to text), Cartesia (the Hinglish voice), Claude (replies) and Pinecone (memory embeddings).
+ The agent also calls Sarvam (speech in and out), Claude (replies) and Pinecone (memory embeddings).
 ```
 
 **Why one service:** a Railway volume attaches to a single service, and the agent and the API share one SQLite file. A volume also means one copy at a time, so a redeploy has a short gap (Railway's rule). Don't redeploy during a demo.
@@ -63,7 +63,7 @@ The agent runs on Railway and only connects out, so there's nothing to deploy on
 
    | Variable | Value |
    |---|---|
-   | `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `PINECONE_API_KEY` | your keys |
+   | `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `PINECONE_API_KEY` | your keys |
    | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | from step 1 |
    | `BAATEIN_AUTH__JWT_SECRET` | `openssl rand -hex 32` |
    | `BAATEIN_AUTH__SEED_PASSWORD` | the password for accounts seeded at deploy |
@@ -115,12 +115,12 @@ The microphone needs HTTPS, which Cloudflare and Railway provide. Audio doesn't 
 - **Memory:** measured in this image with nothing running, the container uses about **1 GB**: the API, the agent and two warm call processes, which share most of their memory. LiveKit's default keeps one warm process per CPU core; the test container saw 8 cores, and Railway's machines may show more. Baatein keeps two (`num_idle_processes` in `agent/entrypoint.py`). Allow up to 2 GB, so calls have headroom. Railway bills the memory actually used, not the limit.
 - **Volume:** 1 GB is plenty for SQLite. It can grow without data loss; shrinking it is destructive.
 - **LiveKit Cloud:** the free plan's caps on minutes and concurrent calls are plenty for a demo; check its dashboard.
-- **Calls** still spend Sarvam, Cartesia, Anthropic and Pinecone credits, as they do locally.
+- **Calls** still spend Sarvam, Anthropic and Pinecone credits, as they do locally.
 
 ## Before a demo
 - Don't deploy on the day: a redeploy with a volume has a short gap, and a call in progress gets 60 s to finish.
 - Make one test call shortly before. The first call after a deploy is a little slower while the processes warm up.
-- Check your Sarvam, Cartesia and Anthropic balances.
+- Check your Sarvam and Anthropic balances.
 - Keep the laptop setup (`docs/RUNNING.md`) ready as a fallback.
 - Backups: turn on daily volume backups in the service's Backups tab, so a bad upload can be undone.
 

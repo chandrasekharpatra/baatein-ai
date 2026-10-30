@@ -21,7 +21,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
    │──2. POST /livekit/token ─▶  room token + agent dispatch {"user_id": ...}
    │
    └──3. WebRTC audio ─▶ LiveKit server ──dispatches──▶ Agent worker
-                                                      Sarvam STT → Claude → Cartesia TTS
+                                                      Sarvam STT → Claude → Sarvam TTS
 ```
 
 1. The web client signs you up or logs you in and gets an access token.
@@ -35,7 +35,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 | Realtime voice | LiveKit Agents 1.8, self-hosted `livekit-server` |
 | Speech-to-text | Sarvam `saaras:v4` in `codemix` mode (Hindi, Odia, Kannada mixed with English) |
 | LLM | Claude Haiku 5.5 (configurable) |
-| Text-to-speech | Cartesia `sonic-3.6` for Hinglish (voice Siya; D31); Sarvam `bulbul:v4-flash` for English and Kannada, `bulbul:v3` for Odia (v4-flash has no Odia voice yet). Any language's voice can be swapped with `BAATEIN_VOICE__TTS` |
+| Text-to-speech | Sarvam `bulbul:v4-flash` for Hinglish (voice `ishita_enhi_companion`; D32), English and Kannada; `bulbul:v3` for Odia (v4-flash has no Odia voice yet). Any language's voice can be swapped with `BAATEIN_VOICE__TTS`, e.g. to Cartesia `sonic-3.6` |
 | Storage | SQLite (WAL) via `aiosqlite`, numbered SQL migrations |
 | Memory search | `sqlite-vec` vectors + FTS5 keyword search, fused with reciprocal rank fusion |
 | Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d); FastEmbed local models also work (see [docs/RETRIEVAL_BENCHMARK.md](docs/RETRIEVAL_BENCHMARK.md)) |
@@ -51,7 +51,7 @@ For a step-by-step walkthrough from a fresh machine, including installing LiveKi
 
 - Python 3.12 and [`uv`](https://docs.astral.sh/uv/)
 - `livekit-server`: see the [LiveKit install instructions](https://github.com/livekit/livekit#linux) (Linux: `curl -sSL https://get.livekit.io | bash`, macOS: `brew install livekit`)
-- API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/) (speech-to-text, and the English and Kannada voices), [Cartesia](https://play.cartesia.ai/) (the Hinglish voice) and [Pinecone](https://app.pinecone.io/) (memory embeddings)
+- API keys: [Anthropic](https://console.anthropic.com/), [Sarvam](https://dashboard.sarvam.ai/) (speech-to-text and the voices) and [Pinecone](https://app.pinecone.io/) (memory embeddings). A [Cartesia](https://play.cartesia.ai/) key is only needed if you switch a language to a Cartesia voice
 
 ### Install
 
@@ -63,7 +63,7 @@ uv run pre-commit install
 
 Fill in `.env`:
 
-- `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `PINECONE_API_KEY`
+- `ANTHROPIC_API_KEY`, `SARVAM_API_KEY`, `PINECONE_API_KEY` (and `CARTESIA_API_KEY` only for a Cartesia voice)
 - `BAATEIN_AUTH__JWT_SECRET`: a long random string, e.g. `openssl rand -hex 32`
 - Keep the `LIVEKIT_*` defaults; they match `livekit-server --dev`.
 - `BAATEIN_AUTH__SIGNUP_ENABLED=true` to sign up from the page locally, and your email in `BAATEIN_AUTH__ADMIN_EMAILS` to load and download test accounts. Signup is off by default; `uv run baatein create-user EMAIL` makes an account without it.
@@ -92,7 +92,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Claude (read by the LiveKit plugin) |
 | `SARVAM_API_KEY` | — | Sarvam STT and TTS (every language) |
-| `CARTESIA_API_KEY` | — | Cartesia TTS: the Hinglish voice |
+| `CARTESIA_API_KEY` | — | Only if `BAATEIN_VOICE__TTS` switches a language to Cartesia |
 | `PINECONE_API_KEY` | — | Hosted memory embeddings (the default embedder) |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server the agent and tokens point to |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | — | Sign room tokens; register the worker |
