@@ -32,3 +32,21 @@ class FakeEmbedder:
     async def embed(self, texts: Sequence[str], kind: EmbedKind) -> list[list[float]]:
         self.calls.append((list(texts), kind))
         return [bag_of_words_vector(text, self._dimensions) for text in texts]
+
+
+class MappedEmbedder(FakeEmbedder):
+    """Gives chosen texts chosen vectors (normalised), so a test can set exact similarities.
+    Other texts get the bag-of-words vector."""
+
+    def __init__(self, vectors: dict[str, list[float]], dimensions: int = 256) -> None:
+        super().__init__(dimensions)
+        self._vectors = {
+            text: [x / math.sqrt(sum(y * y for y in v)) for x in v] + [0.0] * (dimensions - len(v))
+            for text, v in vectors.items()
+        }
+
+    async def embed(self, texts: Sequence[str], kind: EmbedKind) -> list[list[float]]:
+        self.calls.append((list(texts), kind))
+        return [
+            self._vectors.get(text) or bag_of_words_vector(text, self._dimensions) for text in texts
+        ]

@@ -29,3 +29,15 @@ def test_words(text: str, expected: list[str]) -> None:
 )
 def test_search_terms_drop_stopwords_and_duplicates(text: str, expected: list[str]) -> None:
     assert search_terms(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["ठीक है।", "नहीं नहीं यार।", "Haan ji, theek hai", "Yeah, it's good.", "हम्म, अच्छा"]
+)
+def test_fillers_leave_nothing_to_search(text: str) -> None:
+    assert search_terms(text) == []
+
+
+def test_fillers_keep_the_words_that_matter() -> None:
+    assert search_terms("अच्छा मेरे पिताजी का याद आ रहा है।") == ["पिताजी", "याद", "आ", "रहा"]
+    assert search_terms("Haan, Ramesh ko phone kiya") == ["ramesh", "phone", "kiya"]

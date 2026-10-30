@@ -19,7 +19,7 @@ from baatein.storage.sqlite.memory_store import SqliteMemoryStore
 from baatein.storage.sqlite.migrate import migrate
 from baatein.storage.sqlite.repos import SqlitePeopleRepo, SqliteSessionRepo, SqliteUserRepo
 from tests.factories import T0, at, make_fact, make_session, make_user
-from tests.fakes.embedder import FakeEmbedder
+from tests.fakes.embedder import FakeEmbedder, MappedEmbedder
 from tests.fakes.memory import InMemoryMemoryStore
 from tests.fakes.repos import (
     InMemoryPeopleRepo,
@@ -307,3 +307,34 @@ async def test_each_search_can_set_its_own_cut_off(memory: Memory) -> None:
 
     assert [r.fact.id for r in loose] == [fact.id]
     assert strict == []
+
+
+@pytest.mark.parametrize("kind", ["sqlite", "memory"])
+async def test_a_keyword_match_needs_a_little_shared_meaning(kind: str, tmp_path: Path) -> None:
+    # Shared words alone pulled up unrelated memories ("sleep", "pine cone"); keep a keyword
+    # match only if its similarity reaches KEYWORD_FLOOR (0.1).
+    embedder = MappedEmbedder(
+        {
+            "guitar": [1.0, 0.0],
+            "plays guitar in a band": [0.05, 1.0],  # similarity ~0.05
+            "gave away the old guitar": [0.2, 1.0],  # similarity ~0.2
+        }
+    )
+    if kind == "memory":
+        state = InMemoryState()
+        store: MemoryStore = InMemoryMemoryStore(state, embedder)
+        users: UserRepo = InMemoryUserRepo(state)
+    else:
+        migrate(tmp_path / "test.db")
+        db = Database(tmp_path / "test.db")
+        store, users = SqliteMemoryStore(db, embedder), SqliteUserRepo(db)
+    user = make_user()
+    await users.add(user)
+    for text in ("plays guitar in a band", "gave away the old guitar"):
+        await store.add(make_fact(user.id, text))
+
+    found = await store.search(user.id, "guitar", 5, min_similarity=0.9)  # no meaning match
+
+    assert [r.fact.text for r in found] == ["gave away the old guitar"]
+    if kind == "sqlite":
+        await db.close()

@@ -14,7 +14,7 @@ from baatein.domain.models import (
     ScoredFact,
     Sensitivity,
 )
-from baatein.memory.ranking import reciprocal_rank_fusion
+from baatein.memory.ranking import KEYWORD_FLOOR, reciprocal_rank_fusion
 from baatein.ports.embedder import Embedder
 from baatein.storage.sqlite.db import Database
 from baatein.storage.sqlite.repos import (
@@ -131,9 +131,8 @@ class SqliteMemoryStore:
                 " WHERE embedding MATCH ? AND k = ? AND user_id = ? ORDER BY distance",
                 (serialize_float32(vector), candidates, user_id),
             ) as cursor:
-                semantic = [
-                    pk for pk, distance in await cursor.fetchall() if 1.0 - distance >= cut_off
-                ]
+                similarity = {pk: 1.0 - distance for pk, distance in await cursor.fetchall()}
+            semantic = [pk for pk, score in similarity.items() if score >= cut_off]
             async with conn.execute(
                 "SELECT facts.pk FROM facts_fts JOIN facts ON facts.pk = facts_fts.rowid"
                 " WHERE facts_fts MATCH ? AND facts.user_id = ? AND facts.retired_at IS NULL"
@@ -141,6 +140,17 @@ class SqliteMemoryStore:
                 (match, user_id, candidates),
             ) as cursor:
                 keyword = [pk for (pk,) in await cursor.fetchall()]
+            unscored = [pk for pk in keyword if pk not in similarity]
+            if unscored:
+                async with conn.execute(
+                    f"SELECT rowid, vec_distance_cosine(embedding, ?) FROM {self._table}"
+                    f" WHERE rowid IN ({', '.join('?' * len(unscored))})",
+                    (serialize_float32(vector), *unscored),
+                ) as cursor:
+                    similarity |= {pk: 1.0 - distance for pk, distance in await cursor.fetchall()}
+            # A fact with no vector yet (embedder switched, `reembed` not run) keeps its keyword
+            # match: there is nothing to judge it by.
+            keyword = [pk for pk in keyword if similarity.get(pk, KEYWORD_FLOOR) >= KEYWORD_FLOOR]
 
             scores = reciprocal_rank_fusion([semantic, keyword])
             if not scores:

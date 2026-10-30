@@ -225,8 +225,8 @@ async def test_unexpected_integrity_errors_propagate(db: Database) -> None:
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("hello world", '"hello" OR "world"'),
-        ('say "hi"', '"say" OR "hi"'),
+        ("garden party", '"garden" OR "party"'),
+        ('say "chai"', '"say" OR "chai"'),
         ("?? !!", None),
         ("", None),
     ],

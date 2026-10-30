@@ -4,7 +4,7 @@ from datetime import datetime
 
 from baatein.domain.errors import NotFoundError
 from baatein.domain.models import Fact, ScoredFact
-from baatein.memory.ranking import reciprocal_rank_fusion
+from baatein.memory.ranking import KEYWORD_FLOOR, reciprocal_rank_fusion
 from baatein.ports.embedder import Embedder
 from baatein.text import search_terms, words
 from tests.fakes.repos import InMemoryState
@@ -72,7 +72,10 @@ class InMemoryMemoryStore:
             key=lambda fid: -similarity[fid],
         )
         overlap = {f.id: len(terms & set(words(f.text))) for f in facts}
-        keyword = sorted((f.id for f in facts if overlap[f.id]), key=lambda fid: -overlap[fid])
+        keyword = sorted(
+            (f.id for f in facts if overlap[f.id] and similarity[f.id] >= KEYWORD_FLOOR),
+            key=lambda fid: -overlap[fid],
+        )
 
         scores = reciprocal_rank_fusion([semantic, keyword])
         scored = [ScoredFact(self._facts[fid], score) for fid, score in scores.items()]
