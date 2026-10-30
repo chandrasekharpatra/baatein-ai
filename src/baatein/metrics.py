@@ -42,6 +42,8 @@ class CallMetrics:
     saved: int = 0
     already_saved: int = 0
     """Saves turned down because the memory was already there."""
+    tools: dict[str, int] = field(default_factory=dict)
+    """Tool calls by name."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -50,6 +52,19 @@ class CallMetrics:
     def from_json(cls, data: dict[str, Any]) -> "CallMetrics":
         known = {f.name for f in fields(cls)}
         return cls(**{key: value for key, value in data.items() if key in known})
+
+    def summary(self, seconds: float) -> str:
+        """The call in one log line."""
+        reply, search = percentile(self.reply_ms, 50), percentile(self.search_ms, 50)
+        found = self.memories_now + self.memories_late
+        cached = self.llm_cached_tokens / self.llm_input_tokens if self.llm_input_tokens else 0
+        return (
+            f"{seconds:.0f} s, {self.user_turns} caller turns, {self.replies} replies"
+            f" (p50 {_or_none(reply)}); {self.searches} searches (p50 {_or_none(search)},"
+            f" {found} memories found); tools: {_tools(self.tools)};"
+            f" Claude {self.llm_input_tokens} tokens in ({cached:.0%} cached),"
+            f" {self.llm_output_tokens} out"
+        )
 
 
 def percentile(values: Sequence[float], q: float) -> float | None:
@@ -70,6 +85,14 @@ def _ms(values: Sequence[float]) -> str:
     return f"p50 {p50:.0f} ms, p90 {p90:.0f} ms ({len(values)})"
 
 
+def _or_none(ms: float | None) -> str:
+    return "-" if ms is None else f"{ms:.0f} ms"
+
+
+def _tools(counts: dict[str, int]) -> str:
+    return ", ".join(f"{name} {n}" for name, n in sorted(counts.items())) or "none"
+
+
 def _share(part: int, whole: int) -> str:
     return f"{part}/{whole} ({part / whole:.0%})" if whole else "0/0"
 
@@ -87,6 +110,10 @@ def report(calls: Iterable[CallMetrics]) -> str:
         return sum(getattr(call, name) for call in calls)
 
     turns = total("user_turns")
+    tools: dict[str, int] = {}
+    for call in calls:
+        for name, n in call.tools.items():
+            tools[name] = tools.get(name, 0) + n
     memories = total("memories_now") + total("memories_late")
     lines = [
         f"Calls: {len(calls)}, caller turns: {turns}, replies: {total('replies')}",
@@ -106,6 +133,7 @@ def report(calls: Iterable[CallMetrics]) -> str:
         f"  memories late    {_share(total('memories_late'), memories)} (joined the next turn)",
         f'  recall tool      {total("recall_calls")} calls, "Hmm…" said {total("thinking_said")}',
         f"  saved            {total('saved')}, already saved {total('already_saved')}",
+        f"  tools            {_tools(tools)}",
         "",
         "Usage:",
         f"  Claude tokens    {total('llm_input_tokens')} in ({total('llm_cached_tokens')} cached),"

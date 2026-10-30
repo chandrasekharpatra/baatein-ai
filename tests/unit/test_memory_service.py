@@ -363,12 +363,13 @@ async def test_a_slow_recall_stops_waiting_but_keeps_searching(
     memory = await world.service.open_call(world.user)
     task = memory.start_recall("google interview")
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         assert await memory.recall(task) is None
-        assert "still searching" in caplog.text
+        assert "still running" in caplog.text
         [found] = await task  # not cancelled: the caller can use it later
     assert found.fact.text == "Has a job interview at Google"
-    assert "the search took" in caplog.text
+    assert "memory search: " in caplog.text
+    assert "1 found" in caplog.text
 
 
 async def test_recall_of_a_cancelled_search_finds_nothing(world: World) -> None:

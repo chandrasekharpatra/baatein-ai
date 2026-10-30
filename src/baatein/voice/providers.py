@@ -29,12 +29,17 @@ def default_tts_registry() -> TTSRegistry:
 
 
 def anthropic_llm(**options: Any) -> anthropic.LLM:
-    """Claude with plain tool schemas.
+    """Claude with plain tool schemas and prompt caching.
 
     Strict schemas allow at most 16 optional parameters across all tools, and the memory tools
     need more. The tools validate their own arguments (see `agent.tools.choice`).
+
+    Caching marks the tools, the instructions and the conversation so far, so each reply
+    re-reads them from Anthropic's cache (about a tenth of the price, and faster) instead of
+    sending ~13k tokens at full price every turn. The instructions stay the same for the
+    whole call (memory notes are added as messages), which is what lets the cache hit.
     """
-    return anthropic.LLM(_strict_tool_schema=False, **options)
+    return anthropic.LLM(_strict_tool_schema=False, caching="ephemeral", **options)
 
 
 def default_llm_registry() -> LLMRegistry:

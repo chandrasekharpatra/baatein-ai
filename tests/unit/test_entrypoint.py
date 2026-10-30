@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -8,7 +9,14 @@ from typing import Any
 import pytest
 from injector import Injector, InstanceProvider
 from livekit.agents import AgentSession, llm, vad
-from livekit.agents.metrics import LLMMetrics, STTMetrics, TTSMetrics
+from livekit.agents.metrics import (
+    AgentSessionUsage,
+    EOTModelUsage,
+    LLMModelUsage,
+    STTModelUsage,
+    TTSModelUsage,
+)
+from livekit.agents.voice import FunctionToolsExecutedEvent
 
 from baatein.agent import entrypoint
 from baatein.agent.assistant import Assistant
@@ -41,6 +49,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.handlers: dict[str, Callable[[Any], None]] = {}
+        self.usage = AgentSessionUsage(model_usage=[])
 
     def on(self, event: str, handler: Callable[[Any], None] | None = None) -> Any:
         def register(handler: Callable[[Any], None]) -> Callable[[Any], None]:
@@ -259,7 +268,12 @@ async def test_entrypoint_uses_dispatched_users_language_and_name(
     on_item = session.handlers["conversation_item_added"]
     on_item(SimpleNamespace(item=llm.ChatMessage(role="user", content=["Kal interview hai"])))
     on_item(SimpleNamespace(item=llm.ChatMessage(role="assistant", content=["All the best!"])))
-    session.handlers["metrics_collected"](SimpleNamespace(metrics=llm_usage(input=900, output=40)))
+    session.handlers["function_tools_executed"](
+        FunctionToolsExecutedEvent(function_calls=[], function_call_outputs=[])
+    )
+    session.usage = AgentSessionUsage(
+        model_usage=[LLMModelUsage(provider="anthropic", model="m", input_tokens=900)]
+    )
     [close] = shutdown
     await close("user_left")
 
@@ -331,22 +345,6 @@ async def test_record_item_saves_interrupted_flag() -> None:
     assert (turn.text, turn.interrupted) == ("Accha", True)
 
 
-def llm_usage(input: int, output: int, cached: int = 0) -> LLMMetrics:
-    return LLMMetrics(
-        label="claude",
-        request_id="r",
-        timestamp=0,
-        duration=1,
-        ttft=0.4,
-        cancelled=False,
-        completion_tokens=output,
-        prompt_tokens=input,
-        prompt_cached_tokens=cached,
-        total_tokens=input + output,
-        tokens_per_second=10,
-    )
-
-
 def test_latency_is_noted_per_message() -> None:
     metrics = CallMetrics()
     user = llm.ChatMessage(role="user", content=["Kal interview hai"])
@@ -366,25 +364,24 @@ def test_latency_is_noted_per_message() -> None:
     assert (metrics.user_turns, metrics.replies, metrics.interrupted) == (1, 1, 1)
 
 
-def test_usage_adds_tokens_audio_and_characters() -> None:
+def test_usage_copies_the_sessions_tokens_audio_and_characters() -> None:
     metrics = CallMetrics()
-    stt = STTMetrics(
-        label="sarvam", request_id="s", timestamp=0, duration=0, audio_duration=12.5, streamed=True
-    )
-    tts = TTSMetrics(
-        label="cartesia",
-        request_id="t",
-        timestamp=0,
-        ttfb=0.2,
-        duration=1,
-        audio_duration=2,
-        cancelled=False,
-        characters_count=42,
-        streamed=True,
+    usage = AgentSessionUsage(
+        model_usage=[
+            LLMModelUsage(
+                provider="anthropic",
+                model="m",
+                input_tokens=1000,
+                input_cached_tokens=800,
+                output_tokens=50,
+            ),
+            STTModelUsage(provider="sarvam", model="s", audio_duration=12.5),
+            TTSModelUsage(provider="cartesia", model="t", characters_count=42),
+            EOTModelUsage(provider="livekit", model="e"),
+        ]
     )
 
-    for usage in (llm_usage(1000, 50, cached=800), stt, tts, object()):
-        entrypoint.note_usage(metrics, usage)
+    entrypoint.note_usage(metrics, usage)
 
     assert (metrics.llm_input_tokens, metrics.llm_cached_tokens, metrics.llm_output_tokens) == (
         1000,
@@ -392,6 +389,32 @@ def test_usage_adds_tokens_audio_and_characters() -> None:
         50,
     )
     assert (metrics.stt_audio_seconds, metrics.tts_characters) == (12.5, 42)
+
+
+def test_tools_are_counted_and_logged_short_and_redacted(caplog: pytest.LogCaptureFixture) -> None:
+    metrics = CallMetrics()
+    calls = [
+        llm.FunctionCall(call_id="1", name="remember", arguments='{"text": "OTP 482913"}'),
+        llm.FunctionCall(call_id="2", name="recall", arguments='{"query": "' + "x" * 300 + '"}'),
+        llm.FunctionCall(call_id="3", name="recall", arguments='{"query": "Ramesh"}'),
+    ]
+    outputs = [
+        llm.FunctionCallOutput(call_id=c.call_id, name=c.name, output="Saved.", is_error=False)
+        for c in calls
+    ]
+
+    with caplog.at_level(logging.INFO):
+        entrypoint.note_tools(
+            metrics, FunctionToolsExecutedEvent(function_calls=calls, function_call_outputs=outputs)
+        )
+
+    assert metrics.tools == {"remember": 1, "recall": 2}
+    first, second, _ = caplog.messages
+    assert first.startswith("tool remember(")
+    assert "482913" not in first
+    assert first.endswith("→ Saved.")
+    assert len(second) < 160
+    assert "…" in second
 
 
 async def test_resolve_user_returns_none_for_unknown_user() -> None:

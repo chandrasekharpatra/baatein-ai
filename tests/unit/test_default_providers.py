@@ -32,6 +32,7 @@ def test_default_llm_spec_builds_real_plugin() -> None:
 
     assert isinstance(claude, llm.LLM)
     assert claude._opts.strict_tool_schema is False  # type: ignore[attr-defined]
+    assert claude._opts.caching == "ephemeral"  # type: ignore[attr-defined]
 
 
 DEMO_VOICE = (

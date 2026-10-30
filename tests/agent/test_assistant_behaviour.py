@@ -36,8 +36,8 @@ pytestmark = [
 
 class JudgeLLM(anthropic.LLM):
     def __init__(self, **kwargs: Any) -> None:
-        # Same tool schemas as the agent: see voice.providers.anthropic_llm.
-        super().__init__(_strict_tool_schema=False, **kwargs)
+        # Same tool schemas and caching as the agent: see voice.providers.anthropic_llm.
+        super().__init__(_strict_tool_schema=False, caching="ephemeral", **kwargs)
 
     def chat(
         self, *, extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN, **kwargs: Any
@@ -510,3 +510,26 @@ async def test_replies_in_the_users_language_and_script(
         # The danda (U+0964/5) is the full stop of Odia too, though it sits in the Devanagari block.
         assert not DEVANAGARI.search(reply.replace("\u0964", "").replace("\u0965", "")), reply
         assert familiar_you not in reply, reply
+
+
+async def test_saves_what_it_promises_to_follow_up_on() -> None:
+    """From a live call: "I want to do ten pushups… after few minutes, note this down" got
+    "jab bhi aap baat karenge, main pooch lungi", with nothing saved to ask about."""
+    world = build_world()
+    async with JudgeLLM(model=Settings().llm.model) as llm, AgentSession(llm=llm) as session:
+        await start_with_memory(session, world, user_name="Ram")
+
+        first = await turn(
+            session,
+            "Ab mujhe ek doosra kaam karna hai, I want to do ten pushups. "
+            "After few minutes, note this down.",
+        )
+        second = await turn(session, "Haan, theek hai.")
+
+        if not (world.state.reminders or world.state.threads):  # then it must promise nothing
+            for result in (first, second):
+                await result.expect.contains_message(role="assistant").judge(
+                    llm,
+                    intent="Doesn't claim to have noted or saved anything, and doesn't promise "
+                    "to ask about it or remind them later.",
+                )

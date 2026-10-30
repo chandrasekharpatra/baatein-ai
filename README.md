@@ -130,7 +130,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `uv run baatein demo-date YYYY-MM-DD [--time 10:00] [--tz Asia/Kolkata] \| --clear` | Demos only (needs `BAATEIN_DEV__CLOCK_FILE`): make it a chosen day for memory, reminders and summaries, so one recording session can show several days |
 | `uv run baatein forget-user EMAIL --yes` | Erase everything Baatein remembers about a user (memories, people, storylines, reminders, calls); the account stays |
 | `uv run baatein seed FILE [--replace]` | Create a test account with artificial memories (see `docs/SEED_DATA.md`) |
-| `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload |
+| `uv run baatein-agent dev` | Run the agent worker against a LiveKit server, with hot reload. Logs at INFO: each call's start, tool calls, memory searches and a one-line summary at the end; add `--log-level debug` for library detail |
 | `uv run baatein-agent start` | Run the agent worker in production mode |
 | `uv run baatein-agent console` | Talk to the agent in the terminal with local audio |
 

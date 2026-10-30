@@ -404,7 +404,7 @@ class CallMemory:
             elif searched:
                 took = (time_module.perf_counter() - started) * 1000
                 self.metrics.search_ms.append(round(took))
-                logger.info("memory recall: the search took %.0f ms", took)
+                logger.info("memory search: %.0f ms, %d found", took, len(done.result()))
 
         task.add_done_callback(log_duration)
         return task
@@ -424,14 +424,14 @@ class CallMemory:
         started = time_module.perf_counter()
         done, _ = await asyncio.wait({task}, timeout=timeout)
         if not done:
-            logger.info("memory recall: still searching; replying without it")
+            logger.debug("memory search still running; replying without it")
             return None
         if task.cancelled():
             return []
         if task.exception() is not None:  # logged when the search finished
             return []
-        logger.info(
-            "memory recall: the reply waited %.0f ms", (time_module.perf_counter() - started) * 1000
+        logger.debug(
+            "memory search: the reply waited %.0f ms", (time_module.perf_counter() - started) * 1000
         )
         return task.result()
 
@@ -880,3 +880,5 @@ class CallMemory:
             await self._deps.sessions.save_metrics(self.session.id, self.metrics.to_json())
         except Exception:  # the numbers are for tuning; never fail a call's end over them
             logger.exception("saving metrics of session %s failed", self.session.id)
+        seconds = (self._deps.clock.now() - self.session.started_at).total_seconds()
+        logger.info("call ended (%s): %s", reason, self.metrics.summary(seconds))

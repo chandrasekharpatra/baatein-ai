@@ -5,8 +5,17 @@ import logging
 from dotenv import find_dotenv, load_dotenv
 from injector import Injector
 from livekit.agents import AgentServer, AgentSession, JobContext, JobProcess, cli, llm, vad
-from livekit.agents.metrics import LLMMetrics, STTMetrics, TTSMetrics
-from livekit.agents.voice import CloseEvent, ConversationItemAddedEvent, MetricsCollectedEvent
+from livekit.agents.metrics import (
+    AgentSessionUsage,
+    LLMModelUsage,
+    STTModelUsage,
+    TTSModelUsage,
+)
+from livekit.agents.voice import (
+    CloseEvent,
+    ConversationItemAddedEvent,
+    FunctionToolsExecutedEvent,
+)
 from livekit.plugins import silero
 
 from baatein.agent.assistant import Assistant
@@ -15,6 +24,7 @@ from baatein.config import LiveKitSettings, Settings, VoiceSettings
 from baatein.container import build_root
 from baatein.domain.models import Role, User
 from baatein.memory.context_builder import opening, render_context
+from baatein.memory.redact import redact
 from baatein.memory.service import CallMemory, MemoryService
 from baatein.metrics import CallMetrics
 from baatein.ports.repos import UserRepo
@@ -31,12 +41,18 @@ from baatein.voice.providers import VoicePipeline, VoicePipelineFactory
 
 logger = logging.getLogger(__name__)
 
+LOGGED_CHARS = 120
+"""How much of a tool's arguments and result goes into its log line."""
+
 
 def prewarm(proc: JobProcess) -> None:
     settings = Settings()
     migrate(settings.database.sqlite_path())
     proc.userdata["injector"] = build_root(settings=settings)
     proc.userdata["vad"] = silero.VAD.load()
+    # One INFO line per embedding request ("Generating embeddings…") says nothing the
+    # memory search line doesn't.
+    logging.getLogger("pinecone").setLevel(logging.WARNING)
 
 
 def dispatch_user_id(metadata: str | None) -> str | None:
@@ -125,19 +141,35 @@ def note_latency(metrics: CallMetrics, item: llm.ChatMessage) -> None:
             values.append(value)
 
 
-def note_usage(metrics: CallMetrics, usage: object) -> None:
-    """Add what one LLM, STT or TTS request used (LiveKit's `metrics_collected` event)."""
-    if isinstance(usage, LLMMetrics):
-        metrics.llm_input_tokens += usage.prompt_tokens
-        metrics.llm_cached_tokens += usage.prompt_cached_tokens
-        metrics.llm_output_tokens += usage.completion_tokens
-    elif isinstance(usage, STTMetrics):
-        metrics.stt_audio_seconds += usage.audio_duration
-    elif isinstance(usage, TTSMetrics):
-        metrics.tts_characters += usage.characters_count
+def note_usage(metrics: CallMetrics, usage: AgentSessionUsage) -> None:
+    """Copy what the call used, from LiveKit's totals for the session, into its metrics."""
+    for model in usage.model_usage:
+        if isinstance(model, LLMModelUsage):
+            metrics.llm_input_tokens += model.input_tokens
+            metrics.llm_cached_tokens += model.input_cached_tokens
+            metrics.llm_output_tokens += model.output_tokens
+        elif isinstance(model, STTModelUsage):
+            metrics.stt_audio_seconds += model.audio_duration
+        elif isinstance(model, TTSModelUsage):
+            metrics.tts_characters += model.characters_count
 
 
-server = AgentServer(setup_fnc=prewarm)
+def _short(text: str) -> str:
+    text = " ".join(redact(text).split())
+    return text if len(text) <= LOGGED_CHARS else text[: LOGGED_CHARS - 1] + "…"
+
+
+def note_tools(metrics: CallMetrics, event: FunctionToolsExecutedEvent) -> None:
+    """Count each tool call, and log it in one line: name, arguments and result, shortened
+    and with codes and long numbers redacted."""
+    for call, output in zip(event.function_calls, event.function_call_outputs, strict=False):
+        metrics.tools[call.name] = metrics.tools.get(call.name, 0) + 1
+        logger.info("tool %s(%s) → %s", call.name, _short(call.arguments), _short(output.output))
+
+
+# INFO by default, also in `dev` (LiveKit's dev default is DEBUG: every SQLite call and STT
+# frame). `baatein-agent dev --log-level debug` brings it back.
+server = AgentServer(setup_fnc=prewarm, log_level="INFO")
 
 
 @server.rtc_session(agent_name=LiveKitSettings().agent_name)
@@ -156,6 +188,8 @@ async def entrypoint(ctx: JobContext) -> None:
     greeting = persona.greeting
 
     async def on_shutdown(reason: str) -> None:
+        if memory is not None:
+            note_usage(memory.metrics, session.usage)
         await end_call(injector, memory, reason)
 
     ctx.add_shutdown_callback(on_shutdown)
@@ -181,11 +215,25 @@ async def entrypoint(ctx: JobContext) -> None:
         def _on_item(event: ConversationItemAddedEvent) -> None:
             record_item(call_memory, event.item)
 
-        @session.on("metrics_collected")
-        def _on_usage(event: MetricsCollectedEvent) -> None:
-            note_usage(call_memory.metrics, event.metrics)
+        @session.on("function_tools_executed")
+        def _on_tools(event: FunctionToolsExecutedEvent) -> None:
+            note_tools(call_memory.metrics, event)
 
         known = await memory.context()
+        logger.info(
+            "call started: user %s, %s, %s; context: %d memories, %d storylines (%s),"
+            " %d reminders due, last call %s",
+            user.id,
+            language,
+            persona.code,
+            len(known.facts),
+            len(known.threads),
+            "a check-in" if known.check_in else "no check-in",
+            sum(d.alerted for d in known.reminders),
+            f"{known.last_call.started_at.astimezone(known.now.tzinfo):%d %b %H:%M}"
+            if known.last_call
+            else "none",
+        )
         context = render_context(known)
         greeting = opening(persona.greeting, known)
         assistant = Assistant(
