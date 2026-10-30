@@ -126,7 +126,7 @@ class MemoryModule(Module):
     def sqlite_memory_store(
         self, db: Database, embedder: Embedder, settings: Settings
     ) -> SqliteMemoryStore:
-        return SqliteMemoryStore(db, embedder, settings.memory.min_similarity)
+        return SqliteMemoryStore(db, embedder, settings.embedding.cut_off())
 
     @singleton
     @provider
@@ -165,8 +165,10 @@ class MemoryModule(Module):
 
     @singleton
     @provider
-    def memory_service(self, deps: MemoryDeps, embedder: Embedder) -> MemoryService:
-        return MemoryService(deps, embedder)
+    def memory_service(
+        self, deps: MemoryDeps, embedder: Embedder, settings: Settings
+    ) -> MemoryService:
+        return MemoryService(deps, embedder, settings.embedding.cut_off)
 
     @singleton
     @provider

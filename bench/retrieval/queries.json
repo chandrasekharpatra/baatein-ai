@@ -1,12 +1,14 @@
 {
- "about": "Retrieval benchmark over Ram's seeded memories (seeds/ram_mohapatra.json), stored in English as in production. Each question comes in every spoken form: hindi (Devanagari with English words in Latin, as Sarvam's codemix STT returns it), hinglish (Roman script), odia (Odia script), kannada (Kannada script); plus keywords (English, as Claude writes for the recall tool). `match` is a case-insensitive piece of the expected memory's text. Negatives are small talk that should retrieve nothing. The Odia and Kannada lines were written by Claude and should be reviewed by native speakers.",
+ "about": "Retrieval benchmark over Ram's seeded memories (seeds/ram_mohapatra.json), stored in English as in production. Each question comes in every spoken form: english (an English-speaking user), hindi (Devanagari with English words in Latin, as Sarvam's codemix STT returns it), hinglish (Roman script), odia (Odia script), kannada (Kannada script); plus keywords (English, as Claude writes for the recall tool). `match` is a case-insensitive piece of the expected memory's text. Negatives are small talk that should retrieve nothing. The Odia and Kannada lines were written by Claude and should be reviewed by native speakers.",
  "spoken": [
+  "english",
   "hindi",
   "hinglish",
   "odia",
   "kannada"
  ],
  "forms": [
+  "english",
   "hindi",
   "hinglish",
   "odia",
@@ -23,7 +25,8 @@
    "hinglish": "Tumhe yaad hai meri shaadi kab aur kahan hui thi?",
    "odia": "ତୁମର ମନେ ଅଛି କି ମୋ ବାହାଘର କେବେ ଆଉ କେଉଁଠି ହୋଇଥିଲା?",
    "kannada": "ನನ್ನ ಮದುವೆ ಯಾವಾಗ ಮತ್ತು ಎಲ್ಲಿ ಆಯಿತು ಅಂತ ನಿನಗೆ ನೆನಪಿದೆಯಾ?",
-   "keywords": "wedding marriage date place"
+   "keywords": "wedding marriage date place",
+   "english": "Do you remember when and where I got married?"
   },
   {
    "id": "father",
@@ -34,7 +37,8 @@
    "hinglish": "Mere Bapa kya karte the, yaad hai?",
    "odia": "ମୋ ବାପା କ'ଣ କରୁଥିଲେ, ମନେ ଅଛି?",
    "kannada": "ನನ್ನ ಅಪ್ಪ ಏನು ಮಾಡುತ್ತಿದ್ದರು, ನೆನಪಿದೆಯಾ?",
-   "keywords": "father job"
+   "keywords": "father job",
+   "english": "Do you remember what my father did?"
   },
   {
    "id": "mother_food",
@@ -45,7 +49,8 @@
    "hinglish": "Maa ke haath ka kya pasand tha mujhe?",
    "odia": "ମାଆ ହାତର କ'ଣ ମୋତେ ଭଲ ଲାଗୁଥିଲା?",
    "kannada": "ಅಮ್ಮನ ಕೈ ಅಡುಗೆಯಲ್ಲಿ ನನಗೆ ಏನು ಇಷ್ಟ ಆಗುತ್ತಿತ್ತು?",
-   "keywords": "mother cooking"
+   "keywords": "mother cooking",
+   "english": "What did I love that my mother used to make?"
   },
   {
    "id": "sister",
@@ -56,7 +61,8 @@
    "hinglish": "Meri behen kahan rehti hai?",
    "odia": "ମୋ ଭଉଣୀ କେଉଁଠି ରହେ?",
    "kannada": "ನನ್ನ ತಂಗಿ ಎಲ್ಲಿ ಇರುತ್ತಾಳೆ?",
-   "keywords": "sister lives"
+   "keywords": "sister lives",
+   "english": "Where does my sister live?"
   },
   {
    "id": "fani",
@@ -67,7 +73,8 @@
    "hinglish": "Fani toofan mein hamare ghar ka kya hua tha?",
    "odia": "ଫନି ବାତ୍ୟାରେ ଆମ ଘରର କ'ଣ ହୋଇଥିଲା?",
    "kannada": "ಫನಿ ಚಂಡಮಾರುತದಲ್ಲಿ ನಮ್ಮ ಮನೆಗೆ ಏನಾಯಿತು?",
-   "keywords": "Cyclone Fani house"
+   "keywords": "Cyclone Fani house",
+   "english": "What happened to our house in Cyclone Fani?"
   },
   {
    "id": "super_cyclone",
@@ -78,7 +85,8 @@
    "hinglish": "Super Cyclone ke time maine kya kiya tha?",
    "odia": "Super Cyclone ବେଳେ ମୁଁ କ'ଣ କରିଥିଲି?",
    "kannada": "Super Cyclone ಸಮಯದಲ್ಲಿ ನಾನು ಏನು ಮಾಡಿದ್ದೆ?",
-   "keywords": "Super Cyclone relief work"
+   "keywords": "Super Cyclone relief work",
+   "english": "What did I do during the Super Cyclone?"
   },
   {
    "id": "monday",
@@ -89,7 +97,8 @@
    "hinglish": "Main Somvaar ko subah kahan jaata hoon?",
    "odia": "ମୁଁ ସୋମବାର ସକାଳେ କେଉଁଠିକୁ ଯାଏ?",
    "kannada": "ನಾನು ಸೋಮವಾರ ಬೆಳಿಗ್ಗೆ ಎಲ್ಲಿಗೆ ಹೋಗುತ್ತೇನೆ?",
-   "keywords": "Monday temple"
+   "keywords": "Monday temple",
+   "english": "Where do I go on Monday mornings?"
   },
   {
    "id": "newspaper",
@@ -100,7 +109,8 @@
    "hinglish": "Subah main kaunsa akhbaar padhta hoon?",
    "odia": "ସକାଳେ ମୁଁ କେଉଁ ଖବରକାଗଜ ପଢ଼େ?",
    "kannada": "ಬೆಳಿಗ್ಗೆ ನಾನು ಯಾವ ಪತ್ರಿಕೆ ಓದುತ್ತೇನೆ?",
-   "keywords": "newspaper morning tea"
+   "keywords": "newspaper morning tea",
+   "english": "Which newspaper do I read in the morning?"
   },
   {
    "id": "garden",
@@ -111,7 +121,8 @@
    "hinglish": "Mere bagiche mein kya kya laga hai?",
    "odia": "ମୋ ବଗିଚାରେ କ'ଣ କ'ଣ ଲଗାହୋଇଛି?",
    "kannada": "ನನ್ನ ತೋಟದಲ್ಲಿ ಏನೇನು ಬೆಳೆದಿದೆ?",
-   "keywords": "garden plants"
+   "keywords": "garden plants",
+   "english": "What all is growing in my garden?"
   },
   {
    "id": "aarav_birthday",
@@ -122,7 +133,8 @@
    "hinglish": "Aarav ka birthday kab hai?",
    "odia": "ଆରବର birthday କେବେ?",
    "kannada": "ಆರವ್‌ನ birthday ಯಾವಾಗ?",
-   "keywords": "Aarav birthday"
+   "keywords": "Aarav birthday",
+   "english": "When is Aarav's birthday?"
   },
   {
    "id": "lipsa_home",
@@ -133,7 +145,8 @@
    "hinglish": "Lipsa aajkal kahan rehti hai?",
    "odia": "ଲିପ୍ସା ଏବେ କେଉଁଠି ରହୁଛି?",
    "kannada": "ಲಿಪ್ಸಾ ಈಗ ಎಲ್ಲಿ ಇರುತ್ತಾಳೆ?",
-   "keywords": "Lipsa lives"
+   "keywords": "Lipsa lives",
+   "english": "Where does Lipsa live these days?"
   },
   {
    "id": "bijay",
@@ -145,7 +158,8 @@
    "hinglish": "Bijay kaun hai, yaad hai?",
    "odia": "ବିଜୟ କିଏ, ମନେ ଅଛି?",
    "kannada": "ಬಿಜಯ್ ಯಾರು, ನೆನಪಿದೆಯಾ?",
-   "keywords": "Bijay friend"
+   "keywords": "Bijay friend",
+   "english": "Do you remember who Bijay is?"
   },
   {
    "id": "food",
@@ -156,7 +170,8 @@
    "hinglish": "Mera favourite khana kya hai?",
    "odia": "ମୋର favourite ଖାଇବା କ'ଣ?",
    "kannada": "ನನ್ನ favourite ಊಟ ಯಾವುದು?",
-   "keywords": "favourite food"
+   "keywords": "favourite food",
+   "english": "What's my favourite food?"
   },
   {
    "id": "football",
@@ -167,7 +182,8 @@
    "hinglish": "Main kaunsi team support karta hoon?",
    "odia": "ମୁଁ କେଉଁ team କୁ support କରେ?",
    "kannada": "ನಾನು ಯಾವ team ಗೆ support ಮಾಡುತ್ತೇನೆ?",
-   "keywords": "football team"
+   "keywords": "football team",
+   "english": "Which team do I support?"
   },
   {
    "id": "award",
@@ -178,7 +194,8 @@
    "hinglish": "Mujhe kaunsa award mila tha?",
    "odia": "ମୋତେ କେଉଁ award ମିଳିଥିଲା?",
    "kannada": "ನನಗೆ ಯಾವ award ಸಿಕ್ಕಿತ್ತು?",
-   "keywords": "award work"
+   "keywords": "award work",
+   "english": "Which award did I get?"
   },
   {
    "id": "rourkela_friend",
@@ -189,7 +206,8 @@
    "hinglish": "Rourkela wala mera purana saathi kaun hai?",
    "odia": "ରାଉରକେଲାର ମୋ ପୁରୁଣା ସାଥୀ କିଏ?",
    "kannada": "ರೂರ್ಕೆಲಾದ ನನ್ನ ಹಳೆಯ ಸಹೋದ್ಯೋಗಿ ಯಾರು?",
-   "keywords": "Rourkela colleague"
+   "keywords": "Rourkela colleague",
+   "english": "Who is my old colleague from Rourkela?"
   },
   {
    "id": "chess",
@@ -200,7 +218,8 @@
    "hinglish": "Shaam ko main kiske saath chess khelta hoon?",
    "odia": "ସନ୍ଧ୍ୟାରେ ମୁଁ କାହା ସହ chess ଖେଳେ?",
    "kannada": "ಸಂಜೆ ನಾನು ಯಾರ ಜೊತೆ chess ಆಡುತ್ತೇನೆ?",
-   "keywords": "chess evening"
+   "keywords": "chess evening",
+   "english": "Who do I play chess with in the evenings?"
   },
   {
    "id": "diabetes",
@@ -211,7 +230,8 @@
    "hinglish": "Doctor ne mujhe kya khaane se mana kiya hai?",
    "odia": "ଡାକ୍ତର ମୋତେ କ'ଣ ଖାଇବାକୁ ମନା କରିଛନ୍ତି?",
    "kannada": "ಡಾಕ್ಟರ್ ನನಗೆ ಏನು ತಿನ್ನಬಾರದು ಅಂತ ಹೇಳಿದ್ದಾರೆ?",
-   "keywords": "doctor diabetes sweets"
+   "keywords": "doctor diabetes sweets",
+   "english": "What has the doctor told me not to eat?"
   },
   {
    "id": "songs",
@@ -222,7 +242,8 @@
    "hinglish": "Mujhe kaunse gaane pasand hain?",
    "odia": "ମୋତେ କେଉଁ ଗୀତ ଭଲ ଲାଗେ?",
    "kannada": "ನನಗೆ ಯಾವ ಹಾಡುಗಳು ಇಷ್ಟ?",
-   "keywords": "favourite songs music"
+   "keywords": "favourite songs music",
+   "english": "What kind of songs do I like?"
   },
   {
    "id": "usa_trip",
@@ -233,7 +254,8 @@
    "hinglish": "America trip mein humein kya achha laga tha?",
    "odia": "ଆମେରିକା trip ରେ ଆମକୁ କ'ଣ ଭଲ ଲାଗିଥିଲା?",
    "kannada": "ಅಮೆರಿಕ trip ನಲ್ಲಿ ನಮಗೆ ಏನು ಇಷ್ಟ ಆಯಿತು?",
-   "keywords": "USA trip visit"
+   "keywords": "USA trip visit",
+   "english": "What did we enjoy on our trip to America?"
   },
   {
    "id": "lipsa_baby",
@@ -244,7 +266,8 @@
    "hinglish": "Lipsa ka baccha kab hone wala hai?",
    "odia": "ଲିପ୍ସାର ପିଲା କେବେ ହେବ?",
    "kannada": "ಲಿಪ್ಸಾಗೆ ಮಗು ಯಾವಾಗ ಆಗುತ್ತದೆ?",
-   "keywords": "Lipsa baby due"
+   "keywords": "Lipsa baby due",
+   "english": "When is Lipsa's baby due?"
   },
   {
    "id": "rohan_study",
@@ -255,7 +278,8 @@
    "hinglish": "Rohan kya padh raha hai?",
    "odia": "ରୋହନ କ'ଣ ପଢ଼ୁଛି?",
    "kannada": "ರೋಹನ್ ಏನು ಓದುತ್ತಿದ್ದಾನೆ?",
-   "keywords": "Rohan studies"
+   "keywords": "Rohan studies",
+   "english": "What is Rohan studying?"
   },
   {
    "id": "mango",
@@ -266,7 +290,8 @@
    "hinglish": "Aangan wala aam ka ped kab lagaya tha?",
    "odia": "ଅଗଣାର ଆମ୍ବ ଗଛ କେବେ ଲଗାଯାଇଥିଲା?",
    "kannada": "ಅಂಗಳದ ಮಾವಿನ ಮರ ಯಾವಾಗ ನೆಟ್ಟಿದ್ದು?",
-   "keywords": "mango tree"
+   "keywords": "mango tree",
+   "english": "When was the mango tree in the courtyard planted?"
   },
   {
    "id": "hari_childhood",
@@ -277,7 +302,8 @@
    "hinglish": "Hari bhaiya ke saath bachpan mein humne kya kiya tha?",
    "odia": "ହରି ଭାଇଙ୍କ ସହ ପିଲାଦିନେ ଆମେ କ'ଣ କରିଥିଲୁ?",
    "kannada": "ಹರಿ ಅಣ್ಣನ ಜೊತೆ ಬಾಲ್ಯದಲ್ಲಿ ನಾವು ಏನು ಮಾಡಿದ್ದೆವು?",
-   "keywords": "brother Hari childhood"
+   "keywords": "brother Hari childhood",
+   "english": "What did Hari and I do together as kids?"
   },
   {
    "id": "sabitri_hobby",
@@ -288,7 +314,8 @@
    "hinglish": "Sabitri ko kya karna achha lagta hai?",
    "odia": "ସାବିତ୍ରୀଙ୍କୁ କ'ଣ କରିବାକୁ ଭଲ ଲାଗେ?",
    "kannada": "ಸಬಿತ್ರಿಗೆ ಏನು ಮಾಡುವುದು ಇಷ್ಟ?",
-   "keywords": "Sabitri hobbies"
+   "keywords": "Sabitri hobbies",
+   "english": "What does Sabitri like doing?"
   },
   {
    "id": "career",
@@ -299,7 +326,8 @@
    "hinglish": "Maine kitne saal naukri ki thi?",
    "odia": "ମୁଁ କେତେ ବର୍ଷ ଚାକିରି କରିଥିଲି?",
    "kannada": "ನಾನು ಎಷ್ಟು ವರ್ಷ ಕೆಲಸ ಮಾಡಿದ್ದೆ?",
-   "keywords": "career years retired"
+   "keywords": "career years retired",
+   "english": "How many years did I work?"
   },
   {
    "id": "aja",
@@ -310,7 +338,8 @@
    "hinglish": "Aarav mujhe kya bulata hai?",
    "odia": "ଆରବ ମୋତେ କ'ଣ ବୋଲି ଡାକେ?",
    "kannada": "ಆರವ್ ನನ್ನನ್ನು ಏನು ಅಂತ ಕರೆಯುತ್ತಾನೆ?",
-   "keywords": "Aarav calls him"
+   "keywords": "Aarav calls him",
+   "english": "What does Aarav call me?"
   },
   {
    "id": "college",
@@ -321,7 +350,8 @@
    "hinglish": "Maine kahan se padhai ki thi?",
    "odia": "ମୁଁ କେଉଁଠୁ ପାଠ ପଢ଼ିଥିଲି?",
    "kannada": "ನಾನು ಎಲ್ಲಿ ಓದಿದ್ದು?",
-   "keywords": "education college"
+   "keywords": "education college",
+   "english": "Where did I study?"
   },
   {
    "id": "mention_chess",
@@ -332,7 +362,8 @@
    "hinglish": "Aaj Prafulla se phir chess mein jeet gaya!",
    "odia": "ଆଜି ପ୍ରଫୁଲ୍ଲଙ୍କ ସହ ପୁଣି chess ରେ ଜିତିଲି!",
    "kannada": "ಇವತ್ತು ಪ್ರಫುಲ್ಲ ಜೊತೆ ಮತ್ತೆ chess ನಲ್ಲಿ ಗೆದ್ದೆ!",
-   "keywords": "won chess Prafulla"
+   "keywords": "won chess Prafulla",
+   "english": "I beat Prafulla at chess again today!"
   },
   {
    "id": "mention_aja",
@@ -343,7 +374,8 @@
    "hinglish": "Kal Sambit ka video call aaya tha, Aarav ne mujhe Aja bola.",
    "odia": "କାଲି ସମ୍ବିତର video call ଆସିଥିଲା, ଆରବ ମୋତେ ଅଜା ବୋଲି ଡାକିଲା।",
    "kannada": "ನಿನ್ನೆ ಸಂಬಿತ್‌ನ video call ಬಂದಿತ್ತು, ಆರವ್ ನನ್ನನ್ನು ಅಜಾ ಅಂತ ಕರೆದ.",
-   "keywords": "Aarav video call Aja"
+   "keywords": "Aarav video call Aja",
+   "english": "Sambit video called yesterday and Aarav called me Aja."
   },
   {
    "id": "mention_songs",
@@ -354,7 +386,8 @@
    "hinglish": "Aaj radio par Akshaya Mohanty ka gaana baja.",
    "odia": "ଆଜି ରେଡିଓରେ ଅକ୍ଷୟ ମହାନ୍ତିଙ୍କ ଗୀତ ବାଜିଲା।",
    "kannada": "ಇವತ್ತು ರೇಡಿಯೋದಲ್ಲಿ ಅಕ್ಷಯ ಮೊಹಂತಿ ಅವರ ಹಾಡು ಬಂತು.",
-   "keywords": "radio Akshaya Mohanty song"
+   "keywords": "radio Akshaya Mohanty song",
+   "english": "An Akshaya Mohanty song came on the radio today."
   }
  ],
  "negatives": [
@@ -362,37 +395,43 @@
    "hindi": "आज मौसम बहुत अच्छा है।",
    "hinglish": "Aaj mausam bahut achha hai.",
    "odia": "ଆଜି ପାଣିପାଗ ବହୁତ ଭଲ ଅଛି।",
-   "kannada": "ಇವತ್ತು ಹವಾಮಾನ ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ."
+   "kannada": "ಇವತ್ತು ಹವಾಮಾನ ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ.",
+   "english": "The weather is really nice today."
   },
   {
    "hindi": "हाँ, ठीक है।",
    "hinglish": "Haan, theek hai.",
    "odia": "ହଁ, ଠିକ୍ ଅଛି।",
-   "kannada": "ಹೌದು, ಸರಿ."
+   "kannada": "ಹೌದು, ಸರಿ.",
+   "english": "Yes, okay."
   },
   {
    "hindi": "तुम कैसी हो?",
    "hinglish": "Tum kaisi ho?",
    "odia": "ତୁମେ କେମିତି ଅଛ?",
-   "kannada": "ನೀನು ಹೇಗಿದ್ದೀಯ?"
+   "kannada": "ನೀನು ಹೇಗಿದ್ದೀಯ?",
+   "english": "How are you?"
   },
   {
    "hindi": "आज TV पर news देखी।",
    "hinglish": "Aaj TV par news dekhi.",
    "odia": "ଆଜି TV ରେ news ଦେଖିଲି।",
-   "kannada": "ಇವತ್ತು TV ಯಲ್ಲಿ news ನೋಡಿದೆ."
+   "kannada": "ಇವತ್ತು TV ಯಲ್ಲಿ news ನೋಡಿದೆ.",
+   "english": "I watched the news on TV today."
   },
   {
    "hindi": "चलो, अब मैं सोता हूँ।",
    "hinglish": "Chalo, ab main sota hoon.",
    "odia": "ଚାଲ, ଏବେ ମୁଁ ଶୋଇବି।",
-   "kannada": "ಸರಿ, ಈಗ ನಾನು ಮಲಗುತ್ತೇನೆ."
+   "kannada": "ಸರಿ, ಈಗ ನಾನು ಮಲಗುತ್ತೇನೆ.",
+   "english": "Okay, I'm going to sleep now."
   },
   {
    "hindi": "हम्म, और बताओ।",
    "hinglish": "Hmm, aur batao.",
    "odia": "ହଁ, ଆଉ କୁହ।",
-   "kannada": "ಹ್ಮ್, ಇನ್ನೇನು ಹೇಳು."
+   "kannada": "ಹ್ಮ್, ಇನ್ನೇನು ಹೇಳು.",
+   "english": "Hmm, tell me more."
   }
  ]
 }

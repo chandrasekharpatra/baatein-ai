@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import time as time_module
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
@@ -128,12 +130,24 @@ class MemoryDeps:
     settings: MemorySettings
 
 
+def _consume_error(task: "asyncio.Task[list[ScoredFact]]") -> None:
+    """Mark a search's error as seen; `recall` logs the ones anyone waits for."""
+    if not task.cancelled():
+        task.exception()
+
+
 class MemoryService:
     """Opens per-call memory. One instance per process."""
 
-    def __init__(self, deps: MemoryDeps, embedder: Embedder) -> None:
+    def __init__(
+        self,
+        deps: MemoryDeps,
+        embedder: Embedder,
+        cut_off: Callable[[str | None], float] | None = None,
+    ) -> None:
         self._deps = deps
         self._embedder = embedder
+        self._cut_off = cut_off
 
     async def warm_up(self) -> None:
         """Load the embedding model so the first per-turn recall fits its timeout."""
@@ -149,7 +163,16 @@ class MemoryService:
             id=new_id(), user_id=user.id, started_at=self._deps.clock.now(), room_name=room_name
         )
         await self._deps.sessions.add(session)
-        return CallMemory(self._deps, session, language, zone(user.timezone), user.preferences)
+        cut_off = self._cut_off
+        return CallMemory(
+            self._deps,
+            session,
+            language,
+            zone(user.timezone),
+            user.preferences,
+            turn_cut_off=cut_off(language or user.language) if cut_off else None,
+            tool_cut_off=cut_off(None) if cut_off else None,
+        )
 
 
 class CallMemory:
@@ -163,8 +186,14 @@ class CallMemory:
         language: str | None = None,
         timezone: ZoneInfo | None = None,
         preferences: Preferences | None = None,
+        turn_cut_off: float | None = None,
+        tool_cut_off: float | None = None,
     ) -> None:
         self._deps = deps
+        self._turn_cut_off = turn_cut_off
+        """Similarity cut-off for the user's own words (it depends on their language)."""
+        self._tool_cut_off = tool_cut_off
+        """Similarity cut-off for the recall tool's English keywords."""
         self.preferences = preferences or Preferences()
         self.session = session
         self._language = language
@@ -287,23 +316,40 @@ class CallMemory:
         if self._pending is not None:
             await self._pending
 
-    async def recall(self, query: str) -> list[ScoredFact]:
-        """Facts relevant to `query`, or nothing if the search is slow or fails."""
-        settings = self._deps.settings
-        try:
-            return await asyncio.wait_for(
-                self._deps.store.search(self.user_id, query, settings.recall_limit),
-                settings.recall_timeout_seconds,
+    def start_recall(self, query: str) -> "asyncio.Task[list[ScoredFact]]":
+        """Start searching for memories that match the user's words. With a hosted embedder a
+        search takes about 400 ms, so the agent starts it on the final transcript, before the
+        turn ends, and `recall` waits only for what's left."""
+        task = asyncio.ensure_future(
+            self._deps.store.search(
+                self.user_id, query, self._deps.settings.recall_limit, self._turn_cut_off
             )
+        )
+        task.add_done_callback(_consume_error)
+        return task
+
+    async def recall(self, query: "str | asyncio.Task[list[ScoredFact]]") -> list[ScoredFact]:
+        """Facts relevant to the user's words, or nothing if the search is slow or fails. Pass
+        a task from `start_recall` to wait for a search already under way."""
+        task = self.start_recall(query) if isinstance(query, str) else query
+        timeout = self._deps.settings.recall_timeout_seconds
+        started = time_module.perf_counter()
+        try:
+            found = await asyncio.wait_for(task, timeout)
+            waited = (time_module.perf_counter() - started) * 1000
+            logger.info("memory recall: the reply waited %.0f ms", waited)
+            return found
         except TimeoutError:
-            logger.warning("memory recall timed out after %.2fs", settings.recall_timeout_seconds)
+            logger.warning("memory recall timed out after %.2fs", timeout)
         except Exception:
             logger.exception("memory recall failed")
         return []
 
     async def search(self, query: str) -> list[ScoredFact]:
         """Saved memories matching `query`, for an explicit lookup. Never raw transcripts."""
-        return await self._deps.store.search(self.user_id, query, self._deps.settings.recall_limit)
+        return await self._deps.store.search(
+            self.user_id, query, self._deps.settings.recall_limit, self._tool_cut_off
+        )
 
     def pause_saving(self) -> None:
         """The user asked not to save anything from this call ("save mat karna")."""

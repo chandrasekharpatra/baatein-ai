@@ -24,7 +24,7 @@ from baatein.domain.models import (
     ThreadStatus,
     Verbosity,
 )
-from baatein.memory.service import FORGOTTEN_TURN, CallMemory, ForgetOutcome, zone
+from baatein.memory.service import FORGOTTEN_TURN, CallMemory, ForgetOutcome, MemoryService, zone
 from tests.factories import (
     at,
     make_boundary,
@@ -875,3 +875,28 @@ async def test_reminder_people_are_kept_until_nothing_refers_to_them(world: Worl
     await memory.forget(fact.id, user_turn=2)
 
     assert [p.name for p in world.state.people.values()] == ["Ravi"]
+
+
+async def test_a_call_searches_with_its_languages_cut_off() -> None:
+    world = build_world()
+    seen: list[float | None] = []
+    search = world.store.search
+
+    async def recording(user_id: str, query: str, limit: int, min_similarity: float | None = None):  # type: ignore[no-untyped-def]
+        seen.append(min_similarity)
+        return await search(user_id, query, limit, min_similarity)
+
+    world.store.search = recording  # type: ignore[method-assign]
+    cut_offs = {"english": 0.2, None: 0.12}
+    service = MemoryService(
+        world.deps, world.embedder, lambda language: cut_offs.get(language, 0.3)
+    )
+    english = replace(world.user, language="english")
+
+    memory = await service.open_call(english)
+    await memory.recall("my interview")  # the user's own words
+    await memory.search("interview")  # the recall tool's keywords
+    hinglish_call = await service.open_call(world.user, language="hinglish")
+    await hinglish_call.recall("mera interview")
+
+    assert seen == [0.2, 0.12, 0.3]

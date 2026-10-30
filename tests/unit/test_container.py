@@ -10,7 +10,7 @@ from baatein.config import Settings
 from baatein.container import build_root
 from baatein.domain.errors import ConfigurationError
 from baatein.memory.analyzer import ClaudeAnalyzer
-from baatein.memory.embeddings.fastembed import FastEmbedEmbedder
+from baatein.memory.embeddings.pinecone import PineconeEmbedder
 from baatein.memory.service import MemoryService
 from baatein.ports.analyzer import CallAnalyzer
 from baatein.ports.auth import CallTokenIssuer, PasswordHasher
@@ -103,8 +103,8 @@ def test_memory_store_is_sqlite_store_with_configured_embedder() -> None:
     store = injector.get(MemoryStore)
 
     assert store is injector.get(SqliteMemoryStore)
-    assert isinstance(injector.get(Embedder), FastEmbedEmbedder)
-    assert store.vec_table.endswith("_384")  # type: ignore[attr-defined]
+    assert isinstance(injector.get(Embedder), PineconeEmbedder)
+    assert store.vec_table.endswith("_2048")  # type: ignore[attr-defined]
 
 
 def test_memory_service_is_a_singleton() -> None:

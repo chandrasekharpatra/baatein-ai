@@ -1,4 +1,6 @@
-# Retrieval benchmark: finding the right memory in Hindi, Hinglish, Odia and Kannada
+# Retrieval benchmark: finding the right memory in English, Hindi, Hinglish, Odia and Kannada
+
+> **Decision (2026-10-30):** Baatein uses Pinecone `llama-text-embed-v2` at 2048 dimensions, focusing on English, Hindi and Hinglish for now. It is the strongest model here for those three (English 29/31 first, AUC 0.98; Hindi 28/31, 0.89; Hinglish 24/31, 0.80). Its round trip (about 460 ms) is hidden by starting per-turn recall on the final transcript, and similarity cut-offs are set per language from these results. Odia and Kannada stay in the code but off the signup form until their retrieval is better (local `multilingual-e5-large` is the strongest for them). Details in `docs/PLAN.md` §3 Embeddings.
 
 Baatein looks up saved memories in two ways:
 - **Per-turn recall**: on every user turn it searches with the user's own words, as Sarvam transcribes them (`Assistant.on_user_turn_completed`, 0.3 s budget). Results are added as a hidden note.
@@ -37,7 +39,9 @@ The Odia and Kannada lines were written by Claude and should be reviewed by nati
 - **Questions vs small talk:** per-turn recall must also stay quiet on small talk, or every "haan, theek hai" injects unrelated memories. AUC is how often a right answer scores above small talk's best match (1.0 = always, 0.5 = chance). In brackets: at the cut-off that best separates them, the share of questions still answered, and the share of small talk let through.
 - **Cost:** query time on this Mac's CPU (p50 / p95), load time (including the first download), peak memory of the process.
 
-This measures the model alone (dense similarity). Production adds keyword search (FTS5) and a similarity cut-off (`BAATEIN_MEMORY__MIN_SIMILARITY`, 0.3, tuned for MiniLM).
+This measures the model alone (dense similarity). Production adds keyword search (FTS5) and a similarity cut-off per model and language (`config.py:MEASURED_CUT_OFFS`, taken from these results).
+
+An `english` form (full English sentences, for English-speaking users) was added on 2026-10-30, after the first runs; the tables that show it come from runs after that.
 
 ## Results (2026-10-30, Apple Silicon Mac, CPU)
 

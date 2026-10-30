@@ -31,7 +31,7 @@ Built with [LiveKit Agents](https://github.com/livekit/agents), Claude, Sarvam a
 | Text-to-speech | Cartesia `sonic-3` for Hinglish, English and Kannada; Sarvam `bulbul:v3` for Odia (Cartesia has no Odia) |
 | Storage | SQLite (WAL) via `aiosqlite`, numbered SQL migrations |
 | Memory search | `sqlite-vec` vectors + FTS5 keyword search, fused with reciprocal rank fusion |
-| Embeddings | FastEmbed `paraphrase-multilingual-MiniLM-L12-v2` (local, 384-d) |
+| Embeddings | Pinecone hosted `llama-text-embed-v2` (2048-d); FastEmbed local models also work (see [docs/RETRIEVAL_BENCHMARK.md](docs/RETRIEVAL_BENCHMARK.md)) |
 | API and auth | FastAPI, Argon2 password hashing, JWT access tokens |
 | Dependency injection | [`injector`](https://github.com/python-injector/injector) |
 | Tooling | `uv`, ruff, mypy (strict), pytest with 100% branch coverage |
@@ -92,9 +92,9 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_LLM__TEMPERATURE` | unset | Only sent when set; Claude 5.5 models reject it |
 | `BAATEIN_VOICE__DEFAULT_LANGUAGE` | `hinglish` | Used when a call has no known user (e.g. `console`) |
 | `BAATEIN_DATABASE__URL` | `sqlite:///data/baatein.db` | Database file (relative to the working directory) |
-| `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` | `fastembed` / MiniLM / `384` | Fact embeddings; run `baatein reembed` after changing |
-| `BAATEIN_EMBEDDING__CACHE_DIR` | `data/models` | Where the embedding model is downloaded |
-| `BAATEIN_MEMORY__MIN_SIMILARITY` | `0.3` | Cosine threshold for semantic fact matches |
+| `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` | `pinecone` / `llama-text-embed-v2` / `2048` | Fact embeddings (needs `PINECONE_API_KEY`); run `baatein reembed` after changing |
+| `BAATEIN_EMBEDDING__MIN_SIMILARITY` | measured per model | Similarity cut-offs by language, e.g. `{"english": 0.2, "default": 0.12}`; by default the values measured for the model in `config.py:MEASURED_CUT_OFFS` |
+| `BAATEIN_EMBEDDING__CACHE_DIR` | `data/models` | Where FastEmbed downloads a local model |
 | `BAATEIN_MEMORY__CONTEXT_SUMMARIES` / `__CONTEXT_FOLLOWUPS` / `__CONTEXT_FACTS` | `3` / `5` / `10` | How much memory goes into the agent's instructions at call start |
 | `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall_memory` tool |
 | `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0.3` | Per-turn recall is skipped if it takes longer |

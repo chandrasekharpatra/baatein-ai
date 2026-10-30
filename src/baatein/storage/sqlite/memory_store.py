@@ -114,7 +114,10 @@ class SqliteMemoryStore:
             rows = await cursor.fetchall()
         return [_fact(row) for row in rows]
 
-    async def search(self, user_id: str, query: str, limit: int) -> list[ScoredFact]:
+    async def search(
+        self, user_id: str, query: str, limit: int, min_similarity: float | None = None
+    ) -> list[ScoredFact]:
+        cut_off = self._min_similarity if min_similarity is None else min_similarity
         match = fts_query(query)
         if match is None:
             return []
@@ -129,9 +132,7 @@ class SqliteMemoryStore:
                 (serialize_float32(vector), candidates, user_id),
             ) as cursor:
                 semantic = [
-                    pk
-                    for pk, distance in await cursor.fetchall()
-                    if 1.0 - distance >= self._min_similarity
+                    pk for pk, distance in await cursor.fetchall() if 1.0 - distance >= cut_off
                 ]
             async with conn.execute(
                 "SELECT facts.pk FROM facts_fts JOIN facts ON facts.pk = facts_fts.rowid"

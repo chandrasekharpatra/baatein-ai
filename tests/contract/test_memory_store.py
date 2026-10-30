@@ -292,3 +292,18 @@ async def test_saved_in_lists_current_facts_from_a_call(memory: Memory) -> None:
     saved = await memory.store.saved_in(call.id)
 
     assert [f.id for f in saved] == [first.id, second.id]
+
+
+async def test_each_search_can_set_its_own_cut_off(memory: Memory) -> None:
+    # The cut-off depends on the language of the words (docs/RETRIEVAL_BENCHMARK.md).
+    user_id = await add_user(memory)
+    fact = make_fact(user_id, "It is in the garden")
+    await memory.store.add(fact)
+    # Only stopwords overlap: a meaning match without any keyword match (similarity 0.8).
+    query = "is it in the zebra"
+
+    loose = await memory.store.search(user_id, query, 5, min_similarity=0.5)
+    strict = await memory.store.search(user_id, query, 5, min_similarity=0.9)
+
+    assert [r.fact.id for r in loose] == [fact.id]
+    assert strict == []

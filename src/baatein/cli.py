@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import uvicorn
+from dotenv import find_dotenv, load_dotenv
 
 from baatein.api.app import create_app
 from baatein.config import Settings
@@ -65,7 +66,14 @@ async def load_seed(settings: Settings, seed: SeedFile, replace: bool) -> str:
     return f"seeded {user.email} ({user.id}): {counts}"
 
 
+def load_env() -> None:
+    """Provider keys (Pinecone, Anthropic) are read from the environment by their SDKs, so
+    `.env` goes into it, as the agent worker does; variables already set win."""
+    load_dotenv(find_dotenv(usecwd=True))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="baatein")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate", help="apply database migrations")

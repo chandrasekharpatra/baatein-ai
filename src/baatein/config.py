@@ -28,21 +28,44 @@ class VoiceSettings(BaseModel):
     """STT failures in a row (each about 10 s) before Baatein apologises and ends the call."""
 
 
+MEASURED_CUT_OFFS: dict[str, dict[str | None, float]] = {
+    # From docs/RETRIEVAL_BENCHMARK.md (2026-10-30). Keyed by the language of the user's words;
+    # None is for anything else, including the recall tool's English keywords. A Hinglish
+    # user's words reach recall in Devanagari (Sarvam codemix), so "hinglish" uses Hindi's.
+    "llama-text-embed-v2": {None: 0.12, "english": 0.20, "hinglish": 0.14},
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": {None: 0.3},
+}
+
+
 class EmbeddingSettings(BaseModel):
-    provider: str = "fastembed"
-    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    dimensions: int = 384
+    provider: str = "pinecone"
+    model: str = "llama-text-embed-v2"
+    dimensions: int = 2048
     cache_dir: str | None = "data/models"
+    """Where FastEmbed downloads local models."""
+    min_similarity: dict[str, float] = Field(default_factory=dict)
+    """Cut-offs to use instead of the measured ones, by language ("default" for the rest)."""
 
     def spec(self) -> ProviderSpec:
-        return ProviderSpec(
-            self.provider,
-            {"model_id": self.model, "dimensions": self.dimensions, "cache_dir": self.cache_dir},
+        options: dict[str, object] = {"model_id": self.model, "dimensions": self.dimensions}
+        if self.provider == "fastembed":
+            options["cache_dir"] = self.cache_dir
+        return ProviderSpec(self.provider, options)
+
+    def cut_off(self, language: str | None = None) -> float:
+        """The lowest similarity that counts as a match for words in `language`. Similarity
+        scales differ by model (llama's answers score 0.14-0.30, MiniLM's 0.3+) and by
+        language, so the cut-off is measured per model, never one number for all."""
+        explicit = self.min_similarity.get(
+            language or "default", self.min_similarity.get("default")
         )
+        if explicit is not None:
+            return explicit
+        measured = MEASURED_CUT_OFFS.get(self.model, {})
+        return measured.get(language, measured.get(None, 0.3))
 
 
 class MemorySettings(BaseModel):
-    min_similarity: float = 0.3
     context_facts: int = 10
     context_threads: int = 10
     context_declined: int = 10

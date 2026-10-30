@@ -56,7 +56,10 @@ class InMemoryMemoryStore:
         ]
         return sorted(facts, key=lambda f: f.created_at)
 
-    async def search(self, user_id: str, query: str, limit: int) -> list[ScoredFact]:
+    async def search(
+        self, user_id: str, query: str, limit: int, min_similarity: float | None = None
+    ) -> list[ScoredFact]:
+        cut_off = self._min_similarity if min_similarity is None else min_similarity
         terms = set(search_terms(query))
         if not terms:
             return []
@@ -65,7 +68,7 @@ class InMemoryMemoryStore:
 
         similarity = {f.id: _cosine(query_vector, self._vectors[f.id]) for f in facts}
         semantic = sorted(
-            (f.id for f in facts if similarity[f.id] >= self._min_similarity),
+            (f.id for f in facts if similarity[f.id] >= cut_off),
             key=lambda fid: -similarity[fid],
         )
         overlap = {f.id: len(terms & set(words(f.text))) for f in facts}

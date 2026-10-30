@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sqlite3
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from fastapi import FastAPI
 from injector import Injector, Module, provider, singleton
 
 from baatein import cli
+from baatein.cli import load_env as _real_load_env
 from baatein.cli import main
 from baatein.config import Settings
 from baatein.container import build_root
@@ -18,6 +20,24 @@ from baatein.storage.sqlite.migrate import bundled_migrations
 from tests.factories import at, make_session, make_turn, make_user
 from tests.fakes.analyzer import FakeAnalyzer
 from tests.fakes.embedder import FakeEmbedder
+
+
+@pytest.fixture(autouse=True)
+def no_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's real .env (keys, settings) out of these tests."""
+    monkeypatch.setattr(cli, "load_env", lambda: None)
+
+
+def test_main_loads_env_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".env").write_text("BAATEIN_TEST_ONLY_KEY=from-dotenv\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("BAATEIN_TEST_ONLY_KEY", raising=False)
+
+    _real_load_env()  # the autouse fixture only replaced cli.load_env
+
+    assert os.environ.pop("BAATEIN_TEST_ONLY_KEY") == "from-dotenv"
 
 
 def test_migrate_creates_database_at_configured_path(

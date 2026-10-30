@@ -1,7 +1,10 @@
+import asyncio
+
 from livekit.agents import Agent, llm
+from livekit.agents.voice import UserInputTranscribedEvent
 
 from baatein.agent.tools import memory_tools
-from baatein.domain.models import Preferences
+from baatein.domain.models import Preferences, ScoredFact
 from baatein.memory.context_builder import render_recall
 from baatein.memory.service import CallMemory
 from baatein.voice.languages import LanguageProfile
@@ -100,6 +103,10 @@ def build_instructions(
     return instructions
 
 
+def _same_words(a: str, b: str) -> bool:
+    return a.split() == b.split()
+
+
 class Assistant(Agent):
     def __init__(
         self,
@@ -120,6 +127,8 @@ class Assistant(Agent):
         self._memory = memory
         self._recalled: set[str] = set()
         self._check_in_noted = False
+        self._heard = ""
+        self._early: asyncio.Task[list[ScoredFact]] | None = None
 
     def _compose(self, preferences: Preferences | None) -> str:
         return build_instructions(
@@ -134,15 +143,41 @@ class Assistant(Agent):
         if self._profile.pace_option and update is not None:
             update(**{self._profile.pace_option: effective_pace(self._persona, preferences)})
 
+    async def on_enter(self) -> None:
+        if self._memory is not None:
+            self.session.on("user_input_transcribed", self.heard)
+
+    def heard(self, event: UserInputTranscribedEvent) -> None:
+        """Start the per-turn search on each final transcript. LiveKit waits a moment before
+        it decides the turn is over, and that wait hides most of a hosted embedder's round
+        trip (about 400 ms); the reply then waits only for what's left."""
+        words = event.transcript.strip()
+        if self._memory is None or self._memory.private or not event.is_final or not words:
+            return
+        self._heard = f"{self._heard} {words}".strip()
+        if self._early is not None:
+            self._early.cancel()
+        self._early = self._memory.start_recall(self._heard)
+
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
         if self._memory is None:
             return
+        early, heard = self._early, self._heard
+        self._early, self._heard = None, ""
         await self._note_check_in_asked(turn_ctx)
-        if self._memory.private or not (text := new_message.text_content):
+        text = new_message.text_content
+        if self._memory.private or not text:
+            if early is not None:
+                early.cancel()
             return
-        found = [s for s in await self._memory.recall(text) if s.fact.id not in self._recalled]
+        search: str | asyncio.Task[list[ScoredFact]] = text
+        if early is not None and _same_words(heard, text):
+            search = early
+        elif early is not None:
+            early.cancel()
+        found = [s for s in await self._memory.recall(search) if s.fact.id not in self._recalled]
         recalled = render_recall(found)
         if recalled:
             self._recalled.update(s.fact.id for s in found)

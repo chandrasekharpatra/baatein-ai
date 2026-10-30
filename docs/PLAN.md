@@ -117,6 +117,10 @@ class Embedder(Protocol):
 
 - `FastEmbedEmbedder` loads the model lazily (first call, in a worker thread), routes `kind` to FastEmbed's `query_embed`/`passage_embed`, and validates dimensions.
 - `EmbedderRegistry` selects the adapter from `BAATEIN_EMBEDDING__PROVIDER` / `__MODEL` / `__DIMENSIONS` / `__CACHE_DIR`.
+- **Default since 2026-10-30: Pinecone `llama-text-embed-v2` at 2048 dimensions** (`PineconeEmbedder`, official `pinecone` SDK, `PINECONE_API_KEY`). Chosen from `docs/RETRIEVAL_BENCHMARK.md` for English, Hindi and Hinglish (the languages in focus); Odia and Kannada are hidden from signup until their retrieval is better. Through the real hybrid search on Ram's account, the right memory came back for 30/31 English, 29/31 Hindi (Devanagari, as Sarvam returns it) and 26/31 typed-Hinglish questions.
+- **Latency:** a hosted search takes about 460 ms from India, more than the per-turn budget. `Assistant.heard` starts the search on each final transcript (`CallMemory.start_recall`), before LiveKit decides the turn has ended, and the turn waits only for what's left (`recall_timeout_seconds`). Each wait is logged ("the reply waited N ms") so the timeout can be tuned from live calls.
+- **Cut-offs are per model and language** (`EmbeddingSettings.cut_off`, `config.py:MEASURED_CUT_OFFS`): llama's answers score 0.14 to 0.30, MiniLM's 0.3 and up, and each language separates from small talk at its own value. A call uses its user's language's cut-off for their words and the default one for the `recall` tool's English keywords. Override with `BAATEIN_EMBEDDING__MIN_SIMILARITY`.
+- The CLI loads `.env` into the environment (like the agent worker), so `reembed`, `seed`, `finalize` and `serve` see provider keys.
 - Alternatives evaluated: Ollama `bge-m3` (shared local server, better quality), Gemini / Voyage / OpenAI (hosted), `multilingual-e5-large` (too heavy per process).
 
 ## 4. Architecture
@@ -304,7 +308,7 @@ Tests don't have to be written before the code, but every change ships with test
 
 ## 12. Open items (discuss later)
 
-- **Pinecone `llama-text-embed-v2`** — confirm `pc.inference.embed` parameters (`input_type`, `dimension`, `truncate`) and latency from India, then add a `PineconeEmbedder` adapter. With the `Embedder` port and per-model vector tables, switching is config + `baatein reembed`.
+- ~~Pinecone `llama-text-embed-v2`~~: done 2026-10-30 (`memory/embeddings/pinecone.py`), now the default; see §3 Embeddings.
 
 ## 13. Phase 5 plan: the consent-based memory layer
 
