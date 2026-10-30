@@ -354,9 +354,7 @@ class CallMemory:
         started = time_module.perf_counter()
         done, _ = await asyncio.wait({task}, timeout=timeout)
         if not done:
-            logger.info(
-                "memory recall: still searching after %.0f ms; replying without it", timeout * 1000
-            )
+            logger.info("memory recall: still searching; replying without it")
             return None
         if task.cancelled():
             return []

@@ -72,9 +72,10 @@ class MemorySettings(BaseModel):
     check_in_gap_days: int = 3
     check_in_max_offers: int = 3
     recall_limit: int = 5
-    recall_timeout_seconds: float = 0.1
-    """How long a reply waits for the per-turn search. A local embedder finishes well inside
-    it; a hosted one (about 450 ms) usually doesn't, and its memories join the next turn."""
+    recall_timeout_seconds: float = 0.0
+    """How long a reply waits for the per-turn search; one still running joins the next turn.
+    0 suits the default hosted embedder (about 450 ms), which would miss any short wait. With
+    a local FastEmbed model (5-35 ms) set 0.1, so its memories reach this reply."""
     thinking_after_seconds: float = 0.3
     """If the recall tool's search takes longer than this, Baatein says "Hmm…" meanwhile."""
 

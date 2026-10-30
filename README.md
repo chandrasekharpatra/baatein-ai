@@ -97,7 +97,7 @@ Settings are read from the environment and `.env`. App settings use the `BAATEIN
 | `BAATEIN_EMBEDDING__CACHE_DIR` | `data/models` | Where FastEmbed downloads a local model |
 | `BAATEIN_MEMORY__CONTEXT_SUMMARIES` / `__CONTEXT_FOLLOWUPS` / `__CONTEXT_FACTS` | `3` / `5` / `10` | How much memory goes into the agent's instructions at call start |
 | `BAATEIN_MEMORY__RECALL_LIMIT` | `5` | Facts returned by per-turn recall and the `recall_memory` tool |
-| `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0.1` | How long a reply waits for per-turn recall; a slower search's memories join the next turn |
+| `BAATEIN_MEMORY__RECALL_TIMEOUT_SECONDS` | `0` | How long a reply waits for per-turn recall; a slower search's memories join the next turn. Set `0.1` with a local FastEmbed model |
 | `BAATEIN_MEMORY__THINKING_AFTER_SECONDS` | `0.3` | If the `recall` tool takes longer, Baatein says "Hmm…" meanwhile |
 | `BAATEIN_FINALIZE__MODEL` / `__EFFORT` | `claude-haiku-5-5` / `low` | The model that writes each call's summary |
 | `BAATEIN_FINALIZE__INTERVAL_SECONDS` | `10` | How often `baatein serve` summarises finished calls; `0` turns it off |

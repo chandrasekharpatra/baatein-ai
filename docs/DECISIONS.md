@@ -107,7 +107,7 @@ The decisions taken so far, the options considered, and why. Details live in the
 | Get closer to Pinecone's region | Worth doing, but it's a deploy decision |
 
 **Chosen:**
-1. **The reply waits at most 0.1 s** (`recall_timeout_seconds`). That's enough for a local embedder. A slower search keeps running, and its memories are added to the call history for the next turn, once each (`Assistant._arrived_late`). Nothing is added in privacy mode.
+1. **The reply doesn't wait for the per-turn search** (`recall_timeout_seconds` = 0). Pinecone never answers within a short wait, so any wait is silence for nothing; a search that has already finished is still used. With a local embedder (5–35 ms), set it to 0.1 s. A slower search keeps running, and its memories are added to the call history for the next turn, once each (`Assistant._arrived_late`). Nothing is added in privacy mode.
 2. **Memories needed right away come from Claude's `recall` tool.** If that search takes over 0.3 s (`thinking_after_seconds`), Baatein says the language profile's `thinking` line ("Hmm…", about 0.7 s of audio) through `session.say(..., add_to_chat_ctx=False)`. It stays out of the history, transcript and summary, and the caller can talk over it.
 
 **Why:**
@@ -119,7 +119,7 @@ The decisions taken so far, the options considered, and why. Details live in the
 **Watch:** these logs, from live calls:
 - "the search took N ms"
 - "the reply waited N ms"
-- "still searching after N ms"
+- "still searching; replying without it"
 
 ### D15. The call ends at hang-up
 - **Problem:** after a hang-up the LiveKit job lingered until the server closed the empty room (about 20 s). Every call's end reason read "parent process shutdown", and summaries waited.
