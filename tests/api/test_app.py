@@ -69,6 +69,8 @@ def test_index_serves_web_client(client: TestClient) -> None:
     assert response.status_code == 200
     assert "<title>Baatein</title>" in response.text
     assert "livekit-client@2.22.3" in response.text
+    assert 'id="transcript"' not in response.text  # what was said isn't shown on the page
+    assert "/me/forget" in response.text
 
 
 def test_signup_returns_user_and_working_token(client: TestClient) -> None:

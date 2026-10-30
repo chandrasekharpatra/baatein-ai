@@ -2,111 +2,269 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f1ea" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#14110f" media="(prefers-color-scheme: dark)">
   <title>Baatein</title>
   <style>
     :root {
-      --bg: #faf7f2; --surface: #ffffff; --text: #1f1d1a; --muted: #6b665e;
-      --accent: #c2410c; --accent-text: #ffffff; --border: #e7e1d8; --error: #b91c1c;
-      --bubble-user: #fde7d6; --bubble-agent: #f1ede6;
+      --bg: #f7f1ea; --bg-glow: #ffd9bd; --surface: rgba(255, 255, 255, 0.72);
+      --surface-solid: #ffffff; --text: #221c17; --muted: #7a7067; --line: rgba(34, 28, 23, 0.1);
+      --accent: #e0611f; --accent-soft: #ffb37c; --accent-text: #ffffff;
+      --go: #1f9d63; --stop: #d93b3b; --error: #c0362c;
+      --shadow: 0 18px 50px -18px rgba(120, 60, 20, 0.35);
+      --radius: 22px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #171512; --surface: #221f1b; --text: #f3efe8; --muted: #a39d93;
-        --accent: #fb923c; --accent-text: #1b130c; --border: #3a352e; --error: #f87171;
-        --bubble-user: #4a2a14; --bubble-agent: #2e2a25;
+        --bg: #14110f; --bg-glow: #4a2410; --surface: rgba(34, 29, 25, 0.72);
+        --surface-solid: #221d19; --text: #f5eee6; --muted: #a89c90; --line: rgba(245, 238, 230, 0.1);
+        --accent: #ff8a3d; --accent-soft: #ffb37c; --accent-text: #1a0f07;
+        --go: #34c483; --stop: #ff5c5c; --error: #ff7b6e;
+        --shadow: 0 18px 50px -18px rgba(0, 0, 0, 0.7);
       }
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
     body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
-      font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text);
+      margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; justify-content: center;
+      padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      color: var(--text); background: var(--bg); overflow-x: hidden;
+      background-image:
+        radial-gradient(60vmax 50vmax at 85% -10%, var(--bg-glow), transparent 60%),
+        radial-gradient(50vmax 40vmax at -10% 110%, var(--bg-glow), transparent 60%);
+      background-attachment: fixed;
     }
-    main {
-      width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 28px;
-    }
-    h1 { margin: 0 0 4px; font-size: 1.6rem; }
-    p.lead { margin: 0 0 20px; color: var(--muted); }
-    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 4px; }
-    input, select {
-      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
-      background: var(--bg); color: var(--text); font: inherit;
-    }
-    button {
-      width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 10px;
-      background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600;
-      cursor: pointer;
-    }
-    button.secondary { background: transparent; color: var(--accent); margin-top: 8px; }
-    button:disabled { opacity: 0.6; cursor: wait; }
-    .error { color: var(--error); min-height: 1.5em; margin-top: 12px; font-size: 0.9rem; }
-    .status { text-align: center; margin: 16px 0 4px; font-size: 1.05rem; }
-    .detail { text-align: center; color: var(--muted); font-size: 0.85rem; min-height: 1.3em; }
-    .orb {
-      width: 96px; height: 96px; margin: 8px auto; border-radius: 50%;
-      background: radial-gradient(circle at 35% 35%, var(--accent), transparent 70%);
-      opacity: 0.35; transition: opacity 0.2s, transform 0.2s;
-    }
-    .orb.speaking { opacity: 1; transform: scale(1.08); }
-    .transcript {
-      margin-top: 16px; max-height: 260px; overflow-y: auto; display: flex;
-      flex-direction: column; gap: 8px;
-    }
-    .line { padding: 8px 12px; border-radius: 12px; max-width: 85%; overflow-wrap: anywhere; }
-    .line.agent { background: var(--bubble-agent); align-self: flex-start; }
-    .line.user { background: var(--bubble-user); align-self: flex-end; }
-    .line.interim { opacity: 0.6; }
+    .app { width: 100%; max-width: 420px; display: flex; flex-direction: column; }
+    .view { flex: 1; display: flex; flex-direction: column; animation: enter 0.5s var(--ease); }
+    @keyframes enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
     [hidden] { display: none !important; }
+    button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+    button:disabled { opacity: 0.55; cursor: default; }
+    :focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 3px; }
+
+    /* Brand */
+    .brand { display: flex; align-items: center; gap: 12px; margin: 8vh 0 28px; }
+    .brand .mark { width: 44px; height: 44px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #fff6 0 18%, transparent 40%),
+                  conic-gradient(from 200deg, var(--accent), var(--accent-soft), var(--accent));
+      box-shadow: 0 8px 24px -8px var(--accent); }
+    .brand h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .brand p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+    /* Auth */
+    .card { background: var(--surface); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 14px;
+      background: var(--line); margin-bottom: 18px; position: relative; }
+    .tabs button { padding: 9px; border-radius: 11px; font-weight: 600; color: var(--muted);
+      transition: color 0.25s var(--ease), background 0.25s var(--ease); }
+    .tabs button[aria-selected="true"] { background: var(--surface-solid); color: var(--text);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted); margin: 0 0 6px 4px; }
+    .field input, .field select { width: 100%; padding: 13px 14px; border-radius: 14px; font: inherit;
+      color: var(--text); background: var(--surface-solid); border: 1px solid var(--line);
+      transition: border-color 0.2s, box-shadow 0.2s; appearance: none; }
+    .field select { background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: calc(100% - 20px) 55%, calc(100% - 15px) 55%; background-size: 5px 5px;
+      background-repeat: no-repeat; }
+    .field input:focus, .field select:focus { outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+    .signup-extra { display: grid; transition: grid-template-rows 0.35s var(--ease), opacity 0.35s; }
+    .primary { width: 100%; margin-top: 8px; padding: 14px; border-radius: 16px; font-weight: 650;
+      background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--accent-soft)));
+      color: var(--accent-text); box-shadow: 0 10px 24px -10px var(--accent);
+      transition: transform 0.15s var(--ease), box-shadow 0.2s; }
+    .primary:active { transform: scale(0.98); }
+    .error { color: var(--error); font-size: 0.9rem; margin-top: 10px; text-align: center; }
+    .error:empty { margin: 0; }
+
+    /* Call */
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 0; }
+    .hello { font-weight: 650; font-size: 1.05rem; }
+    .hello small { display: block; color: var(--muted); font-weight: 500; font-size: 0.85rem; }
+    .icon-btn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--surface); border: 1px solid var(--line); backdrop-filter: blur(12px);
+      transition: transform 0.15s var(--ease); }
+    .icon-btn:active { transform: scale(0.94); }
+    .icon-btn svg { width: 22px; height: 22px; }
+    .stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 26px; padding: 24px 0; min-height: 360px; }
+    .orb-wrap { position: relative; width: 220px; height: 220px; display: grid; place-items: center; }
+    .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent-soft);
+      opacity: 0; transform: scale(var(--ring, 1)); transition: opacity 0.4s var(--ease); }
+    .orb-wrap::before { content: ""; position: absolute; inset: 18px; border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accent) 40%, transparent), transparent 70%);
+      filter: blur(18px); transform: scale(var(--level, 1)); transition: transform 0.12s linear; }
+    .orb { width: 150px; height: 150px; border-radius: 50%; position: relative; overflow: hidden;
+      isolation: isolate; transform: scale(var(--level, 1)); transition: transform 0.12s linear, filter 0.4s var(--ease);
+      background: radial-gradient(circle at 50% 65%, var(--accent), color-mix(in srgb, var(--accent) 70%, #5a1d00));
+      box-shadow: 0 30px 70px -24px var(--accent), inset 0 -16px 36px rgba(90, 30, 0, 0.28);
+      filter: saturate(0.8); }
+    .orb::before { content: ""; position: absolute; inset: -25%; filter: blur(20px);
+      background: conic-gradient(from var(--spin, 0deg), #ffd9b0, var(--accent), #ff9d5c, #ffe4c4, var(--accent), #ffd9b0);
+      opacity: 0.85; z-index: -1; }
+    .orb::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
+      background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.7) 0 9%, transparent 36%); }
+    @property --spin { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
+    [data-state="idle"] .orb { animation: breathe 5s ease-in-out infinite, swirl 16s linear infinite; }
+    [data-state="connecting"] .orb { animation: breathe 1.4s ease-in-out infinite, swirl 4s linear infinite; }
+    [data-state="connecting"] .ring { opacity: 0.5; animation: ripple 1.4s var(--ease) infinite; }
+    [data-state="listening"] .orb, [data-state="speaking"] .orb { filter: saturate(1.1); }
+    [data-state="speaking"] .ring { opacity: 0.45; }
+    @keyframes breathe { 50% { transform: scale(1.04); } }
+    @keyframes swirl { to { --spin: 360deg; } }
+    @keyframes ripple { from { transform: scale(0.7); opacity: 0.6; } to { transform: scale(1.15); opacity: 0; } }
+    .status { text-align: center; }
+    .status #status { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.01em; transition: opacity 0.3s; }
+    .status .sub { color: var(--muted); font-size: 0.92rem; min-height: 1.4em; font-variant-numeric: tabular-nums; }
+    .controls { display: flex; align-items: center; justify-content: center; gap: 28px; padding-bottom: 12px; }
+    .round { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--surface); border: 1px solid var(--line); backdrop-filter: blur(12px);
+      transition: transform 0.15s var(--ease), background 0.25s, color 0.25s; }
+    .round svg { width: 26px; height: 26px; }
+    .round[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    .call-btn { width: 78px; height: 78px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--go); color: #fff; box-shadow: 0 14px 30px -10px var(--go);
+      transition: transform 0.15s var(--ease), background 0.3s var(--ease), box-shadow 0.3s; }
+    .call-btn svg { width: 32px; height: 32px; transition: transform 0.35s var(--ease); }
+    .call-btn.live { background: var(--stop); box-shadow: 0 14px 30px -10px var(--stop); }
+    .call-btn.live svg { transform: rotate(135deg); }
+    .round:active, .call-btn:active { transform: scale(0.93); }
+    .round.placeholder, .controls .round[hidden] { display: grid !important; visibility: hidden; }
+    .hint { text-align: center; color: var(--muted); font-size: 0.85rem; margin: 0; }
+    .banner { margin: 0 auto; padding: 10px 16px; border-radius: 999px; font-weight: 600;
+      background: var(--accent); color: var(--accent-text); box-shadow: var(--shadow); }
+
+    /* Settings sheet */
+    dialog.sheet { margin: auto auto 0; width: 100%; max-width: 460px; border: 0; padding: 0;
+      background: transparent; color: var(--text); }
+    dialog.sheet::backdrop { background: rgba(10, 6, 3, 0.35); backdrop-filter: blur(3px); }
+    dialog.sheet[open] .panel { animation: rise 0.4s var(--ease); }
+    @keyframes rise { from { transform: translateY(40px); opacity: 0; } }
+    .panel { background: var(--surface-solid); border-radius: 26px 26px 0 0; padding: 10px 20px 28px;
+      padding-bottom: max(28px, env(safe-area-inset-bottom)); box-shadow: var(--shadow); }
+    .grabber { width: 40px; height: 5px; border-radius: 99px; background: var(--line); margin: 4px auto 14px; }
+    .panel h2 { margin: 0 0 4px; font-size: 1.2rem; }
+    .panel .who { color: var(--muted); margin: 0 0 18px; font-size: 0.92rem; }
+    .group { border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-bottom: 12px; }
+    .group h3 { margin: 0 0 4px; font-size: 1rem; }
+    .group p { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; }
+    .row-btn { width: 100%; padding: 12px; border-radius: 14px; font-weight: 600; background: var(--line); }
+    .danger { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
+    .danger.solid { background: var(--error); color: #fff; }
+    .note { font-size: 0.88rem; min-height: 1.3em; margin-top: 8px; color: var(--muted); }
+    .note.bad { color: var(--error); }
+    input[type="file"] { font-size: 0.85rem; color: var(--muted); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
   </style>
 </head>
 <body>
-<main>
-  <h1>Baatein</h1>
-  <p class="lead">Your Hinglish companion who remembers.</p>
-
-  <form id="auth">
-    <div id="signup-fields" hidden>
-      <label for="name">Name</label>
-      <input id="name" autocomplete="name">
-      <label for="language">Language</label>
-      <select id="language">
-        <option value="hinglish">Hinglish</option>
-        <option value="english">English</option>
-        <!-- Odia and Kannada work (voice/languages.py) but wait for better retrieval in those
-             languages; see docs/RETRIEVAL_BENCHMARK.md. -->
-      </select>
-      <label for="persona">How Baatein talks</label>
-      <select id="persona">
-        <option value="casual">Casual, like a friend</option>
-        <option value="elder">Respectful and slow, for elders</option>
-      </select>
+<div class="app">
+  <!-- Log in / sign up -->
+  <section class="view" id="auth-view">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <h1>Baatein</h1>
+        <p>A companion who listens, and remembers.</p>
+      </div>
     </div>
-    <label for="email">Email</label>
-    <input id="email" type="email" autocomplete="email" required>
-    <label for="password">Password</label>
-    <input id="password" type="password" autocomplete="current-password" minlength="8" required>
-    <button id="submit" type="submit">Log in</button>
-    <button id="toggle" class="secondary" type="button">New here? Sign up</button>
-    <div class="error" id="auth-error" role="alert"></div>
-  </form>
+    <form class="card" id="auth" novalidate>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-login" aria-selected="true">Log in</button>
+        <button type="button" role="tab" id="tab-signup" aria-selected="false">Sign up</button>
+      </div>
+      <div id="signup-fields" hidden>
+        <div class="field"><label for="name">Your name</label><input id="name" autocomplete="name" placeholder="e.g. Ram"></div>
+        <div class="field">
+          <label for="language">Language</label>
+          <select id="language">
+            <option value="hinglish">Hinglish</option>
+            <option value="english">English</option>
+            <!-- Odia and Kannada work (voice/languages.py) but wait for better retrieval in those
+                 languages; see docs/RETRIEVAL_BENCHMARK.md. -->
+          </select>
+        </div>
+        <div class="field">
+          <label for="persona">How Baatein talks</label>
+          <select id="persona">
+            <option value="casual">Casual, like a friend</option>
+            <option value="elder">Respectful and slow, for elders</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required></div>
+      <button class="primary" id="submit" type="submit">Log in</button>
+      <div class="error" id="auth-error" role="alert"></div>
+    </form>
+  </section>
 
-  <section id="call" hidden>
-    <div class="orb" id="orb"></div>
-    <div class="status" id="status">Ready</div>
-    <div class="detail" id="detail"></div>
-    <button id="enable-audio" type="button" hidden>Tap to hear Baatein</button>
-    <button id="talk" type="button">Start talking</button>
-    <button id="logout" class="secondary" type="button">Log out</button>
+  <!-- Call -->
+  <section class="view" id="call" hidden>
+    <div class="topbar">
+      <div class="hello"><span id="hello">Namaste</span><small>Baatein is here to talk</small></div>
+      <button class="icon-btn" id="open-settings" type="button" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+
+    <div class="stage" id="stage" data-state="idle">
+      <div class="orb-wrap" aria-hidden="true"><div class="ring" id="ring"></div><div class="orb" id="orb"></div></div>
+      <div class="status" aria-live="polite">
+        <div id="status">Ready when you are</div>
+        <div class="sub" id="detail">Tap the green button to start</div>
+      </div>
+      <button class="banner" id="enable-audio" type="button" hidden>Tap to hear Baatein</button>
+    </div>
+
     <div class="error" id="call-error" role="alert"></div>
-    <div class="transcript" id="transcript" aria-live="polite"></div>
-    <div id="seed" hidden>
-      <label for="seed-file">Load test memories (dev only)</label>
-      <input id="seed-file" type="file" accept="application/json,.json">
-      <div class="detail" id="seed-result"></div>
+    <div class="controls">
+      <button class="round" id="mute" type="button" aria-label="Mute microphone" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <button class="call-btn" id="talk" type="button" aria-label="Start talking">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.6a1 1 0 0 1-.25 1z"/></svg>
+      </button>
+      <span class="round placeholder" aria-hidden="true"></span>
     </div>
   </section>
-</main>
+</div>
+
+<dialog class="sheet" id="settings" aria-labelledby="settings-title">
+  <div class="panel">
+    <div class="grabber"></div>
+    <h2 id="settings-title">Settings</h2>
+    <p class="who" id="who"></p>
+
+    <div class="group">
+      <h3>Erase memories</h3>
+      <p>Baatein forgets everything it remembers about you: memories, people, reminders and past calls. Your account stays.</p>
+      <button class="row-btn danger" id="erase-start" type="button">Erase everything…</button>
+      <form id="erase-form" hidden>
+        <div class="field"><label for="erase-password">Enter your password to confirm</label><input id="erase-password" type="password" autocomplete="current-password" required></div>
+        <button class="row-btn danger solid" id="erase" type="submit">Erase all memories</button>
+      </form>
+      <div class="note" id="erase-note" role="status"></div>
+    </div>
+
+    <div class="group" id="seed" hidden>
+      <h3>Test memories</h3>
+      <p>Development only: load a seed file into this account.</p>
+      <input id="seed-file" type="file" accept="application/json,.json">
+      <div class="note" id="seed-result"></div>
+    </div>
+
+    <button class="row-btn" id="logout" type="button">Log out</button>
+  </div>
+</dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.umd.min.js"></script>
 <script>
@@ -114,7 +272,11 @@
   const { Room, RoomEvent, Track } = LivekitClient;
   let mode = "login";
   let room = null;
-  const lines = new Map();
+  let timer = null;
+  let meter = null;
+
+  // What was said, for tools like the demo recorder (demo/live-call). Never shown on the page.
+  window.baateinTranscript = [];
 
   function storedToken() {
     try { return localStorage.getItem("baatein.token"); } catch { return null; }
@@ -127,7 +289,7 @@
     const headers = { "Content-Type": "application/json" };
     if (token) headers.Authorization = `Bearer ${token}`;
     const response = await fetch(path, { method: body ? "POST" : "GET", headers, body: body && JSON.stringify(body) });
-    const data = await response.json().catch(() => ({}));
+    const data = response.status === 204 ? {} : await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(", ") : data.detail;
       const error = new Error(detail || `Request failed (${response.status})`);
@@ -137,60 +299,44 @@
     return data;
   }
 
-  function show(signedIn) {
-    $("auth").hidden = signedIn;
+  // ---- Screens ----
+  async function show(signedIn) {
+    $("auth-view").hidden = signedIn;
     $("call").hidden = !signedIn;
-    if (signedIn) request("/dev/seed").then(() => { $("seed").hidden = false; }, () => {});
-  }
-
-  $("seed-file").onchange = async (event) => {
-    const [file] = event.target.files;
-    if (!file) return;
-    $("seed-result").textContent = "Loading…";
+    if (!signedIn) return;
     try {
-      const counts = await request("/dev/seed", JSON.parse(await file.text()), storedToken());
-      $("seed-result").textContent = "Added " + Object.entries(counts).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
+      const me = await request("/me", null, storedToken());
+      const name = me.display_name || me.email.split("@")[0];
+      $("hello").textContent = `Namaste, ${name}`;
+      $("who").textContent = me.email;
     } catch (error) {
-      $("seed-result").textContent = `Seed failed: ${error.message}`;
+      if (error.status === 401) { storeToken(null); show(false); return; }
     }
-    event.target.value = "";
-  };
-
-  function detail(text) { $("detail").textContent = text; }
-
-  function isAgent(participant) {
-    return participant && participant.kind === LivekitClient.ParticipantKind.AGENT;
+    request("/dev/seed").then(() => { $("seed").hidden = false; }, () => {});
   }
 
-  function upsertLine(id, who, text, final) {
-    let el = lines.get(id);
-    if (!el) {
-      el = document.createElement("div");
-      lines.set(id, el);
-      $("transcript").appendChild(el);
-    }
-    el.className = `line ${who}${final ? "" : " interim"}`;
-    el.textContent = text;
-    $("transcript").scrollTop = $("transcript").scrollHeight;
-  }
-
-  $("toggle").onclick = () => {
-    mode = mode === "login" ? "signup" : "login";
+  function setMode(next) {
+    mode = next;
+    $("tab-login").setAttribute("aria-selected", mode === "login");
+    $("tab-signup").setAttribute("aria-selected", mode === "signup");
     $("signup-fields").hidden = mode === "login";
-    $("submit").textContent = mode === "login" ? "Log in" : "Sign up";
-    $("toggle").textContent = mode === "login" ? "New here? Sign up" : "Have an account? Log in";
+    $("submit").textContent = mode === "login" ? "Log in" : "Create account";
+    $("password").autocomplete = mode === "login" ? "current-password" : "new-password";
     $("auth-error").textContent = "";
-  };
+  }
+  $("tab-login").onclick = () => setMode("login");
+  $("tab-signup").onclick = () => setMode("signup");
 
   $("auth").onsubmit = async (event) => {
     event.preventDefault();
     $("submit").disabled = true;
     $("auth-error").textContent = "";
     try {
-      const body = { email: $("email").value, password: $("password").value };
-      if (mode === "signup") Object.assign(body, { display_name: $("name").value || null, language: $("language").value, persona: $("persona").value });
+      const body = { email: $("email").value.trim(), password: $("password").value };
+      if (mode === "signup") Object.assign(body, { display_name: $("name").value.trim() || null, language: $("language").value, persona: $("persona").value });
       const session = await request(`/auth/${mode}`, body);
       storeToken(session.access_token);
+      $("password").value = "";
       show(true);
     } catch (error) {
       $("auth-error").textContent = error.message;
@@ -199,60 +345,123 @@
     }
   };
 
-  $("enable-audio").onclick = async () => {
-    if (room) await room.startAudio();
-  };
+  // ---- Call ----
+  function setState(state, status, detail) {
+    $("stage").dataset.state = state;
+    if (status !== undefined) $("status").textContent = status;
+    if (detail !== undefined) $("detail").textContent = detail;
+  }
+
+  function isAgent(participant) {
+    return participant && participant.kind === LivekitClient.ParticipantKind.AGENT;
+  }
+
+  function startTimer() {
+    const started = Date.now();
+    const tick = () => {
+      const s = Math.floor((Date.now() - started) / 1000);
+      $("detail").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    };
+    tick();
+    timer = setInterval(tick, 1000);
+  }
+
+  // The orb follows whoever is speaking, read from the audio itself for smooth motion.
+  function startMeter() {
+    const audio = new AudioContext();
+    const sources = new Map();
+    const analyser = (track) => {
+      const node = audio.createAnalyser();
+      node.fftSize = 512;
+      audio.createMediaStreamSource(new MediaStream([track])).connect(node);
+      return { node, data: new Uint8Array(node.fftSize) };
+    };
+    const level = ({ node, data }) => {
+      node.getByteTimeDomainData(data);
+      let sum = 0;
+      for (const v of data) sum += ((v - 128) / 128) ** 2;
+      return Math.sqrt(sum / data.length);
+    };
+    let smooth = 0;
+    let spin = 0;
+    const frame = () => {
+      let loudest = 0;
+      for (const source of sources.values()) loudest = Math.max(loudest, level(source));
+      smooth += (Math.min(loudest * 4, 1) - smooth) * 0.25;
+      spin = (spin + 0.4 + smooth * 3) % 360;
+      $("orb").style.setProperty("--level", (1 + smooth * 0.22).toFixed(3));
+      $("orb").style.setProperty("--spin", `${spin.toFixed(1)}deg`);
+      $("ring").style.setProperty("--ring", (1 + smooth * 0.35).toFixed(3));
+      meter.raf = requestAnimationFrame(frame);
+    };
+    meter = { audio, sources, raf: requestAnimationFrame(frame),
+      add: (key, track) => { if (!sources.has(key)) sources.set(key, analyser(track)); audio.resume(); } };
+  }
+
+  function stopMeter() {
+    if (!meter) return;
+    cancelAnimationFrame(meter.raf);
+    meter.audio.close();
+    meter = null;
+    $("orb").style.removeProperty("--level");
+    $("ring").style.removeProperty("--ring");
+  }
+
+  function noteLine(id, who, text, final) {
+    const lines = window.baateinTranscript;
+    const line = lines.find((l) => l.id === id);
+    if (line) Object.assign(line, { text, final });
+    else lines.push({ id, who, text, final, at: Date.now() });
+  }
+
+  $("enable-audio").onclick = async () => { if (room) await room.startAudio(); };
 
   async function startCall() {
     $("call-error").textContent = "";
     $("talk").disabled = true;
-    $("transcript").replaceChildren();
-    lines.clear();
-    $("status").textContent = "Connecting…";
-    detail("");
+    window.baateinTranscript = [];
+    setState("connecting", "Connecting…", "Calling Baatein");
     try {
       const grant = await request("/livekit/token", {}, storedToken());
       room = new Room({ adaptiveStream: true });
+      startMeter();
 
-      room.on(RoomEvent.ConnectionStateChanged, (state) => detail(`Connection: ${state}`));
       room.on(RoomEvent.ParticipantConnected, (participant) => {
-        if (isAgent(participant)) $("status").textContent = "Baatein joined";
+        if (isAgent(participant)) setState("listening", "Baatein joined");
       });
       room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
         if (track.kind !== Track.Kind.Audio) return;
         document.body.appendChild(track.attach());
-        detail(`Receiving audio from ${isAgent(participant) ? "Baatein" : participant.identity}`);
+        meter?.add(participant.identity, track.mediaStreamTrack);
       });
-      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
-        $("enable-audio").hidden = room.canPlaybackAudio;
+      room.on(RoomEvent.LocalTrackPublished, (publication) => {
+        if (publication.track?.kind === Track.Kind.Audio) meter?.add("me", publication.track.mediaStreamTrack);
       });
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => { $("enable-audio").hidden = room.canPlaybackAudio; });
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
         const agentSpeaking = speakers.some(isAgent);
-        $("orb").classList.toggle("speaking", agentSpeaking);
-        $("status").textContent = agentSpeaking ? "Baatein is speaking" : "Listening…";
+        setState(agentSpeaking ? "speaking" : "listening", agentSpeaking ? "Baatein is speaking" : "Listening…");
       });
-      room.on(RoomEvent.MediaDevicesError, (error) => {
-        $("call-error").textContent = `Microphone error: ${error.message}`;
-      });
+      room.on(RoomEvent.MediaDevicesError, (error) => { $("call-error").textContent = `Microphone: ${error.message}`; });
       room.on(RoomEvent.Disconnected, () => endCall());
 
       room.registerTextStreamHandler("lk.transcription", async (reader, participantInfo) => {
         const who = participantInfo.identity === room.localParticipant.identity ? "user" : "agent";
         const id = reader.info.attributes?.["lk.segment_id"] || reader.info.id;
         let text = "";
-        for await (const chunk of reader) {
-          text += chunk;
-          upsertLine(id, who, text, false);
-        }
-        upsertLine(id, who, text, true);
+        for await (const chunk of reader) { text += chunk; noteLine(id, who, text, false); }
+        noteLine(id, who, text, true);
       });
 
       await room.connect(grant.server_url, grant.participant_token);
       await room.startAudio();
       $("enable-audio").hidden = room.canPlaybackAudio;
       await room.localParticipant.setMicrophoneEnabled(true);
-      $("status").textContent = "Waiting for Baatein…";
-      $("talk").textContent = "End call";
+      setState("connecting", "Waiting for Baatein…");
+      startTimer();
+      $("talk").classList.add("live");
+      $("talk").setAttribute("aria-label", "End call");
+      $("mute").hidden = false;
       $("talk").onclick = () => room.disconnect();
     } catch (error) {
       $("call-error").textContent = error.message;
@@ -267,15 +476,78 @@
   function endCall() {
     document.querySelectorAll("audio").forEach((el) => el.remove());
     room = null;
-    $("orb").classList.remove("speaking");
+    clearInterval(timer);
+    stopMeter();
     $("enable-audio").hidden = true;
-    $("status").textContent = "Ready";
-    $("talk").textContent = "Start talking";
+    $("mute").hidden = true;
+    $("mute").setAttribute("aria-pressed", "false");
+    $("talk").classList.remove("live");
+    $("talk").setAttribute("aria-label", "Start talking");
+    setState("idle", "Ready when you are", "Tap the green button to start");
     $("talk").onclick = startCall;
   }
 
+  $("mute").onclick = async () => {
+    if (!room) return;
+    const muted = $("mute").getAttribute("aria-pressed") !== "true";
+    await room.localParticipant.setMicrophoneEnabled(!muted);
+    $("mute").setAttribute("aria-pressed", String(muted));
+    $("mute").setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
+  };
+
+  // ---- Settings ----
+  $("open-settings").onclick = () => {
+    $("erase-form").hidden = true;
+    $("erase-start").hidden = false;
+    $("erase-note").textContent = "";
+    $("settings").showModal();
+  };
+  $("settings").onclick = (event) => { if (event.target === $("settings")) $("settings").close(); };
+
+  $("erase-start").onclick = () => {
+    $("erase-start").hidden = true;
+    $("erase-form").hidden = false;
+    $("erase-password").focus();
+  };
+  $("erase-form").onsubmit = async (event) => {
+    event.preventDefault();
+    $("erase").disabled = true;
+    $("erase-note").className = "note";
+    $("erase-note").textContent = "Erasing…";
+    try {
+      await request("/me/forget", { password: $("erase-password").value }, storedToken());
+      $("erase-form").hidden = true;
+      $("erase-note").textContent = "Done. Baatein no longer remembers anything about you.";
+    } catch (error) {
+      $("erase-note").className = "note bad";
+      $("erase-note").textContent = error.status === 401 ? "That password didn't match." : error.message;
+    } finally {
+      $("erase-password").value = "";
+      $("erase").disabled = false;
+    }
+  };
+
+  $("seed-file").onchange = async (event) => {
+    const [file] = event.target.files;
+    if (!file) return;
+    $("seed-result").textContent = "Loading…";
+    try {
+      const counts = await request("/dev/seed", JSON.parse(await file.text()), storedToken());
+      $("seed-result").textContent = "Added " + Object.entries(counts).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
+    } catch (error) {
+      $("seed-result").textContent = `Seed failed: ${error.message}`;
+    }
+    event.target.value = "";
+  };
+
+  $("logout").onclick = () => {
+    if (room) room.disconnect();
+    storeToken(null);
+    $("settings").close();
+    show(false);
+  };
+
   $("talk").onclick = startCall;
-  $("logout").onclick = () => { if (room) room.disconnect(); storeToken(null); show(false); };
   show(Boolean(storedToken()));
 </script>
 </body>
